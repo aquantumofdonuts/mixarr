@@ -15,7 +15,7 @@ This workplan prioritizes community-requested features from least to most effort
 | # | Feature | Status | Key Deliverables |
 |---|---------|--------|------------------|
 | 1 | Library Health Dashboard | ✅ Complete | Health score, enrich buttons, progress bar |
-| 2 | ListenBrainz Deep Integration | 🔲 Not Started | 5 new subscription types (Fresh Releases, Year in Music, Playlist Import, Artist Radio, Loved Recordings) |
+| 2 | ListenBrainz Deep Integration | ✅ Complete | 5 new subscription types (Fresh Releases, Year in Music, Playlist Import, Artist Radio, Loved Recordings) |
 | 3 | Notification Integrations | 🔲 Not Started | Discord webhooks, Telegram, Pushover, email, configurable triggers |
 | 4 | Public Playlist Import | 🔲 Not Started | Paste Spotify URL → extract artists → review queue |
 

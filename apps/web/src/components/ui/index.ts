@@ -22,3 +22,5 @@ export { Loading, LoadingPage, LoadingOverlay } from './loading';
 export { EmptyState } from './empty-state';
 
 export { OfflineIndicator } from './offline-indicator';
+
+export { Checkbox } from './checkbox';

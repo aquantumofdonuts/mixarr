@@ -26,12 +26,13 @@ model User {
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  sessions      Session[]
-  connections   Connection[]
-  subscriptions Subscription[]
-  importSources ImportSource[]
-  reviewItems   ReviewItem[]
-  settings      UserSetting[]
+  sessions             Session[]
+  connections          Connection[]
+  subscriptions        Subscription[]
+  importSources        ImportSource[]
+  reviewItems          ReviewItem[]
+  settings             UserSetting[]
+  notificationChannels NotificationChannel[]
 
   @@map("users")
 }
@@ -390,4 +391,32 @@ enum AIStrategy {
   similar
   genre_expansion
   discovery
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model NotificationChannel {
+  id        Int              @id @default(autoincrement())
+  userId    Int              @map("user_id")
+  type      NotificationType
+  name      String           @db.VarChar(100)
+  config    Json             // Channel-specific config (webhook URL, etc.)
+  events    Json             // Array of event names to notify on
+  isActive  Boolean          @default(true) @map("is_active")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_channels")
+}
+
+enum NotificationType {
+  discord
+  webhook
+  telegram
+  pushover
+  email
 }

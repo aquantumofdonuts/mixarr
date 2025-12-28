@@ -17,6 +17,7 @@ import { aiRouter } from './routes/ai.js';
 import { dashboardRouter } from './routes/dashboard.js';
 import { adminRouter } from './routes/admin.js';
 import { discoverRouter } from './routes/discover.js';
+import notificationsRouter from './routes/notifications.js';
 import { setupPassport, sessionMiddleware } from './auth/passport.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requestLogger } from './middleware/request-logger.js';
@@ -71,6 +72,7 @@ app.use('/api/ai', aiRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/discover', discoverRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // Error handler
 app.use(errorHandler);

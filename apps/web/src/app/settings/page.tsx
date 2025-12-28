@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, useToast, Select } from '@/components/ui';
 import { PageHeader } from '@/components/layout/page-header';
 import { AISettings } from '@/components/settings/ai-settings';
 import { api } from '@/lib/api';
-import { Settings as SettingsIcon, Save, RefreshCw, Bell, Globe } from 'lucide-react';
+import { Settings as SettingsIcon, Save, RefreshCw, Bell, Globe, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 
 interface SettingGroup {
@@ -260,6 +261,20 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 ))}
+                {group.key === 'notifications' && (
+                  <Link 
+                    href="/settings/notifications"
+                    className="flex items-center justify-between py-3 px-4 -mx-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors mt-4"
+                  >
+                    <div>
+                      <div className="font-medium">Notification Channels</div>
+                      <div className="text-sm text-muted-foreground">
+                        Configure Discord, webhooks, and other notification destinations
+                      </div>
+                    </div>
+                    <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                  </Link>
+                )}
               </CardContent>
             </Card>
           );

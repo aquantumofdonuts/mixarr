@@ -22,6 +22,7 @@ import { BandcampService } from '../services/bandcamp.js';
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
+import { notificationService } from '../services/notifications.js';
 
 interface ArtistToAdd {
   name: string;
@@ -1618,6 +1619,14 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       queued,
     });
 
+    // Send notification for completed subscription
+    await notificationService.send(userId, 'subscription.completed', {
+      subscriptionName: subscription.name,
+      artistCount: artists.length,
+      queuedCount: queued,
+      addedCount: added,
+    });
+
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     await prisma.subscriptionRun.update({
@@ -1642,6 +1651,13 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     // Log the error
     await addLogEntry('error', 'subscription', `Subscription run failed: ${errorMessage}`, {
       subscriptionId,
+      error: errorMessage,
+    });
+
+    // Send notification for failed subscription
+    const subscription = await prisma.subscription.findUnique({ where: { id: subscriptionId } });
+    await notificationService.send(userId, 'subscription.failed', {
+      subscriptionName: subscription?.name || 'Unknown',
       error: errorMessage,
     });
 
