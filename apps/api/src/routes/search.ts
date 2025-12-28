@@ -338,6 +338,31 @@ function getMetadataIssues(artist: {
   return issues;
 }
 
+// Calculate overall library health score (0-100%)
+function calculateHealthScore(artists: Array<{
+  hasOverview: boolean;
+  hasPoster: boolean;
+  hasGenres: boolean;
+  albumCount: number;
+}>): number {
+  if (artists.length === 0) return 100;
+  
+  // Weights for different metadata types
+  const weights = { overview: 0.3, poster: 0.25, genres: 0.25, albums: 0.2 };
+  
+  const overviewScore = artists.filter(a => a.hasOverview).length / artists.length;
+  const posterScore = artists.filter(a => a.hasPoster).length / artists.length;
+  const genresScore = artists.filter(a => a.hasGenres).length / artists.length;
+  const albumsScore = artists.filter(a => a.albumCount > 0).length / artists.length;
+  
+  return Math.round(
+    (overviewScore * weights.overview +
+     posterScore * weights.poster +
+     genresScore * weights.genres +
+     albumsScore * weights.albums) * 100
+  );
+}
+
 // Get all artists from Lidarr with album statistics and metadata status
 searchRouter.get('/lidarr/artists', async (req, res) => {
   try {
@@ -388,11 +413,15 @@ searchRouter.get('/lidarr/artists', async (req, res) => {
       noGenres: artistsWithStats.filter(a => a.issues.includes('no_genres')).length,
     };
 
+    // Calculate overall health score (0-100%)
+    const healthScore = calculateHealthScore(artistsWithStats);
+
     res.json({ 
       artists: artistsWithStats,
       total: artistsWithStats.length,
       needingRefresh: artistsWithStats.filter(a => a.needsRefresh).length,
       issueStats,
+      healthScore,
     });
   } catch (error) {
     res.status(500).json({ 

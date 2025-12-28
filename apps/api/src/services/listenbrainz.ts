@@ -13,6 +13,9 @@ export type ListenBrainzPeriod = 'week' | 'month' | 'quarter' | 'half_yearly' | 
 // Valid recommendation types
 export type ListenBrainzRecommendationType = 'top_artist' | 'similar_artist';
 
+// Valid radio modes
+export type ListenBrainzRadioMode = 'easy' | 'medium' | 'hard';
+
 interface ListenBrainzArtist {
   artist_name: string;
   listen_count: number;
@@ -49,6 +52,101 @@ interface RecommendationsResponse {
 
 interface SimilarUsersResponse {
   payload: ListenBrainzSimilarUser[];
+}
+
+// Fresh Releases response interfaces
+interface FreshRelease {
+  artist_credit_name: string;
+  artist_mbids: string[];
+  release_name: string;
+  release_mbid: string;
+  release_date?: string;
+}
+
+interface FreshReleasesResponse {
+  payload: {
+    releases: FreshRelease[];
+  };
+}
+
+// Year in Music response interfaces
+interface YearInMusicArtist {
+  artist_name: string;
+  artist_mbid?: string;
+  listen_count: number;
+}
+
+interface YearInMusicResponse {
+  payload: {
+    data: {
+      top_artists?: YearInMusicArtist[];
+      total_listen_count?: number;
+    };
+  };
+}
+
+// Playlist response interfaces
+interface PlaylistInfo {
+  identifier: string;
+  title: string;
+  creator: string;
+  track_count?: number;
+}
+
+interface PlaylistsResponse {
+  playlists: Array<{ playlist: PlaylistInfo }>;
+  playlist_count: number;
+}
+
+interface PlaylistTrack {
+  title: string;
+  creator: string;
+  identifier?: string[];
+  extension?: {
+    'https://musicbrainz.org/doc/jspf#track'?: {
+      artist_identifiers?: string[];
+    };
+  };
+}
+
+interface PlaylistResponse {
+  playlist: {
+    identifier: string;
+    title: string;
+    creator: string;
+    track: PlaylistTrack[];
+  };
+}
+
+// Radio response interfaces
+interface RadioResponse {
+  payload: {
+    jspf: {
+      playlist: {
+        track: PlaylistTrack[];
+      };
+    };
+  };
+}
+
+// Loved tracks response interfaces
+interface LovedTrackFeedback {
+  recording_mbid: string;
+  score: number;
+  track_metadata?: {
+    artist_name?: string;
+    track_name?: string;
+    mbid_mapping?: {
+      artist_mbids?: string[];
+    };
+  };
+}
+
+interface LovedTracksResponse {
+  feedback: LovedTrackFeedback[];
+  count: number;
+  total_count: number;
+  offset: number;
 }
 
 // Default timeout for API requests (30 seconds)
@@ -244,5 +342,151 @@ export class ListenBrainzService {
     );
 
     return response.payload;
+  }
+
+  /**
+   * Get fresh/trending releases from ListenBrainz explore
+   * Returns popular new music releases
+   */
+  async getFreshReleases(): Promise<{ releases: FreshRelease[] }> {
+    const response = await this.request<FreshReleasesResponse>(
+      '/1/explore/fresh-releases'
+    );
+
+    return {
+      releases: response.payload.releases,
+    };
+  }
+
+  /**
+   * Get user's year in music statistics
+   * @param year - The year to get stats for (defaults to current year)
+   */
+  async getYearInMusic(year?: number): Promise<{
+    topArtists: YearInMusicArtist[];
+    totalListenCount?: number;
+  }> {
+    const targetYear = year ?? new Date().getFullYear();
+    const response = await this.request<YearInMusicResponse>(
+      `/1/stats/user/${this.username}/year-in-music/${targetYear}`
+    );
+
+    return {
+      topArtists: response.payload.data.top_artists ?? [],
+      totalListenCount: response.payload.data.total_listen_count,
+    };
+  }
+
+  /**
+   * Get user's playlists from ListenBrainz
+   */
+  async getUserPlaylists(): Promise<{
+    playlists: Array<{ title: string; identifier: string; creator: string; track_count?: number }>;
+    playlist_count: number;
+  }> {
+    const response = await this.request<PlaylistsResponse>(
+      `/1/user/${this.username}/playlists`
+    );
+
+    return {
+      playlists: response.playlists.map(p => ({
+        title: p.playlist.title,
+        identifier: p.playlist.identifier,
+        creator: p.playlist.creator,
+        track_count: p.playlist.track_count,
+      })),
+      playlist_count: response.playlist_count,
+    };
+  }
+
+  /**
+   * Get tracks from a specific playlist
+   * @param playlistId - The playlist ID (MBID or full URL)
+   */
+  async getPlaylist(playlistId: string): Promise<{
+    title: string;
+    tracks: Array<{ artist_name: string; artist_mbid?: string; title: string }>;
+  }> {
+    const response = await this.request<PlaylistResponse>(
+      `/1/playlist/${playlistId}`
+    );
+
+    return {
+      title: response.playlist.title,
+      tracks: response.playlist.track.map(t => {
+        // Extract artist MBID from extension URL if available
+        const artistMbidUrl = t.extension?.['https://musicbrainz.org/doc/jspf#track']?.artist_identifiers?.[0];
+        const artistMbid = artistMbidUrl?.replace('https://musicbrainz.org/artist/', '');
+        
+        return {
+          artist_name: t.creator,
+          artist_mbid: artistMbid,
+          title: t.title,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Get artist radio recommendations (similar artists/tracks)
+   * @param artistMbid - The seed artist's MusicBrainz ID
+   * @param mode - Radio mode: easy, medium, or hard (default: medium)
+   */
+  async getArtistRadio(
+    artistMbid: string,
+    mode: ListenBrainzRadioMode = 'medium'
+  ): Promise<{
+    tracks: Array<{ artist_name: string; artist_mbid?: string; title: string }>;
+  }> {
+    const prompt = `artist:(${artistMbid})`;
+    const response = await this.request<RadioResponse>(
+      `/1/explore/lb-radio?prompt=${prompt}&mode=${mode}`
+    );
+
+    const tracks = response.payload.jspf.playlist.track.map(t => {
+      // Extract artist MBID from extension URL if available
+      const artistMbidUrl = t.extension?.['https://musicbrainz.org/doc/jspf#track']?.artist_identifiers?.[0];
+      const extractedMbid = artistMbidUrl?.replace('https://musicbrainz.org/artist/', '');
+      
+      return {
+        artist_name: t.creator,
+        artist_mbid: extractedMbid,
+        title: t.title,
+      };
+    });
+
+    return { tracks };
+  }
+
+  /**
+   * Get user's loved/favorited recordings
+   * @param count - Number of results to return (optional)
+   * @param offset - Offset for pagination (optional)
+   */
+  async getLovedTracks(
+    count?: number,
+    offset?: number
+  ): Promise<{
+    feedback: Array<{ recording_mbid: string; artist_name?: string; artist_mbid?: string }>;
+    total_count: number;
+  }> {
+    let url = `/1/feedback/user/${this.username}/get-feedback?score=1`;
+    if (count !== undefined) {
+      url += `&count=${count}`;
+    }
+    if (offset !== undefined) {
+      url += `&offset=${offset}`;
+    }
+    
+    const response = await this.request<LovedTracksResponse>(url);
+
+    return {
+      feedback: response.feedback.map(f => ({
+        recording_mbid: f.recording_mbid,
+        artist_name: f.track_metadata?.artist_name,
+        artist_mbid: f.track_metadata?.mbid_mapping?.artist_mbids?.[0],
+      })),
+      total_count: response.total_count,
+    };
   }
 }

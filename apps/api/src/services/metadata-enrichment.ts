@@ -40,15 +40,23 @@ export class MetadataEnrichmentService {
     try {
       // Get current artist from Lidarr
       const artist = await this.lidarrService.getArtist(artistId);
+      console.log(`[MetadataEnrichment] Enriching artist: ${artist.artistName} (ID: ${artistId})`);
+      console.log(`[MetadataEnrichment] Current state - overview: ${artist.overview ? 'YES' : 'NO'}, genres: ${artist.genres?.length || 0}, images: ${artist.images?.length || 0}`);
 
       // Fetch metadata from all sources in parallel
       const metadataSources = await this.fetchFromAllSources(artist.artistName);
+      console.log(`[MetadataEnrichment] Fetched ${metadataSources.length} sources with data`);
+      for (const source of metadataSources) {
+        console.log(`[MetadataEnrichment] Source ${source.source}: overview=${source.overview ? 'YES' : 'NO'}, genres=${source.genres?.length || 0}, images=${source.images?.length || 0}`);
+      }
 
       // Merge using Best Quality heuristics
       const merged = this.merger.merge(metadataSources);
+      console.log(`[MetadataEnrichment] Merged result: overview=${merged.overview ? 'YES' : 'NO'}, genres=${merged.genres.length}, images=${merged.images.length}`);
 
       // Determine what fields would be updated
       const fieldsToUpdate = this.getFieldsToUpdate(artist, merged, forceUpdate);
+      console.log(`[MetadataEnrichment] Fields to update: ${fieldsToUpdate.join(', ') || 'NONE'}`);
 
       if (fieldsToUpdate.length === 0) {
         return {
@@ -80,7 +88,9 @@ export class MetadataEnrichmentService {
           }));
         }
 
+        console.log(`[MetadataEnrichment] Updating Lidarr with:`, JSON.stringify(updates, null, 2));
         await this.lidarrService.patchArtist(artistId, updates);
+        console.log(`[MetadataEnrichment] Lidarr update complete`);
       }
 
       return {

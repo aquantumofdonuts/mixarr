@@ -1245,6 +1245,46 @@ subscriptionsRouter.get('/presets/list', async (_req, res) => {
       category: 'listenbrainz',
       config: { limit: 50 },
     },
+    {
+      id: 'listenbrainz-explore-week',
+      name: 'ListenBrainz Fresh Releases (This Week)',
+      description: 'Popular new releases from the past week',
+      type: 'listenbrainz_explore',
+      category: 'listenbrainz',
+      config: { limit: 50 },
+    },
+    {
+      id: 'listenbrainz-year-current',
+      name: 'ListenBrainz Year in Music',
+      description: 'Your top artists from this year',
+      type: 'listenbrainz_year',
+      category: 'listenbrainz',
+      config: { limit: 50 },
+    },
+    {
+      id: 'listenbrainz-loved',
+      name: 'ListenBrainz Loved Tracks Artists',
+      description: 'Artists from your loved/favorited tracks',
+      type: 'listenbrainz_loved',
+      category: 'listenbrainz',
+      config: { limit: 50 },
+    },
+    {
+      id: 'listenbrainz-radio',
+      name: 'ListenBrainz Artist Radio',
+      description: 'Discover artists similar to a seed artist (configure seedMbid)',
+      type: 'listenbrainz_radio',
+      category: 'listenbrainz',
+      config: { mode: 'medium', limit: 50, seedMbid: '' },
+    },
+    {
+      id: 'listenbrainz-playlist',
+      name: 'ListenBrainz Playlist Import',
+      description: 'Artists from a ListenBrainz playlist (configure playlistId)',
+      type: 'listenbrainz_playlist',
+      category: 'listenbrainz',
+      config: { limit: 50, playlistId: '' },
+    },
 
     // DISCOGS
     {

@@ -44,14 +44,12 @@ export default function LibraryPage() {
 
   const [artists, setArtists] = useState<LidarrArtist[]>([]);
   const [issueStats, setIssueStats] = useState<IssueStats | null>(null);
+  const [healthScore, setHealthScore] = useState<number>(100);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
   const [sortField, setSortField] = useState<SortField>('issues');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [selectedArtists, setSelectedArtists] = useState<Set<number>>(new Set());
-  const [refreshingArtists, setRefreshingArtists] = useState<Set<number>>(new Set());
-  const [isBulkRefreshing, setIsBulkRefreshing] = useState(false);
 
   // Redirect non-admin users
   useEffect(() => {
@@ -74,6 +72,7 @@ export default function LibraryPage() {
       total: number;
       needingRefresh: number;
       issueStats: IssueStats;
+      healthScore: number;
     }>('/api/search/lidarr/artists');
 
     if (error) {
@@ -81,78 +80,9 @@ export default function LibraryPage() {
     } else if (data) {
       setArtists(data.artists);
       setIssueStats(data.issueStats);
+      setHealthScore(data.healthScore);
     }
     setIsLoading(false);
-  };
-
-  const refreshArtist = async (artistId: number) => {
-    setRefreshingArtists(prev => new Set(prev).add(artistId));
-    
-    const { error } = await api.post(`/api/search/lidarr/artists/${artistId}/refresh`);
-    
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to refresh artist' });
-    } else {
-      addToast({ type: 'success', title: 'Refresh triggered' });
-    }
-    
-    setRefreshingArtists(prev => {
-      const next = new Set(prev);
-      next.delete(artistId);
-      return next;
-    });
-  };
-
-  const refreshSelected = async () => {
-    if (selectedArtists.size === 0) return;
-    
-    setIsBulkRefreshing(true);
-    const artistIds = Array.from(selectedArtists);
-    let successCount = 0;
-    
-    for (const artistId of artistIds) {
-      setRefreshingArtists(prev => new Set(prev).add(artistId));
-      const { error } = await api.post(`/api/search/lidarr/artists/${artistId}/refresh`);
-      if (!error) successCount++;
-      
-      setRefreshingArtists(prev => {
-        const next = new Set(prev);
-        next.delete(artistId);
-        return next;
-      });
-      
-      // Small delay between refreshes
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
-    
-    addToast({ 
-      type: 'success', 
-      title: `Refreshed ${successCount} of ${artistIds.length} artists` 
-    });
-    
-    setSelectedArtists(new Set());
-    setIsBulkRefreshing(false);
-    
-    // Refresh the list after a delay
-    setTimeout(fetchArtists, 3000);
-  };
-
-  const refreshByIssue = async (issueType: string) => {
-    setIsBulkRefreshing(true);
-    
-    const { data, error } = await api.post<{ refreshed: number; message: string }>(
-      '/api/search/lidarr/artists/refresh-by-issue',
-      { issueType, limit: 50 }
-    );
-    
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to refresh artists', message: error });
-    } else if (data) {
-      addToast({ type: 'success', title: 'Bulk refresh triggered', message: data.message });
-      setTimeout(fetchArtists, 5000);
-    }
-    
-    setIsBulkRefreshing(false);
   };
 
   // Filter and sort artists
@@ -216,26 +146,6 @@ export default function LibraryPage() {
     }
   };
 
-  const toggleSelectAll = () => {
-    if (selectedArtists.size === filteredArtists.length) {
-      setSelectedArtists(new Set());
-    } else {
-      setSelectedArtists(new Set(filteredArtists.map(a => a.id)));
-    }
-  };
-
-  const toggleSelectArtist = (artistId: number) => {
-    setSelectedArtists(prev => {
-      const next = new Set(prev);
-      if (next.has(artistId)) {
-        next.delete(artistId);
-      } else {
-        next.add(artistId);
-      }
-      return next;
-    });
-  };
-
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) return null;
     return sortDirection === 'asc' ? 
@@ -252,7 +162,7 @@ export default function LibraryPage() {
     <>
       <PageHeader
         title="Lidarr Library"
-        description="View and manage missing metadata in your Lidarr library"
+        description="View the health of your Lidarr library"
       >
         <div className="flex gap-2">
           <Button variant="outline" onClick={fetchArtists} disabled={isLoading}>
@@ -261,6 +171,26 @@ export default function LibraryPage() {
           </Button>
         </div>
       </PageHeader>
+
+      {/* Health Score */}
+      <Card className="mb-4">
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-4">
+            <div className={`text-2xl font-bold ${healthScore >= 80 ? 'text-green-500' : healthScore >= 50 ? 'text-yellow-500' : 'text-red-500'}`}>
+              {healthScore}%
+            </div>
+            <div className="flex-1">
+              <div className="text-sm text-muted-foreground mb-1">Library Health</div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div 
+                  className={`h-full transition-all ${healthScore >= 80 ? 'bg-green-500' : healthScore >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                  style={{ width: `${healthScore}%` }} 
+                />
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-5 mb-6">
@@ -335,30 +265,6 @@ export default function LibraryPage() {
                 ]}
               />
             </div>
-            
-            {/* Bulk Actions */}
-            <div className="flex gap-2">
-              {selectedArtists.size > 0 && (
-                <Button
-                  onClick={refreshSelected}
-                  disabled={isBulkRefreshing}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${isBulkRefreshing ? 'animate-spin' : ''}`} />
-                  Refresh Selected ({selectedArtists.size})
-                </Button>
-              )}
-              
-              {filter !== 'all' && filter !== 'complete' && filteredArtists.length > 0 && (
-                <Button
-                  variant="outline"
-                  onClick={() => refreshByIssue(filter === 'needs_refresh' ? 'any' : filter)}
-                  disabled={isBulkRefreshing}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${isBulkRefreshing ? 'animate-spin' : ''}`} />
-                  Refresh All Filtered (up to 50)
-                </Button>
-              )}
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -384,14 +290,6 @@ export default function LibraryPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left py-3 px-2 w-10">
-                      <input
-                        type="checkbox"
-                        checked={selectedArtists.size === filteredArtists.length && filteredArtists.length > 0}
-                        onChange={toggleSelectAll}
-                        className="rounded"
-                      />
-                    </th>
                     <th 
                       className="text-left py-3 px-2 cursor-pointer hover:bg-muted/50"
                       onClick={() => toggleSort('name')}
@@ -411,20 +309,11 @@ export default function LibraryPage() {
                     >
                       Issues <SortIcon field="issues" />
                     </th>
-                    <th className="text-right py-3 px-2 w-24">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredArtists.map((artist) => (
                     <tr key={artist.id} className="border-b hover:bg-muted/50">
-                      <td className="py-3 px-2">
-                        <input
-                          type="checkbox"
-                          checked={selectedArtists.has(artist.id)}
-                          onChange={() => toggleSelectArtist(artist.id)}
-                          className="rounded"
-                        />
-                      </td>
                       <td className="py-3 px-2">
                         <div className="font-medium">{artist.name}</div>
                         <div className="text-xs text-muted-foreground">
@@ -461,16 +350,6 @@ export default function LibraryPage() {
                             {artist.issues.length}
                           </Badge>
                         )}
-                      </td>
-                      <td className="text-right py-3 px-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => refreshArtist(artist.id)}
-                          disabled={refreshingArtists.has(artist.id)}
-                        >
-                          <RefreshCw className={`h-4 w-4 ${refreshingArtists.has(artist.id) ? 'animate-spin' : ''}`} />
-                        </Button>
                       </td>
                     </tr>
                   ))}

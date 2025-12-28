@@ -395,4 +395,408 @@ describe('ListenBrainz Service', () => {
       expect(VALID_PERIODS).toContain('all_time');
     });
   });
+
+  // ============================================================================
+  // NEW LISTENBRAINZ DEEP INTEGRATION METHODS
+  // ============================================================================
+
+  describe('getFreshReleases', () => {
+    it('should return fresh releases (trending/popular new music)', async () => {
+      const responseData = {
+        payload: {
+          releases: [
+            {
+              artist_credit_name: 'Artist One',
+              artist_mbids: ['mbid-1'],
+              release_name: 'Album One',
+              release_mbid: 'release-mbid-1',
+              release_date: '2025-01-01',
+            },
+            {
+              artist_credit_name: 'Artist Two',
+              artist_mbids: ['mbid-2'],
+              release_name: 'Album Two',
+              release_mbid: 'release-mbid-2',
+              release_date: '2025-01-02',
+            },
+          ],
+        },
+      };
+
+      mockFetch.mockResolvedValue(mockResponse(responseData));
+
+      const result = await service.getFreshReleases();
+
+      expect(result.releases).toHaveLength(2);
+      expect(result.releases[0].artist_credit_name).toBe('Artist One');
+      expect(result.releases[0].artist_mbids).toContain('mbid-1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.listenbrainz.org/1/explore/fresh-releases',
+        expect.any(Object)
+      );
+    });
+
+    it('should return empty array when no releases', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        payload: { releases: [] },
+      }));
+
+      const result = await service.getFreshReleases();
+
+      expect(result.releases).toEqual([]);
+    });
+
+    it('should throw on API error', async () => {
+      mockFetch.mockResolvedValue(mockErrorResponse(500, 'Internal Server Error'));
+
+      await expect(service.getFreshReleases()).rejects.toThrow('ListenBrainz API error');
+    });
+  });
+
+  describe('getYearInMusic', () => {
+    it('should return year in music stats with top artists', async () => {
+      const responseData = {
+        payload: {
+          data: {
+            top_artists: [
+              { artist_name: 'Top Artist 1', artist_mbid: 'mbid-1', listen_count: 500 },
+              { artist_name: 'Top Artist 2', artist_mbid: 'mbid-2', listen_count: 300 },
+            ],
+            total_listen_count: 5000,
+          },
+        },
+      };
+
+      mockFetch.mockResolvedValue(mockResponse(responseData));
+
+      const result = await service.getYearInMusic(2024);
+
+      expect(result.topArtists).toHaveLength(2);
+      expect(result.topArtists[0].artist_name).toBe('Top Artist 1');
+      expect(result.topArtists[0].listen_count).toBe(500);
+      expect(mockFetch).toHaveBeenCalledWith(
+        `https://api.listenbrainz.org/1/stats/user/${testUsername}/year-in-music/2024`,
+        expect.any(Object)
+      );
+    });
+
+    it('should use current year by default', async () => {
+      const currentYear = new Date().getFullYear();
+      mockFetch.mockResolvedValue(mockResponse({
+        payload: { data: { top_artists: [] } },
+      }));
+
+      await service.getYearInMusic();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining(`/year-in-music/${currentYear}`),
+        expect.any(Object)
+      );
+    });
+
+    it('should return empty array when no data', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        payload: { data: { top_artists: [] } },
+      }));
+
+      const result = await service.getYearInMusic(2024);
+
+      expect(result.topArtists).toEqual([]);
+    });
+
+    it('should throw on API error', async () => {
+      mockFetch.mockResolvedValue(mockErrorResponse(404, 'Not Found'));
+
+      await expect(service.getYearInMusic(2024)).rejects.toThrow('ListenBrainz API error');
+    });
+  });
+
+  describe('getUserPlaylists', () => {
+    it('should return user playlists', async () => {
+      const responseData = {
+        playlists: [
+          {
+            playlist: {
+              identifier: 'https://listenbrainz.org/playlist/playlist-1',
+              title: 'My Playlist 1',
+              creator: testUsername,
+              track_count: 25,
+            },
+          },
+          {
+            playlist: {
+              identifier: 'https://listenbrainz.org/playlist/playlist-2',
+              title: 'My Playlist 2',
+              creator: testUsername,
+              track_count: 50,
+            },
+          },
+        ],
+        playlist_count: 2,
+      };
+
+      mockFetch.mockResolvedValue(mockResponse(responseData));
+
+      const result = await service.getUserPlaylists();
+
+      expect(result.playlists).toHaveLength(2);
+      expect(result.playlists[0].title).toBe('My Playlist 1');
+      expect(result.playlists[0].identifier).toBe('https://listenbrainz.org/playlist/playlist-1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        `https://api.listenbrainz.org/1/user/${testUsername}/playlists`,
+        expect.any(Object)
+      );
+    });
+
+    it('should return empty array when no playlists', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        playlists: [],
+        playlist_count: 0,
+      }));
+
+      const result = await service.getUserPlaylists();
+
+      expect(result.playlists).toEqual([]);
+    });
+
+    it('should throw on API error', async () => {
+      mockFetch.mockResolvedValue(mockErrorResponse(500, 'Internal Server Error'));
+
+      await expect(service.getUserPlaylists()).rejects.toThrow('ListenBrainz API error');
+    });
+  });
+
+  describe('getPlaylist', () => {
+    it('should return playlist tracks with artist info', async () => {
+      const responseData = {
+        playlist: {
+          identifier: 'https://listenbrainz.org/playlist/playlist-1',
+          title: 'My Playlist',
+          creator: testUsername,
+          track: [
+            {
+              title: 'Track One',
+              creator: 'Artist One',
+              identifier: ['https://musicbrainz.org/recording/rec-1'],
+              extension: {
+                'https://musicbrainz.org/doc/jspf#track': {
+                  artist_identifiers: ['https://musicbrainz.org/artist/mbid-1'],
+                },
+              },
+            },
+            {
+              title: 'Track Two',
+              creator: 'Artist Two',
+              identifier: ['https://musicbrainz.org/recording/rec-2'],
+              extension: {
+                'https://musicbrainz.org/doc/jspf#track': {
+                  artist_identifiers: ['https://musicbrainz.org/artist/mbid-2'],
+                },
+              },
+            },
+          ],
+        },
+      };
+
+      mockFetch.mockResolvedValue(mockResponse(responseData));
+
+      const result = await service.getPlaylist('playlist-1');
+
+      expect(result.tracks).toHaveLength(2);
+      expect(result.tracks[0].artist_name).toBe('Artist One');
+      expect(result.tracks[0].artist_mbid).toBe('mbid-1');
+      expect(result.title).toBe('My Playlist');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.listenbrainz.org/1/playlist/playlist-1',
+        expect.any(Object)
+      );
+    });
+
+    it('should return empty tracks when playlist is empty', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        playlist: {
+          identifier: 'https://listenbrainz.org/playlist/playlist-1',
+          title: 'Empty Playlist',
+          creator: testUsername,
+          track: [],
+        },
+      }));
+
+      const result = await service.getPlaylist('playlist-1');
+
+      expect(result.tracks).toEqual([]);
+    });
+
+    it('should throw on API error', async () => {
+      mockFetch.mockResolvedValue(mockErrorResponse(404, 'Not Found'));
+
+      await expect(service.getPlaylist('nonexistent')).rejects.toThrow('ListenBrainz API error');
+    });
+  });
+
+  describe('getArtistRadio', () => {
+    it('should return radio recommendations for an artist', async () => {
+      const responseData = {
+        payload: {
+          jspf: {
+            playlist: {
+              track: [
+                {
+                  title: 'Radio Track 1',
+                  creator: 'Related Artist 1',
+                  extension: {
+                    'https://musicbrainz.org/doc/jspf#track': {
+                      artist_identifiers: ['https://musicbrainz.org/artist/radio-mbid-1'],
+                    },
+                  },
+                },
+                {
+                  title: 'Radio Track 2',
+                  creator: 'Related Artist 2',
+                  extension: {
+                    'https://musicbrainz.org/doc/jspf#track': {
+                      artist_identifiers: ['https://musicbrainz.org/artist/radio-mbid-2'],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      };
+
+      mockFetch.mockResolvedValue(mockResponse(responseData));
+
+      const result = await service.getArtistRadio('source-artist-mbid');
+
+      expect(result.tracks).toHaveLength(2);
+      expect(result.tracks[0].artist_name).toBe('Related Artist 1');
+      expect(result.tracks[0].artist_mbid).toBe('radio-mbid-1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('https://api.listenbrainz.org/1/explore/lb-radio'),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('prompt=artist:(source-artist-mbid)'),
+        expect.any(Object)
+      );
+    });
+
+    it('should support different radio modes', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        payload: { jspf: { playlist: { track: [] } } },
+      }));
+
+      await service.getArtistRadio('mbid', 'easy');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('mode=easy'),
+        expect.any(Object)
+      );
+    });
+
+    it('should use medium mode by default', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        payload: { jspf: { playlist: { track: [] } } },
+      }));
+
+      await service.getArtistRadio('mbid');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('mode=medium'),
+        expect.any(Object)
+      );
+    });
+
+    it('should throw on API error', async () => {
+      mockFetch.mockResolvedValue(mockErrorResponse(500, 'Internal Server Error'));
+
+      await expect(service.getArtistRadio('mbid')).rejects.toThrow('ListenBrainz API error');
+    });
+  });
+
+  describe('getLovedTracks', () => {
+    it('should return loved/favorited tracks with artist info', async () => {
+      const responseData = {
+        feedback: [
+          {
+            recording_mbid: 'rec-1',
+            score: 1,
+            track_metadata: {
+              artist_name: 'Loved Artist 1',
+              track_name: 'Loved Track 1',
+              mbid_mapping: {
+                artist_mbids: ['loved-mbid-1'],
+              },
+            },
+          },
+          {
+            recording_mbid: 'rec-2',
+            score: 1,
+            track_metadata: {
+              artist_name: 'Loved Artist 2',
+              track_name: 'Loved Track 2',
+              mbid_mapping: {
+                artist_mbids: ['loved-mbid-2'],
+              },
+            },
+          },
+        ],
+        count: 2,
+        total_count: 100,
+        offset: 0,
+      };
+
+      mockFetch.mockResolvedValue(mockResponse(responseData));
+
+      const result = await service.getLovedTracks();
+
+      expect(result.feedback).toHaveLength(2);
+      expect(result.feedback[0].artist_name).toBe('Loved Artist 1');
+      expect(result.feedback[0].artist_mbid).toBe('loved-mbid-1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        `https://api.listenbrainz.org/1/feedback/user/${testUsername}/get-feedback?score=1`,
+        expect.any(Object)
+      );
+    });
+
+    it('should support pagination with count and offset', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        feedback: [],
+        count: 0,
+        total_count: 0,
+        offset: 50,
+      }));
+
+      await service.getLovedTracks(50, 50);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('count=50'),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('offset=50'),
+        expect.any(Object)
+      );
+    });
+
+    it('should return empty array when no loved tracks', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        feedback: [],
+        count: 0,
+        total_count: 0,
+        offset: 0,
+      }));
+
+      const result = await service.getLovedTracks();
+
+      expect(result.feedback).toEqual([]);
+    });
+
+    it('should throw on API error', async () => {
+      mockFetch.mockResolvedValue(mockErrorResponse(500, 'Internal Server Error'));
+
+      await expect(service.getLovedTracks()).rejects.toThrow('ListenBrainz API error');
+    });
+  });
 });

@@ -16,7 +16,9 @@ export class LastfmMetadataAdapter {
     try {
       const info = await this.lastfmService.getArtistInfo(artistName);
 
-      const overview = this.cleanHtml(info.bio?.summary);
+      // Prefer content (full bio) over summary (short teaser with "Read more on Last.fm")
+      const rawBio = info.bio?.content || info.bio?.summary;
+      const overview = this.cleanHtml(rawBio);
       const genres = info.tags?.tag?.map(t => t.name);
 
       return {

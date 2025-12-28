@@ -166,6 +166,11 @@ enum SubscriptionType {
   listenbrainz_top
   listenbrainz_similar
   listenbrainz_recommendations
+  listenbrainz_explore
+  listenbrainz_year
+  listenbrainz_playlist
+  listenbrainz_radio
+  listenbrainz_loved
   // Discogs subscription types
   discogs_label
   discogs_style

@@ -11,6 +11,7 @@ import { QUEUE_NAMES, type ImportJobData } from './queue.js';
 import { LidarrService, LidarrCache } from '../services/lidarr.js';
 import { SpotifyService } from '../services/spotify.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
+import { findOrCreateReviewItem } from '../utils/review-queue.js';
 
 interface ImportItem {
   artistName: string;
@@ -170,24 +171,31 @@ async function processImport(job: Job<ImportJobData>): Promise<void> {
     }
 
     if (mode === 'queue') {
-      // Add to review queue
+      // Add to review queue (with deduplication)
+      let queued = 0;
+      let deduplicated = 0;
+
       for (const item of enrichedItems) {
-        await prisma.reviewItem.create({
-          data: {
-            userId,
-            artistName: item.artistName,
-            albumName: item.albumName,
-            releaseYear: item.releaseYear,
-            spotifyId: item.spotifyId,
-            source: `import-${importSource.type}`,
-            status: 'pending',
-          },
+        const result = await findOrCreateReviewItem({
+          userId,
+          artistName: item.artistName,
+          spotifyId: item.spotifyId,
+          albumName: item.albumName,
+          releaseYear: item.releaseYear,
+          source: `import-${importSource.type}`,
         });
+
+        if (result.created) {
+          queued++;
+        } else {
+          deduplicated++;
+        }
       }
 
       await job.updateProgress({
         phase: 'complete',
-        queued: enrichedItems.length,
+        queued,
+        deduplicated,
       });
       return;
     }

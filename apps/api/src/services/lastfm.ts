@@ -178,7 +178,7 @@ export class LastfmService {
     url: string;
     listeners?: string;
     playcount?: string;
-    bio?: { summary: string };
+    bio?: { summary: string; content?: string };
     similar?: { artist: LastfmArtist[] };
     tags?: { tag: Array<{ name: string }> };
     stats?: { listeners: string; playcount: string };

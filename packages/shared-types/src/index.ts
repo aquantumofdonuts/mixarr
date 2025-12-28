@@ -131,6 +131,11 @@ export type SubscriptionType =
   | 'listenbrainz_top'
   | 'listenbrainz_similar'
   | 'listenbrainz_recommendations'
+  | 'listenbrainz_explore'
+  | 'listenbrainz_year'
+  | 'listenbrainz_playlist'
+  | 'listenbrainz_radio'
+  | 'listenbrainz_loved'
   // Discogs
   | 'discogs_label'
   | 'discogs_style'

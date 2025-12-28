@@ -44,6 +44,11 @@ const subscriptionTypes = [
   { value: 'listenbrainz_top', label: 'ListenBrainz Top', icon: Headphones, description: 'Your top artists from listening history' },
   { value: 'listenbrainz_similar', label: 'ListenBrainz Similar', icon: Headphones, description: 'Artists from users with similar taste' },
   { value: 'listenbrainz_recommendations', label: 'ListenBrainz Recs', icon: Headphones, description: 'Personalized recommendations' },
+  { value: 'listenbrainz_explore', label: 'ListenBrainz Explore', icon: Headphones, description: 'Fresh/trending new releases' },
+  { value: 'listenbrainz_year', label: 'ListenBrainz Year', icon: Headphones, description: 'Your Year in Music top artists' },
+  { value: 'listenbrainz_playlist', label: 'ListenBrainz Playlist', icon: Headphones, description: 'Artists from a playlist' },
+  { value: 'listenbrainz_radio', label: 'ListenBrainz Radio', icon: Headphones, description: 'Artist radio recommendations' },
+  { value: 'listenbrainz_loved', label: 'ListenBrainz Loved', icon: Headphones, description: 'Artists from your loved tracks' },
   { value: 'spotify_playlist', label: 'Spotify Playlist', icon: Music2, description: 'Artists from a playlist' },
   { value: 'spotify_new_releases', label: 'Spotify New Releases', icon: Music2, description: 'New album releases' },
   { value: 'spotify_followed', label: 'Spotify', icon: Music2, description: 'Your followed artists' },
@@ -149,6 +154,10 @@ export default function SubscriptionsPage() {
     // ListenBrainz fields
     listenbrainzPeriod: 'all_time',
     listenbrainzRecType: 'similar_artist',
+    listenbrainzYear: String(new Date().getFullYear()),
+    listenbrainzPlaylistId: '',
+    listenbrainzSeedMbid: '',
+    listenbrainzRadioMode: 'medium',
   });
 
   // Invalidate queries to trigger refetch
@@ -188,6 +197,16 @@ export default function SubscriptionsPage() {
     }
     if (form.type === 'listenbrainz_recommendations') {
       config.recommendationType = form.listenbrainzRecType;
+    }
+    if (form.type === 'listenbrainz_year') {
+      config.year = parseInt(form.listenbrainzYear, 10) || new Date().getFullYear();
+    }
+    if (form.type === 'listenbrainz_playlist') {
+      config.playlistId = form.listenbrainzPlaylistId;
+    }
+    if (form.type === 'listenbrainz_radio') {
+      config.seedMbid = form.listenbrainzSeedMbid;
+      config.mode = form.listenbrainzRadioMode || 'medium';
     }
 
     const payload = {
@@ -262,6 +281,10 @@ export default function SubscriptionsPage() {
         bandcampSort: subscription.config.sort || 'pop',
         listenbrainzPeriod: subscription.config.period || 'all_time',
         listenbrainzRecType: subscription.config.recommendationType || 'similar_artist',
+        listenbrainzYear: subscription.config.year?.toString() || String(new Date().getFullYear()),
+        listenbrainzPlaylistId: subscription.config.playlistId || '',
+        listenbrainzSeedMbid: subscription.config.seedMbid || '',
+        listenbrainzRadioMode: subscription.config.mode || 'medium',
       });
     } else {
       setEditingId(null);
@@ -283,6 +306,10 @@ export default function SubscriptionsPage() {
         bandcampSort: 'pop',
         listenbrainzPeriod: 'all_time',
         listenbrainzRecType: 'similar_artist',
+        listenbrainzYear: String(new Date().getFullYear()),
+        listenbrainzPlaylistId: '',
+        listenbrainzSeedMbid: '',
+        listenbrainzRadioMode: 'medium',
       });
       setModalStep('presets');
       setSelectedCategory(null);
@@ -316,6 +343,10 @@ export default function SubscriptionsPage() {
       bandcampSort: preset.config.sort || 'pop',
       listenbrainzPeriod: preset.config.period || 'all_time',
       listenbrainzRecType: preset.config.recommendationType || 'similar_artist',
+      listenbrainzYear: preset.config.year?.toString() || String(new Date().getFullYear()),
+      listenbrainzPlaylistId: preset.config.playlistId || '',
+      listenbrainzSeedMbid: preset.config.seedMbid || '',
+      listenbrainzRadioMode: preset.config.mode || 'medium',
     });
     setModalStep('form');
   };
@@ -671,6 +702,65 @@ export default function SubscriptionsPage() {
                   Choose how ListenBrainz generates recommendations for you.
                 </p>
               </div>
+            )}
+
+            {form.type === 'listenbrainz_year' && (
+              <div>
+                <label className="text-sm font-medium">Year</label>
+                <Input
+                  type="number"
+                  value={form.listenbrainzYear}
+                  onChange={(e) => setForm({ ...form, listenbrainzYear: e.target.value })}
+                  placeholder={String(new Date().getFullYear())}
+                  min="2014"
+                  max={new Date().getFullYear()}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Get your top artists from a specific year (2014-present).
+                </p>
+              </div>
+            )}
+
+            {form.type === 'listenbrainz_playlist' && (
+              <div>
+                <label className="text-sm font-medium">Playlist ID</label>
+                <Input
+                  value={form.listenbrainzPlaylistId}
+                  onChange={(e) => setForm({ ...form, listenbrainzPlaylistId: e.target.value })}
+                  placeholder="e.g., abc123-def456-..."
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  The playlist MBID from the ListenBrainz playlist URL.
+                </p>
+              </div>
+            )}
+
+            {form.type === 'listenbrainz_radio' && (
+              <>
+                <div>
+                  <label className="text-sm font-medium">Seed Artist MBID</label>
+                  <Input
+                    value={form.listenbrainzSeedMbid}
+                    onChange={(e) => setForm({ ...form, listenbrainzSeedMbid: e.target.value })}
+                    placeholder="e.g., 8bfac288-ccc5-448d-9573-c33ea2aa5c30"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    The MusicBrainz ID of the artist to generate radio from.
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Radio Mode</label>
+                  <Select
+                    value={form.listenbrainzRadioMode}
+                    onChange={(e) => setForm({ ...form, listenbrainzRadioMode: e.target.value })}
+                    options={[
+                      { value: 'easy', label: 'Easy (more similar)' },
+                      { value: 'medium', label: 'Medium (balanced)' },
+                      { value: 'hard', label: 'Hard (more adventurous)' },
+                    ]}
+                  />
+                </div>
+              </>
             )}
 
             {form.type === 'discogs_label' && (

@@ -291,7 +291,10 @@ export class LidarrService {
       ...updates,
     };
 
-    return this.updateArtist(merged);
+    console.log(`[Lidarr] patchArtist ${artistId}: Sending overview=${merged.overview ? 'YES' : 'NO'}, genres=${merged.genres?.length || 0}, images=${merged.images?.length || 0}`);
+    const result = await this.updateArtist(merged);
+    console.log(`[Lidarr] patchArtist ${artistId}: Response overview=${result.overview ? 'YES' : 'NO'}, genres=${result.genres?.length || 0}, images=${result.images?.length || 0}`);
+    return result;
   }
 
   async searchAlbumCommand(albumIds: number[]): Promise<{ id: number }> {

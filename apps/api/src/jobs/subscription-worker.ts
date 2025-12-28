@@ -21,6 +21,7 @@ import { DiscogsService } from '../services/discogs.js';
 import { BandcampService } from '../services/bandcamp.js';
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
+import { findOrCreateReviewItem } from '../utils/review-queue.js';
 
 interface ArtistToAdd {
   name: string;
@@ -1133,6 +1134,159 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         break;
       }
 
+      case 'listenbrainz_explore': {
+        // Fresh releases don't require a connection since it's public data
+        // But we'll use connection if available for consistency
+        const lbConfig = listenbrainzConn?.config as any;
+        const listenbrainz = new ListenBrainzService(lbConfig?.username || 'anonymous');
+        const limit = config.limit || 50;
+        
+        const result = await listenbrainz.getFreshReleases();
+        
+        // Extract unique artists from fresh releases
+        const artistMap = new Map<string, { name: string; mbid?: string }>();
+        for (const release of result.releases.slice(0, limit * 2)) { // Get more releases to ensure enough unique artists
+          const key = release.artist_credit_name.toLowerCase();
+          if (!artistMap.has(key)) {
+            artistMap.set(key, {
+              name: release.artist_credit_name,
+              mbid: release.artist_mbids?.[0],
+            });
+          }
+        }
+        
+        artists = Array.from(artistMap.values())
+          .slice(0, limit)
+          .map(a => ({
+            name: a.name,
+            mbid: a.mbid,
+            source: 'listenbrainz-explore',
+          }));
+        break;
+      }
+
+      case 'listenbrainz_year': {
+        if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
+        const lbConfig = listenbrainzConn.config as any;
+        const username = config.username || lbConfig.username;
+        if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
+        
+        const listenbrainz = new ListenBrainzService(username, lbConfig.token);
+        const year = config.year || new Date().getFullYear();
+        const limit = config.limit || 50;
+        
+        const result = await listenbrainz.getYearInMusic(year);
+        
+        artists = result.topArtists.slice(0, limit).map(a => ({
+          name: a.artist_name,
+          mbid: a.artist_mbid,
+          source: `listenbrainz-year-${year}`,
+        }));
+        break;
+      }
+
+      case 'listenbrainz_playlist': {
+        if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
+        const lbConfig = listenbrainzConn.config as any;
+        const username = config.username || lbConfig.username;
+        if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
+        if (!config.playlistId) throw new Error('Playlist ID is required for ListenBrainz playlist subscription.');
+        
+        const listenbrainz = new ListenBrainzService(username, lbConfig.token);
+        const limit = config.limit || 50;
+        
+        const result = await listenbrainz.getPlaylist(config.playlistId);
+        
+        // Extract unique artists from playlist tracks
+        const artistMap = new Map<string, { name: string; mbid?: string }>();
+        for (const track of result.tracks) {
+          const key = track.artist_name.toLowerCase();
+          if (!artistMap.has(key)) {
+            artistMap.set(key, {
+              name: track.artist_name,
+              mbid: track.artist_mbid,
+            });
+          }
+        }
+        
+        artists = Array.from(artistMap.values())
+          .slice(0, limit)
+          .map(a => ({
+            name: a.name,
+            mbid: a.mbid,
+            source: 'listenbrainz-playlist',
+          }));
+        break;
+      }
+
+      case 'listenbrainz_radio': {
+        if (!config.seedMbid) throw new Error('Seed artist MBID is required for ListenBrainz radio subscription.');
+        
+        // Radio endpoint doesn't require auth, but use connection for consistency
+        const lbConfig = listenbrainzConn?.config as any;
+        const listenbrainz = new ListenBrainzService(lbConfig?.username || 'anonymous');
+        const mode = config.mode || 'medium';
+        const limit = config.limit || 50;
+        
+        const result = await listenbrainz.getArtistRadio(config.seedMbid, mode);
+        
+        // Extract unique artists from radio tracks
+        const artistMap = new Map<string, { name: string; mbid?: string }>();
+        for (const track of result.tracks) {
+          const key = track.artist_name.toLowerCase();
+          if (!artistMap.has(key)) {
+            artistMap.set(key, {
+              name: track.artist_name,
+              mbid: track.artist_mbid,
+            });
+          }
+        }
+        
+        artists = Array.from(artistMap.values())
+          .slice(0, limit)
+          .map(a => ({
+            name: a.name,
+            mbid: a.mbid,
+            source: 'listenbrainz-radio',
+          }));
+        break;
+      }
+
+      case 'listenbrainz_loved': {
+        if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
+        const lbConfig = listenbrainzConn.config as any;
+        const username = config.username || lbConfig.username;
+        if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
+        
+        const listenbrainz = new ListenBrainzService(username, lbConfig.token);
+        const limit = config.limit || 50;
+        
+        const result = await listenbrainz.getLovedTracks();
+        
+        // Extract unique artists from loved tracks
+        const artistMap = new Map<string, { name: string; mbid?: string }>();
+        for (const feedback of result.feedback) {
+          if (feedback.artist_name) {
+            const key = feedback.artist_name.toLowerCase();
+            if (!artistMap.has(key)) {
+              artistMap.set(key, {
+                name: feedback.artist_name,
+                mbid: feedback.artist_mbid,
+              });
+            }
+          }
+        }
+        
+        artists = Array.from(artistMap.values())
+          .slice(0, limit)
+          .map(a => ({
+            name: a.name,
+            mbid: a.mbid,
+            source: 'listenbrainz-loved',
+          }));
+        break;
+      }
+
       // DISCOGS SUBSCRIPTION TYPES
 
       case 'discogs_label': {
@@ -1352,15 +1506,12 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         });
         queued++;
       } else if (resultHandling === 'queue') {
-        // Add to review queue for manual approval
-        await prisma.reviewItem.create({
-          data: {
-            userId,
-            artistName: artist.name,
-            mbid,
-            source: `subscription:${subscription.name}`,
-            status: 'pending',
-          },
+        // Add to review queue for manual approval (with deduplication)
+        const reviewResult = await findOrCreateReviewItem({
+          userId,
+          artistName: artist.name,
+          mbid,
+          source: `subscription:${subscription.name}`,
         });
         const sourcesArray = artist.source.includes(',') ? artist.source.split(',') : [artist.source];
         await prisma.subscriptionResult.create({
@@ -1370,12 +1521,14 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             itemType: 'artist',
             name: artist.name,
             mbid,
-            status: 'queued',
+            status: reviewResult.created ? 'queued' : 'deduplicated',
             sources: sourcesArray,
             matchCount: sourcesArray.length,
           },
         });
-        queued++;
+        if (reviewResult.created) {
+          queued++;
+        }
       } else {
         // auto_add - Add directly to Lidarr
         const sourcesArray = artist.source.includes(',') ? artist.source.split(',') : [artist.source];
