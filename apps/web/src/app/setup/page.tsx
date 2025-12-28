@@ -8,8 +8,8 @@ import { useAuth } from '@/lib/auth';
 import { ChevronRight, Plug, User, Check, Globe, Sparkles, Loader2, Music2, Search } from 'lucide-react';
 import { ConnectionModal } from '@/components/setup/ConnectionModal';
 
-type Step = 'welcome' | 'admin' | 'url' | 'connections';
-const steps: Step[] = ['welcome', 'admin', 'url', 'connections'];
+type Step = 'welcome' | 'admin' | 'url' | 'connections' | 'complete';
+const steps: Step[] = ['welcome', 'admin', 'url', 'connections', 'complete'];
 
 interface AdminForm {
   username: string;
@@ -132,6 +132,10 @@ function SetupPageContent() {
   };
 
   const handleFinishSetup = () => {
+    setStep('complete');
+  };
+
+  const handleGoToDashboard = () => {
     router.push('/');
   };
 
@@ -427,6 +431,44 @@ function SetupPageContent() {
                   Continue to Dashboard <ChevronRight className="ml-2 h-4 w-4" />
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {step === 'complete' && (
+          <Card>
+            <CardHeader className="text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10">
+                <Check className="h-8 w-8 text-green-500" />
+              </div>
+              <CardTitle className="text-2xl">You&apos;re All Set!</CardTitle>
+              <CardDescription>
+                Mixarr is ready to discover amazing music
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Summary of what was configured */}
+              <div className="rounded-lg bg-muted p-4 space-y-3">
+                <p className="font-medium text-sm">What you can do now:</p>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  <li className="flex items-center gap-2">
+                    <Music2 className="h-4 w-4 text-primary shrink-0" />
+                    <span>Import artists from your connected services</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                    <span>Create subscriptions for automatic discovery</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Search className="h-4 w-4 text-primary shrink-0" />
+                    <span>Search for artists across multiple sources</span>
+                  </li>
+                </ul>
+              </div>
+              
+              <Button className="w-full" onClick={handleGoToDashboard}>
+                Go to Dashboard <ChevronRight className="ml-2 h-4 w-4" />
+              </Button>
             </CardContent>
           </Card>
         )}
