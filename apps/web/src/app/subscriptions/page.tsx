@@ -158,8 +158,6 @@ export default function SubscriptionsPage() {
     listenbrainzPlaylistId: '',
     listenbrainzSeedMbid: '',
     listenbrainzRadioMode: 'medium',
-    // Album discovery
-    discoverAlbums: false,
   });
 
   // Invalidate queries to trigger refetch
@@ -210,8 +208,9 @@ export default function SubscriptionsPage() {
       config.seedMbid = form.listenbrainzSeedMbid;
       config.mode = form.listenbrainzRadioMode || 'medium';
     }
+    // spotify_new_releases always discovers albums (new releases are albums by definition)
     if (form.type === 'spotify_new_releases') {
-      config.discoverAlbums = form.discoverAlbums;
+      config.discoverAlbums = true;
     }
 
     const payload = {
@@ -290,7 +289,6 @@ export default function SubscriptionsPage() {
         listenbrainzPlaylistId: subscription.config.playlistId || '',
         listenbrainzSeedMbid: subscription.config.seedMbid || '',
         listenbrainzRadioMode: subscription.config.mode || 'medium',
-        discoverAlbums: subscription.config.discoverAlbums || false,
       });
     } else {
       setEditingId(null);
@@ -316,7 +314,6 @@ export default function SubscriptionsPage() {
         listenbrainzPlaylistId: '',
         listenbrainzSeedMbid: '',
         listenbrainzRadioMode: 'medium',
-        discoverAlbums: false,
       });
       setModalStep('presets');
       setSelectedCategory(null);
@@ -354,7 +351,6 @@ export default function SubscriptionsPage() {
       listenbrainzPlaylistId: preset.config.playlistId || '',
       listenbrainzSeedMbid: preset.config.seedMbid || '',
       listenbrainzRadioMode: preset.config.mode || 'medium',
-      discoverAlbums: preset.config.discoverAlbums || false,
     });
     setModalStep('form');
   };
@@ -652,24 +648,6 @@ export default function SubscriptionsPage() {
                   onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                   placeholder="Spotify playlist ID"
                 />
-              </div>
-            )}
-
-            {form.type === 'spotify_new_releases' && (
-              <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
-                <input
-                  type="checkbox"
-                  id="discoverAlbums"
-                  checked={form.discoverAlbums}
-                  onChange={(e) => setForm({ ...form, discoverAlbums: e.target.checked })}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-                <label htmlFor="discoverAlbums" className="text-sm">
-                  <span className="font-medium">Discover Albums</span>
-                  <p className="text-muted-foreground text-xs mt-0.5">
-                    Queue albums instead of artists. When approved, only the specific album will be monitored in Lidarr.
-                  </p>
-                </label>
               </div>
             )}
 
