@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Button, Card, CardContent, Input, Badge, useToast, LoadingOverlay, Modal, ModalFooter, Select } from '@/components/ui';
 import { PageHeader } from '@/components/layout/page-header';
 import { GenrePills } from '@/components/GenrePills';
 import { api } from '@/lib/api';
 import { Search as SearchIcon, Plus, Check, Music, ChevronLeft, ChevronRight, CheckSquare, Square, X, Loader2 } from 'lucide-react';
 
-type SearchType = 'artist' | 'album' | 'label' | 'year';
+type SearchType = 'artist' | 'album' | 'label' | 'year' | 'ai';
 type SearchSource = 'spotify' | 'deezer' | 'tidal' | 'bandcamp';
 
 interface ArtistResult {
@@ -93,6 +93,20 @@ export default function SearchPage() {
   const labelModalRef = useRef<HTMLDivElement>(null);
   const labelPageSize = 50;
 
+  // AI Search state
+  const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiProviders, setAiProviders] = useState<string[]>([]);
+
+  // Check AI availability on mount
+  useEffect(() => {
+    const checkAiStatus = async () => {
+      const { data } = await api.get<{ available: boolean }>('/api/search/ai/status');
+      setAiAvailable(data?.available ?? false);
+    };
+    checkAiStatus();
+  }, []);
+
   // Helper to handle add artist errors with friendly messages
   const handleAddArtistError = (error: string, artistName: string) => {
     if (error.includes('ArtistExistsValidator') || error.includes('already been added')) {
@@ -113,6 +127,31 @@ export default function SearchPage() {
     setResults([]);
     setSelectedIds(new Set());
     setPage(pageNum);
+
+    // AI Search flow
+    if (searchType === 'ai') {
+      const { data, error } = await api.post<{
+        prompt: string;
+        results: ArtistResult[];
+        aiProviders: string[];
+        message?: string;
+      }>('/api/search/ai', { prompt: query.trim() });
+
+      if (error) {
+        addToast({ type: 'error', title: 'AI Search failed', message: error });
+      } else if (data) {
+        setAiPrompt(data.prompt);
+        setAiProviders(data.aiProviders);
+        setResults(data.results);
+        setTotalCount(data.results.length);
+        
+        if (data.results.length === 0) {
+          addToast({ type: 'info', title: data.message || 'No results found' });
+        }
+      }
+      setIsSearching(false);
+      return;
+    }
 
     const offset = (pageNum - 1) * pageSize;
     let endpoint = '';
@@ -437,6 +476,9 @@ export default function SearchPage() {
                 <option value="album">Album</option>
                 <option value="label">Label</option>
                 <option value="year">Year</option>
+                <option value="ai" disabled={aiAvailable === false}>
+                  ✨ AI Search
+                </option>
               </select>
               
               <div className="relative flex-1">
@@ -445,7 +487,13 @@ export default function SearchPage() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder={searchType === 'year' ? 'Enter year (e.g., 2024)' : `Search for ${searchType}...`}
+                  placeholder={
+                    searchType === 'ai' 
+                      ? "Describe what you're looking for..." 
+                      : searchType === 'year' 
+                      ? 'Enter year (e.g., 2024)' 
+                      : `Search for ${searchType}...`
+                  }
                   className="pl-10"
                 />
               </div>
@@ -454,7 +502,7 @@ export default function SearchPage() {
               </Button>
             </div>
 
-            {/* Source Toggles (for artist search) */}
+            {/* Source Toggles (for artist search only) */}
             {searchType === 'artist' && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-muted-foreground mr-1">Sources:</span>
@@ -482,7 +530,7 @@ export default function SearchPage() {
               </div>
             )}
 
-            {searchType === 'artist' && results.length > 0 && (
+            {(searchType === 'artist' || searchType === 'ai') && results.length > 0 && (
               <div className="flex items-center gap-3 border-t pt-4">
                 <Button variant="outline" size="sm" onClick={selectAll}>Select All</Button>
                 <Button variant="outline" size="sm" onClick={deselectAll}>Deselect All</Button>
@@ -518,7 +566,23 @@ export default function SearchPage() {
               )}
             </div>
             
-            {searchType === 'artist' && (
+            {/* AI Results Banner */}
+            {searchType === 'ai' && results.length > 0 && (
+              <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-lg p-4 mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-purple-400 text-lg">✨</span>
+                  <span className="text-purple-400 font-medium">AI Recommendations for:</span>
+                  <span className="text-zinc-300">"{aiPrompt}"</span>
+                </div>
+                {aiProviders.length > 0 && (
+                  <p className="text-zinc-500 text-sm mt-1">
+                    Powered by {aiProviders.join(' & ')}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {(searchType === 'artist' || searchType === 'ai') && (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {(results as ArtistResult[]).map((artist, i) => (
                   <Card key={`${artist.foreignArtistId || artist.artistName}-${i}`} className="overflow-hidden">
