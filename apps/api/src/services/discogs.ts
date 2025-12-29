@@ -45,6 +45,16 @@ interface DiscogsSearchResult {
   resource_url?: string;
 }
 
+export interface ParsedDiscogsArtist {
+  id: number;
+  name: string;
+  profile?: string;
+  images: Array<{ type: string; uri: string; width?: number; height?: number }>;
+  urls: string[];
+  nameVariations: string[];
+  members?: Array<{ id: number; name: string; active?: boolean }>;
+}
+
 interface DiscogsArtist {
   id: number;
   name: string;
@@ -55,6 +65,59 @@ interface DiscogsArtist {
   members?: Array<{ id: number; name: string; active?: boolean }>;
   namevariations?: string[];
   data_quality?: string;
+}
+
+interface RawDiscogsArtist {
+  id: number;
+  name: string;
+  profile?: string;
+  images?: Array<{ type: string; uri: string; width?: number; height?: number }>;
+  urls?: string[];
+  namevariations?: string[];
+  members?: Array<{ id: number; name: string; active?: boolean }>;
+}
+
+interface DiscogsLabelSearchResponse {
+  pagination: DiscogsPagination;
+  results: DiscogsLabel[];
+}
+
+interface DiscogsLabelReleasesResponse {
+  pagination: DiscogsPagination;
+  releases: DiscogsRelease[];
+}
+
+interface DiscogsStyleSearchResponse {
+  pagination: DiscogsPagination;
+  results: DiscogsSearchResult[];
+}
+
+/**
+ * Parse raw Discogs artist data into a structured format
+ */
+export function parseDiscogsArtist(raw: RawDiscogsArtist): ParsedDiscogsArtist {
+  return {
+    id: raw.id,
+    name: raw.name,
+    profile: raw.profile,
+    images: raw.images || [],
+    urls: raw.urls || [],
+    nameVariations: raw.namevariations || [],
+    members: raw.members,
+  };
+}
+
+/**
+ * Format Discogs image URL based on desired size
+ */
+export function formatDiscogsImageUrl(
+  fullUrl: string,
+  thumbnailUrl?: string,
+  size?: 'small' | 'large'
+): string {
+  if (!size) return fullUrl;
+  if (size === 'small' && thumbnailUrl) return thumbnailUrl;
+  return fullUrl;
 }
 
 interface DiscogsLabelSearchResponse {

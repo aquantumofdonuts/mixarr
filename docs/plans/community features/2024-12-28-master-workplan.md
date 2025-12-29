@@ -32,8 +32,8 @@ This workplan prioritizes community-requested features from least to most effort
 
 | # | Feature | Status | Key Deliverables |
 |---|---------|--------|------------------|
-| 5 | Duplicate Detection | 🔲 Not Started | Fuzzy matching scan, merge candidates UI, confidence scoring |
-| 6 | Discogs Integration | 🔲 Not Started | OAuth connection, metadata enrichment, label browsing |
+| 5 | Duplicate Detection | ✅ Complete | Fuzzy matching scan, merge candidates UI, confidence scoring |
+| 6 | Discogs Integration | ✅ Complete | Metadata enrichment source with artist bios and images |
 
 **Design Documents:**
 - [Duplicate Detection](2024-12-27-duplicate-detection-design.md)
@@ -80,12 +80,12 @@ The following features were considered but deferred from this workplan:
 
 ## Progress Tracking
 
-- **Sprint 1:** 1/4 complete (25%)
-- **Sprint 2:** 0/2 complete (0%)
+- **Sprint 1:** 2/4 complete (50%)
+- **Sprint 2:** 2/2 complete (100%)
 - **Sprint 3:** 0/1 complete (0%)
 - **Sprint 4:** 0/2 complete (0%)
 
-**Overall:** 1/9 features complete (11%)
+**Overall:** 4/9 features complete (44%)
 
 ---
 

@@ -606,8 +606,14 @@ searchRouter.post('/lidarr/artists/:id/enrich', async (req, res) => {
       return;
     }
 
+    // Get Discogs token if available (optional)
+    const discogsConn = await prisma.connection.findFirst({
+      where: { userId: req.user!.id, type: 'discogs', isActive: true },
+    });
+    const discogsToken = discogsConn ? (discogsConn.config as { token?: string }).token : undefined;
+
     const lastfm = new LastfmService(lastfmConn.config as { apiKey: string });
-    const enrichService = new MetadataEnrichmentService(lidarr, lastfm);
+    const enrichService = new MetadataEnrichmentService(lidarr, lastfm, discogsToken);
 
     const { updateLidarr = true, forceUpdate = false } = req.body as {
       updateLidarr?: boolean;
@@ -643,8 +649,14 @@ searchRouter.post('/lidarr/artists/enrich-incomplete', async (req, res) => {
       return;
     }
 
+    // Get Discogs token if available (optional)
+    const discogsConn = await prisma.connection.findFirst({
+      where: { userId: req.user!.id, type: 'discogs', isActive: true },
+    });
+    const discogsToken = discogsConn ? (discogsConn.config as { token?: string }).token : undefined;
+
     const lastfm = new LastfmService(lastfmConn.config as { apiKey: string });
-    const enrichService = new MetadataEnrichmentService(lidarr, lastfm);
+    const enrichService = new MetadataEnrichmentService(lidarr, lastfm, discogsToken);
 
     const { limit = 50, issueType = 'any' } = req.body as {
       limit?: number;

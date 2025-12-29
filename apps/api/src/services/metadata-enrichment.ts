@@ -4,6 +4,7 @@ import type { LidarrService, LidarrArtist } from './lidarr.js';
 import type { LastfmService } from './lastfm.js';
 import { LastfmMetadataAdapter } from './adapters/lastfm-adapter.js';
 import { DeezerMetadataAdapter } from './adapters/deezer-adapter.js';
+import { DiscogsMetadataAdapter } from './adapters/discogs-adapter.js';
 import { MetadataMerger } from './metadata-merger.js';
 import type {
   NormalizedArtistMetadata,
@@ -17,14 +18,17 @@ import type {
 export class MetadataEnrichmentService {
   private lastfmAdapter: LastfmMetadataAdapter;
   private deezerAdapter: DeezerMetadataAdapter;
+  private discogsAdapter: DiscogsMetadataAdapter;
   private merger: MetadataMerger;
 
   constructor(
     private lidarrService: LidarrService,
-    lastfmService: LastfmService
+    lastfmService: LastfmService,
+    discogsToken?: string
   ) {
     this.lastfmAdapter = new LastfmMetadataAdapter(lastfmService);
     this.deezerAdapter = new DeezerMetadataAdapter();
+    this.discogsAdapter = new DiscogsMetadataAdapter(discogsToken);
     this.merger = new MetadataMerger();
   }
 
@@ -148,12 +152,13 @@ export class MetadataEnrichmentService {
    * Fetch metadata from all connected sources
    */
   private async fetchFromAllSources(artistName: string): Promise<NormalizedArtistMetadata[]> {
-    const [lastfmData, deezerData] = await Promise.all([
+    const [lastfmData, deezerData, discogsData] = await Promise.all([
       this.lastfmAdapter.fetchMetadata(artistName),
       this.deezerAdapter.fetchMetadata(artistName),
+      this.discogsAdapter.fetchMetadata(artistName),
     ]);
 
-    return [lastfmData, deezerData].filter(
+    return [lastfmData, deezerData, discogsData].filter(
       (data) => data.overview || data.genres?.length || data.images?.length
     );
   }
