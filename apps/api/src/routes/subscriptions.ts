@@ -374,8 +374,13 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
     // Get or find MBID
     let mbid = result.mbid;
     if (!mbid) {
+      // For albums, search by artistName; for artists, search by name
+      const searchName = result.itemType === 'album' && result.artistName 
+        ? result.artistName 
+        : result.name;
+      console.log(`[Approval] No MBID stored, searching MusicBrainz for: "${searchName}"`);
       const musicbrainz = new MusicBrainzService();
-      mbid = await musicbrainz.getMbidFromSpotifyArtist(result.name) || null;
+      mbid = await musicbrainz.getMbidFromSpotifyArtist(searchName) || null;
     }
 
     if (!mbid) {

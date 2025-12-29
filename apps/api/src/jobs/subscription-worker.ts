@@ -1683,6 +1683,11 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             runId: run.id,
             itemType: 'album',
             name: `${album.albumName} - ${album.artistName}`,
+            artistName: album.artistName,
+            mbid: album.artistMbid,      // Artist MBID for proper Lidarr matching
+            albumMbid: album.albumMbid,  // Album MBID for targeted download
+            releaseDate: album.releaseDate,
+            releaseType: album.releaseType,
             status: reviewResult.created ? 'queued' : 'deduplicated',
             sources: sourcesArray,
             matchCount: 1,
