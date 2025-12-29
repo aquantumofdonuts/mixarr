@@ -221,7 +221,7 @@ Return at least 5 unique artists total, maximum 10.`;
   /**
    * Parse artist list from AI response
    */
-  parseArtistList(content: string): string[] {
+  private parseArtistList(content: string): string[] {
     try {
       // Try to extract JSON array from response
       const jsonMatch = content.match(/\[[\s\S]*\]/);
@@ -249,6 +249,14 @@ Return at least 5 unique artists total, maximum 10.`;
     prompt: string,
     limit: number = 20
   ): Promise<{ artists: string[]; providers: ('openai' | 'anthropic')[] }> {
+    // Input validation: check for empty/whitespace-only prompts
+    if (!prompt || !prompt.trim()) {
+      return { artists: [], providers: [] };
+    }
+
+    // Input validation: limit prompt to 500 characters max
+    const trimmedPrompt = prompt.trim().slice(0, 500);
+
     if (!this.settings) {
       await this.loadSettings();
     }
@@ -261,7 +269,7 @@ Return at least 5 unique artists total, maximum 10.`;
     const usedProviders: ('openai' | 'anthropic')[] = [];
 
     // Build the prompt for natural language search
-    const searchPrompt = `Based on this request: "${prompt}"
+    const searchPrompt = `Based on this request: "${trimmedPrompt}"
 
 Recommend 15-20 music artists that match this description. Consider genre, mood, era, and style.
 
