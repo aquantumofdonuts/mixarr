@@ -25,7 +25,7 @@ export const queryKeys = {
   connection: (id: number) => ['connections', id] as const,
   
   // Queue / Review
-  reviewQueue: (status: string) => ['review', 'queue', status] as const,
+  reviewQueue: (status: string, itemType?: string) => ['review', 'queue', status, itemType] as const,
   
   // Jobs
   jobs: ['jobs'] as const,
@@ -224,17 +224,20 @@ interface ReviewItem {
   mbid: string | null;
   source: string;
   status: 'pending' | 'approved' | 'rejected';
+  itemType: 'artist' | 'album';
   createdAt: string;
   imageUrl?: string;
   user?: { username: string; displayName: string };
 }
 
-export function useReviewQueue(status: 'pending' | 'approved' | 'rejected') {
+export function useReviewQueue(status: 'pending' | 'approved' | 'rejected', itemType?: 'artist' | 'album') {
   return useQuery({
-    queryKey: queryKeys.reviewQueue(status),
+    queryKey: queryKeys.reviewQueue(status, itemType),
     queryFn: async () => {
+      const params = new URLSearchParams({ status, limit: '100' });
+      if (itemType) params.append('itemType', itemType);
       const { data, error } = await api.get<{ items: ReviewItem[] }>(
-        `/api/imports/review/queue?status=${status}&limit=100`
+        `/api/imports/review/queue?${params.toString()}`
       );
       if (error) throw new Error(error);
       return data!.items;

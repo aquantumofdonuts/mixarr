@@ -6,24 +6,31 @@ import { PageHeader } from '@/components/layout/page-header';
 import { PublicPlaylistImport } from '@/components/imports/public-playlist-import';
 import { useAuth } from '@/lib/auth';
 import { useReviewQueue, useUpdateReviewItem, useBulkUpdateReview } from '@/lib/hooks';
-import { Check, X, Music2, Clock, User, Search, CheckSquare, Square, Loader2 } from 'lucide-react';
+import { Check, X, Music2, Clock, User, Search, CheckSquare, Square, Loader2, Disc, Users } from 'lucide-react';
 
 export default function QueuePage() {
   const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [itemTypeFilter, setItemTypeFilter] = useState<'artist' | 'album' | undefined>(undefined);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [processingId, setProcessingId] = useState<number | null>(null);
   const { addToast } = useToast();
 
   // React Query hooks with caching
-  const { data: items = [], isLoading } = useReviewQueue(statusFilter);
+  const { data: items = [], isLoading } = useReviewQueue(statusFilter, itemTypeFilter);
   const updateMutation = useUpdateReviewItem();
   const bulkUpdateMutation = useBulkUpdateReview();
 
   // Reset selection when status filter changes
   const handleStatusChange = (status: 'pending' | 'approved' | 'rejected') => {
     setStatusFilter(status);
+    setSelectedIds(new Set());
+  };
+
+  // Reset selection when item type filter changes
+  const handleItemTypeChange = (itemType: 'artist' | 'album' | undefined) => {
+    setItemTypeFilter(itemType);
     setSelectedIds(new Set());
   };
 
@@ -113,6 +120,36 @@ export default function QueuePage() {
               {status.charAt(0).toUpperCase() + status.slice(1)}
             </Button>
           ))}
+        </div>
+
+        {/* Item type filter */}
+        <div className="flex gap-1 bg-muted rounded-lg p-1">
+          <Button
+            variant={itemTypeFilter === undefined ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => handleItemTypeChange(undefined)}
+            className="h-7 px-3"
+          >
+            All
+          </Button>
+          <Button
+            variant={itemTypeFilter === 'artist' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => handleItemTypeChange('artist')}
+            className="h-7 px-3"
+          >
+            <Users className="h-3 w-3 mr-1" />
+            Artists
+          </Button>
+          <Button
+            variant={itemTypeFilter === 'album' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => handleItemTypeChange('album')}
+            className="h-7 px-3"
+          >
+            <Disc className="h-3 w-3 mr-1" />
+            Albums
+          </Button>
         </div>
 
         <div className="flex-1 relative">
@@ -208,6 +245,12 @@ export default function QueuePage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold truncate">{item.artistName}</h3>
+                      {item.itemType === 'album' && (
+                        <Badge variant="outline" className="text-xs">
+                          <Disc className="h-3 w-3 mr-1" />
+                          Album
+                        </Badge>
+                      )}
                       {getStatusBadge(item.status)}
                       {user?.role === 'admin' && item.user && (
                         <Badge variant="outline" className="text-xs">

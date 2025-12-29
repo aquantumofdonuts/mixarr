@@ -160,12 +160,14 @@ importsRouter.get('/review/queue', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit as string, 10) || 50;
     const status = req.query.status as string || 'pending';
+    const itemType = req.query.itemType as string; // 'artist', 'album', or undefined for all
     const isAdmin = req.user!.role === 'admin';
 
     const items = await prisma.reviewItem.findMany({
       where: {
         ...(isAdmin ? {} : { userId: req.user!.id }),
         status: status as any,
+        ...(itemType ? { itemType: itemType as any } : {}),
       },
       include: {
         user: { select: { username: true, displayName: true } },
