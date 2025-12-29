@@ -58,6 +58,29 @@ model Session {
 }
 
 // ============================================================================
+// SSO AUTHENTICATION
+// ============================================================================
+
+enum SsoProviderType {
+  ldap
+  saml
+  google
+  plex
+}
+
+model SsoProvider {
+  id        Int             @id @default(autoincrement())
+  type      SsoProviderType @unique
+  name      String          @db.VarChar(100)
+  config    Json            // Encrypted credentials, URLs, mappings
+  isEnabled Boolean         @default(false) @map("is_enabled")
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@map("sso_providers")
+}
+
+// ============================================================================
 // CONNECTIONS
 // ============================================================================
 
