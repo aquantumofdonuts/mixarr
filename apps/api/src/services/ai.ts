@@ -221,7 +221,7 @@ Return at least 5 unique artists total, maximum 10.`;
   /**
    * Parse artist list from AI response
    */
-  private parseArtistList(content: string): string[] {
+  parseArtistList(content: string): string[] {
     try {
       // Try to extract JSON array from response
       const jsonMatch = content.match(/\[[\s\S]*\]/);
@@ -239,6 +239,93 @@ Return at least 5 unique artists total, maximum 10.`;
         .filter(line => line.length > 0 && line.length < 100);
     }
     return [];
+  }
+
+  /**
+   * Search for artists based on a natural language prompt
+   * Used by the AI Search feature on the search page
+   */
+  async searchByPrompt(
+    prompt: string,
+    limit: number = 20
+  ): Promise<{ artists: string[]; providers: ('openai' | 'anthropic')[] }> {
+    if (!this.settings) {
+      await this.loadSettings();
+    }
+
+    if (!this.settings) {
+      return { artists: [], providers: [] };
+    }
+
+    const allArtists: string[] = [];
+    const usedProviders: ('openai' | 'anthropic')[] = [];
+
+    // Build the prompt for natural language search
+    const searchPrompt = `Based on this request: "${prompt}"
+
+Recommend 15-20 music artists that match this description. Consider genre, mood, era, and style.
+
+Return ONLY a JSON array of artist names, nothing else. Format:
+["Artist Name 1", "Artist Name 2", ...]`;
+
+    // Try OpenAI if enabled
+    if (this.settings.openaiEnabled && this.openaiClient) {
+      try {
+        const response = await this.openaiClient.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a music expert that recommends artists based on descriptions. Always respond with valid JSON arrays only.',
+            },
+            { role: 'user', content: searchPrompt },
+          ],
+          max_tokens: 500,
+          temperature: 0.7,
+        });
+
+        const content = response.choices[0]?.message?.content || '[]';
+        const artists = this.parseArtistList(content);
+        allArtists.push(...artists);
+        usedProviders.push('openai');
+      } catch (error) {
+        console.error('[AI Search] OpenAI error:', error);
+      }
+    }
+
+    // Try Anthropic if enabled
+    if (this.settings.anthropicEnabled && this.anthropicClient) {
+      try {
+        const response = await this.anthropicClient.messages.create({
+          model: 'claude-3-haiku-20240307',
+          max_tokens: 500,
+          messages: [{ role: 'user', content: searchPrompt }],
+          system: 'You are a music expert that recommends artists based on descriptions. Always respond with valid JSON arrays only.',
+        });
+
+        const textBlock = response.content.find((block: { type: string }) => block.type === 'text');
+        const content = textBlock && 'text' in textBlock ? textBlock.text : '[]';
+        const artists = this.parseArtistList(content);
+        allArtists.push(...artists);
+        usedProviders.push('anthropic');
+      } catch (error) {
+        console.error('[AI Search] Anthropic error:', error);
+      }
+    }
+
+    // Deduplicate artist names (case-insensitive)
+    const seen = new Set<string>();
+    const uniqueArtists = allArtists.filter(name => {
+      const key = name.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    return {
+      artists: uniqueArtists.slice(0, limit),
+      providers: usedProviders,
+    };
   }
 
   /**
