@@ -10,6 +10,7 @@ import { AIService } from '../services/ai.js';
 import { fetchDeezerArtistImages } from '../services/deezer.js';
 import { addLogEntry } from './logs.js';
 import { parseSpotifyPlaylistUrl, importPublicPlaylist } from '../services/public-playlist.js';
+import { notificationService } from '../services/notifications.js';
 import type { ImportSource } from '@prisma/client';
 import type { Request } from 'express';
 
@@ -312,6 +313,11 @@ importsRouter.put('/review/:id', async (req, res) => {
         albumMbid: item.albumMbid,
       });
 
+      // Send notification
+      await notificationService.send(req.user!.id, 'artist.added', {
+        artistName: `${item.albumName} by ${item.artistName}`,
+      });
+
       res.json({ success: true, added: true, itemType: 'album' });
     } else {
       // Artist approval (default behavior) - trigger metadata refresh for complete data
@@ -332,6 +338,11 @@ importsRouter.put('/review/:id', async (req, res) => {
         mbid: foreignArtistId,
       });
 
+      // Send notification
+      await notificationService.send(req.user!.id, 'artist.added', {
+        artistName: item.artistName,
+      });
+
       res.json({ success: true, added: true, itemType: 'artist' });
     }
   } catch (error) {
@@ -340,6 +351,13 @@ importsRouter.put('/review/:id', async (req, res) => {
     await addLogEntry('error', 'review', `Failed to add artist to Lidarr: ${errorMsg}`, {
       error: errorMsg,
     });
+
+    // Send failure notification
+    await notificationService.send(req.user!.id, 'artist.failed', {
+      artistName: 'Unknown',
+      error: errorMsg,
+    });
+
     res.status(500).json({ error: errorMsg });
   }
 });

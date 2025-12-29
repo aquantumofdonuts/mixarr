@@ -16,8 +16,8 @@ This workplan prioritizes community-requested features from least to most effort
 |---|---------|--------|------------------|
 | 1 | Library Health Dashboard | ✅ Complete | Health score, enrich buttons, progress bar |
 | 2 | ListenBrainz Deep Integration | ✅ Complete | 5 new subscription types (Fresh Releases, Year in Music, Playlist Import, Artist Radio, Loved Recordings) |
-| 3 | Notification Integrations | 🔲 Not Started | Discord webhooks, Telegram, Pushover, email, configurable triggers |
-| 4 | Public Playlist Import | 🔲 Not Started | Paste Spotify URL → extract artists → review queue |
+| 3 | Notification Integrations | ✅ Complete | Discord webhooks, generic webhooks, configurable triggers, Settings UI |
+| 4 | Public Playlist Import | ✅ Complete | Paste Spotify URL → extract artists → review queue |
 
 **Design Documents:**
 - [Library Health Dashboard](2024-12-27-library-health-dashboard-design.md)
@@ -80,12 +80,12 @@ The following features were considered but deferred from this workplan:
 
 ## Progress Tracking
 
-- **Sprint 1:** 2/4 complete (50%)
-- **Sprint 2:** 2/2 complete (100%)
-- **Sprint 3:** 1/1 complete (100%)
+- **Sprint 1:** 4/4 complete (100%) ✅
+- **Sprint 2:** 2/2 complete (100%) ✅
+- **Sprint 3:** 1/1 complete (100%) ✅
 - **Sprint 4:** 0/2 complete (0%)
 
-**Overall:** 5/9 features complete (56%)
+**Overall:** 7/9 features complete (78%)
 
 ---
 
@@ -95,3 +95,5 @@ The following features were considered but deferred from this workplan:
 |------|--------|
 | 2024-12-28 | Initial workplan created |
 | 2024-12-28 | Library Health Dashboard marked complete |
+| 2024-12-28 | Notification Integrations complete (full integration with all artist add routes) |
+| 2024-12-28 | Public Playlist Import complete (fixed Spotify embed format parsing) |

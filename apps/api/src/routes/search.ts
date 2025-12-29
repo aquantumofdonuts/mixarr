@@ -7,6 +7,7 @@ import { LastfmService } from '../services/lastfm.js';
 import { fetchDeezerArtistImages } from '../services/deezer.js';
 import { multiSourceSearch, resolveMbid, SearchSource } from '../services/multi-search.js';
 import { MetadataEnrichmentService } from '../services/metadata-enrichment.js';
+import { notificationService } from '../services/notifications.js';
 
 export const searchRouter = Router();
 
@@ -272,6 +273,11 @@ searchRouter.post('/artists/add', async (req, res) => {
 
     // Use addArtistWithRefresh to trigger metadata refresh for complete MusicBrainz data
     const { artist, refreshCommand } = await lidarr.addArtistWithRefresh(foreignArtistId, qpId, mpId, rfPath);
+    
+    // Send notification
+    await notificationService.send(req.user!.id, 'artist.added', {
+      artistName: artist.artistName || 'Unknown Artist',
+    });
     
     res.json({ success: true, artist, refreshTriggered: !!refreshCommand });
   } catch (error) {

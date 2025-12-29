@@ -5,6 +5,7 @@ import { LidarrService, LidarrCache } from '../services/lidarr.js';
 import { LastfmService } from '../services/lastfm.js';
 import { fetchDeezerArtistImage, getDeezerChartArtists, getDeezerGenres, getDeezerGenreArtists } from '../services/deezer.js';
 import { addLogEntry } from './logs.js';
+import { notificationService } from '../services/notifications.js';
 
 export const discoverRouter = Router();
 
@@ -305,6 +306,11 @@ discoverRouter.post('/add', async (req, res) => {
       artistName,
       mbid: foreignArtistId,
       refreshTriggered: !!refreshCommand,
+    });
+
+    // Send notification
+    await notificationService.send(req.user!.id, 'artist.added', {
+      artistName,
     });
 
     res.json({ success: true, artist: result, refreshTriggered: !!refreshCommand });

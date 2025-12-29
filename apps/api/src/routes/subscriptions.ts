@@ -5,6 +5,7 @@ import { addScheduledJob, removeScheduledJob } from '../jobs/scheduler.js';
 import { fetchDeezerArtistImages } from '../services/deezer.js';
 import { LidarrService } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
+import { notificationService } from '../services/notifications.js';
 import type { Subscription, ConnectionType } from '@prisma/client';
 import type { Request } from 'express';
 
@@ -415,6 +416,11 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
       await prisma.subscriptionResult.update({
         where: { id: resultId },
         data: { status: 'added', processedAt: new Date() },
+      });
+
+      // Send notification
+      await notificationService.send(req.user!.id, 'artist.added', {
+        artistName: result.name,
       });
 
       res.json({ success: true, message: `Added "${result.name}" to Lidarr` });

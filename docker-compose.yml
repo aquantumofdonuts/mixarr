@@ -49,10 +49,10 @@ services:
       PORT: 3005
       DATABASE_URL: mysql://${MYSQL_USER:-mixarr}:${MYSQL_PASSWORD:-mixarr_password}@db:3306/${MYSQL_DATABASE:-mixarr}
       REDIS_URL: redis://redis:6379
-      SESSION_SECRET: ${SESSION_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-in-production}
       FRONTEND_URL: ${FRONTEND_URL:-https://localhost:3443}
       BASE_URL: ${BASE_URL:-https://localhost:3443}
-    command: sh -c "npx prisma migrate deploy && node dist/index.js"
+    command: sh -c "npx prisma db push --accept-data-loss && node dist/index.js"
 
   # Web Frontend
   web:
