@@ -25,6 +25,7 @@
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.25.2",
+    "cheerio": "^1.1.2",
     "cors": "^2.8.5",
     "cron": "^3.1.7",
     "dotenv": "^16.4.5",
@@ -42,6 +43,7 @@
   "devDependencies": {
     "@mixarr/config": "*",
     "@types/bcryptjs": "^2.4.6",
+    "@types/cheerio": "^0.22.35",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.0",

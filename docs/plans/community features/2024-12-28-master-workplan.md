@@ -58,8 +58,8 @@ This workplan prioritizes community-requested features from least to most effort
 
 | # | Feature | Status | Key Deliverables |
 |---|---------|--------|------------------|
-| 8 | Album-Level Discovery | 🔲 Not Started | Schema changes, album review queue, "add album only" action |
-| 9 | Bandcamp Integration | 🔲 Not Started | Web scraping service, tag discovery, Daily/New & Notable |
+| 8 | Album-Level Discovery | ✅ Complete | Schema changes, album review queue, "add album only" action |
+| 9 | Bandcamp Integration | ✅ Complete | BandcampService, tag discovery, subscription handlers |
 
 **Design Documents:**
 - [Album-Level Discovery](2024-12-27-album-level-discovery-design.md)
@@ -83,9 +83,9 @@ The following features were considered but deferred from this workplan:
 - **Sprint 1:** 4/4 complete (100%) ✅
 - **Sprint 2:** 2/2 complete (100%) ✅
 - **Sprint 3:** 1/1 complete (100%) ✅
-- **Sprint 4:** 0/2 complete (0%)
+- **Sprint 4:** 2/2 complete (100%) ✅
 
-**Overall:** 7/9 features complete (78%)
+**Overall:** 9/9 features complete (100%) 🎉
 
 ---
 
