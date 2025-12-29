@@ -124,7 +124,7 @@ export function PublicPlaylistImport({ onImportComplete }: { onImportComplete?: 
               <ListMusic className="w-5 h-5 text-green-500" />
             </div>
             <div>
-              <h3 className="font-medium">Import from Public Playlist</h3>
+              <h3 className="font-medium">Import from Public Spotify Playlist</h3>
               <p className="text-sm text-muted-foreground">
                 Paste a Spotify playlist URL to import artists (no login required)
               </p>

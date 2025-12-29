@@ -20,6 +20,12 @@
   "prefer_related_applications": false,
   "shortcuts": [
     {
+      "name": "Review Queue",
+      "short_name": "Queue",
+      "description": "Review pending artists",
+      "url": "/queue"
+    },
+    {
       "name": "Search Artists",
       "short_name": "Search",
       "description": "Search for artists",
@@ -32,10 +38,10 @@
       "url": "/subscriptions"
     },
     {
-      "name": "Spotify Import",
-      "short_name": "Import",
-      "description": "Import from Spotify",
-      "url": "/spotify-import"
+      "name": "Library Health",
+      "short_name": "Library",
+      "description": "View library health",
+      "url": "/library"
     }
   ]
 }

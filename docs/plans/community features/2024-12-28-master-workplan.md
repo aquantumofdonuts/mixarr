@@ -46,7 +46,7 @@ This workplan prioritizes community-requested features from least to most effort
 
 | # | Feature | Status | Key Deliverables |
 |---|---------|--------|------------------|
-| 7 | Mobile PWA Improvements | 🔲 Not Started | Offline review queue, push notifications, background sync |
+| 7 | Mobile PWA Improvements | ✅ Complete | IndexedDB offline store, background sync, mobile bottom nav, offline indicators |
 
 **Design Documents:**
 - [Mobile PWA Improvements](2024-12-27-mobile-pwa-improvements-design.md)
@@ -82,10 +82,10 @@ The following features were considered but deferred from this workplan:
 
 - **Sprint 1:** 2/4 complete (50%)
 - **Sprint 2:** 2/2 complete (100%)
-- **Sprint 3:** 0/1 complete (0%)
+- **Sprint 3:** 1/1 complete (100%)
 - **Sprint 4:** 0/2 complete (0%)
 
-**Overall:** 4/9 features complete (44%)
+**Overall:** 5/9 features complete (56%)
 
 ---
 

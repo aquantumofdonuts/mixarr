@@ -1,8 +1,25 @@
-const CACHE_NAME = 'lidarr-spotify-v1';
+const CACHE_NAME = 'mixarr-v2';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
+  '/queue',
+  '/library',
+  '/subscriptions',
+  '/search',
+  '/dashboard',
 ];
+
+// IndexedDB for pending actions
+const DB_NAME = 'mixarr-offline';
+const DB_VERSION = 1;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
 
 // Install service worker and cache static assets
 self.addEventListener('install', (event) => {
@@ -20,7 +37,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
-          .filter((name) => name !== CACHE_NAME)
+          .filter((name) => name.startsWith('mixarr-') && name !== CACHE_NAME)
           .map((name) => caches.delete(name))
       );
     })
@@ -125,4 +142,86 @@ self.addEventListener('notificationclick', (event) => {
       }
     })
   );
+});
+
+// Background sync handler for offline actions
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-actions') {
+    event.waitUntil(syncPendingActions());
+  }
+});
+
+async function syncPendingActions() {
+  console.log('[SW] Starting background sync of pending actions');
+  
+  try {
+    const db = await openDB();
+    const tx = db.transaction('pending-actions', 'readonly');
+    const store = tx.objectStore('pending-actions');
+    
+    const actions = await new Promise((resolve, reject) => {
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+
+    console.log(`[SW] Found ${actions.length} pending actions to sync`);
+
+    for (const action of actions) {
+      try {
+        let response;
+        
+        if (action.type === 'add') {
+          response = await fetch(`/api/review/${action.itemId}/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(action.data || {}),
+            credentials: 'include',
+          });
+        } else if (action.type === 'dismiss') {
+          response = await fetch(`/api/review/${action.itemId}/dismiss`, {
+            method: 'POST',
+            credentials: 'include',
+          });
+        } else if (action.type === 'skip') {
+          response = await fetch(`/api/review/${action.itemId}/skip`, {
+            method: 'POST',
+            credentials: 'include',
+          });
+        }
+
+        if (response && response.ok) {
+          // Remove the action from IndexedDB
+          const deleteTx = db.transaction('pending-actions', 'readwrite');
+          deleteTx.objectStore('pending-actions').delete(action.id);
+          await new Promise((resolve) => {
+            deleteTx.oncomplete = resolve;
+          });
+          console.log(`[SW] Synced action: ${action.id}`);
+        } else {
+          console.error(`[SW] Failed to sync action ${action.id}:`, response?.status);
+        }
+      } catch (error) {
+        console.error(`[SW] Error syncing action ${action.id}:`, error);
+        // Will retry on next sync
+      }
+    }
+
+    // Notify clients that sync completed
+    const clients = await self.clients.matchAll();
+    for (const client of clients) {
+      client.postMessage({ type: 'SYNC_COMPLETE', syncedCount: actions.length });
+    }
+
+  } catch (error) {
+    console.error('[SW] Background sync failed:', error);
+    throw error; // Will trigger retry
+  }
+}
+
+// Listen for messages from the main thread
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
