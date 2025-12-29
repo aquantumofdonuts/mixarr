@@ -9,6 +9,7 @@ import { MusicBrainzService } from '../services/musicbrainz.js';
 import { AIService } from '../services/ai.js';
 import { fetchDeezerArtistImages } from '../services/deezer.js';
 import { addLogEntry } from './logs.js';
+import { parseSpotifyPlaylistUrl, importPublicPlaylist } from '../services/public-playlist.js';
 import type { ImportSource } from '@prisma/client';
 import type { Request } from 'express';
 
@@ -1017,3 +1018,133 @@ importsRouter.post('/preview/import', async (req, res) => {
   }
 });
 
+// ============================================================================
+// PUBLIC PLAYLIST IMPORT (No OAuth required)
+// ============================================================================
+
+// Preview public playlist - extracts artists without adding to queue
+importsRouter.post('/public-playlist/preview', async (req, res) => {
+  try {
+    const { url, includeAllArtists } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ error: 'Playlist URL is required' });
+    }
+    
+    const playlistId = parseSpotifyPlaylistUrl(url);
+    if (!playlistId) {
+      return res.status(400).json({ error: 'Invalid Spotify playlist URL' });
+    }
+    
+    const result = await importPublicPlaylist(url, { includeAllArtists });
+    
+    // Check which artists are already in library
+    let existingArtists: string[] = [];
+    try {
+      // Get Lidarr config
+      const lidarrConnection = await prisma.connection.findFirst({
+        where: {
+          type: 'lidarr',
+          isActive: true,
+          OR: [{ userId: req.user!.id }, { userId: null }],
+        },
+      });
+      
+      if (lidarrConnection) {
+        const config = lidarrConnection.config as { url: string; apiKey: string };
+        const lidarrService = new LidarrService(config);
+        const artists = await lidarrService.getArtists();
+        existingArtists = artists.map(a => a.artistName.toLowerCase());
+      }
+    } catch {
+      // Lidarr not available, skip check
+    }
+    
+    const artistsWithStatus = result.artistNames.map(name => ({
+      name,
+      inLibrary: existingArtists.includes(name.toLowerCase()),
+    }));
+    
+    res.json({
+      playlistName: result.playlistName,
+      totalTracks: result.totalTracks,
+      artistCount: result.artistNames.length,
+      artists: artistsWithStatus,
+    });
+  } catch (error) {
+    console.error('Public playlist preview error:', error);
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Failed to fetch playlist' 
+    });
+  }
+});
+
+// Import artists from public playlist to review queue
+importsRouter.post('/public-playlist/import', async (req, res) => {
+  try {
+    const { url, selectedArtists, includeAllArtists } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ error: 'Playlist URL is required' });
+    }
+    
+    const result = await importPublicPlaylist(url, { includeAllArtists });
+    
+    // Use selected artists if provided, otherwise use all
+    const artistsToImport = selectedArtists && Array.isArray(selectedArtists)
+      ? selectedArtists
+      : result.artistNames;
+    
+    // Check which artists are already in review queue
+    const existingReviewItems = await prisma.reviewItem.findMany({
+      where: {
+        userId: req.user!.id,
+        artistName: { in: artistsToImport },
+        status: 'pending',
+      },
+      select: { artistName: true },
+    });
+    const existingInQueue = new Set(existingReviewItems.map(r => r.artistName.toLowerCase()));
+    
+    // Add to review queue
+    const addedArtists: string[] = [];
+    const skippedArtists: string[] = [];
+    
+    for (const artistName of artistsToImport) {
+      if (existingInQueue.has(artistName.toLowerCase())) {
+        skippedArtists.push(artistName);
+        continue;
+      }
+      
+      await prisma.reviewItem.create({
+        data: {
+          userId: req.user!.id,
+          artistName,
+          source: `playlist:${result.playlistName}`,
+          status: 'pending',
+        },
+      });
+      addedArtists.push(artistName);
+    }
+    
+    await addLogEntry(
+      'info',
+      'playlist-import',
+      `Imported ${addedArtists.length} artists from playlist "${result.playlistName}"`,
+      { playlistName: result.playlistName, addedCount: addedArtists.length, userId: req.user!.id }
+    );
+    
+    res.json({
+      success: true,
+      playlistName: result.playlistName,
+      added: addedArtists.length,
+      skipped: skippedArtists.length,
+      message: `Added ${addedArtists.length} artist(s) to review queue${skippedArtists.length > 0 ? `, ${skippedArtists.length} already queued` : ''}`,
+    });
+  } catch (error) {
+    console.error('Public playlist import error:', error);
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Failed to import playlist' 
+    });
+  }
+});
