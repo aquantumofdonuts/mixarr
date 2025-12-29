@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Badge, useToast, Select } from '@/components/ui';
 import { PageHeader } from '@/components/layout/page-header';
+import { DuplicatesContent } from '@/components/library/duplicates-content';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { RefreshCw, Search, CheckCircle, AlertTriangle, Image, FileText, Music, ChevronUp, ChevronDown } from 'lucide-react';
+import { RefreshCw, Search, CheckCircle, AlertTriangle, Image, FileText, Music, ChevronUp, ChevronDown, Copy } from 'lucide-react';
 
 interface LidarrArtist {
   id: number;
