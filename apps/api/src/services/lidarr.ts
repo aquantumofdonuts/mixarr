@@ -449,14 +449,35 @@ export class LidarrService {
           },
         }),
       });
+
+      // Wait for Lidarr to fetch artist metadata (albums list)
+      // Lidarr queues a RefreshArtist command when an artist is added
+      console.log(`[Lidarr] Waiting for artist metadata to be fetched...`);
+      await this.sleep(2000); // Give Lidarr time to start fetching
     }
 
     // Step 3: Get albums for the artist and find the target album
-    const albums = await this.getAlbums(artist.id);
-    const targetAlbum = albums.find(a => a.foreignAlbumId === albumMbid);
+    // Retry a few times in case the album list isn't populated yet
+    let targetAlbum: LidarrAlbum | undefined;
+    const maxRetries = 5;
+    const retryDelay = 2000;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const albums = await this.getAlbums(artist.id);
+      targetAlbum = albums.find(a => a.foreignAlbumId === albumMbid);
+      
+      if (targetAlbum) {
+        break;
+      }
+      
+      if (attempt < maxRetries) {
+        console.log(`[Lidarr] Album not found yet, retry ${attempt}/${maxRetries}...`);
+        await this.sleep(retryDelay);
+      }
+    }
 
     if (!targetAlbum) {
-      throw new Error(`Album not found in artist discography for MBID: ${albumMbid}`);
+      throw new Error(`Album not found in artist discography for MBID: ${albumMbid}. The album may not exist in MusicBrainz or Lidarr may still be fetching metadata.`);
     }
 
     // Step 4: Set the album to monitored
