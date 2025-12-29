@@ -14,8 +14,12 @@ export interface ReviewItemInput {
   mbid?: string;
   spotifyId?: string;
   albumName?: string;
+  albumMbid?: string;
   releaseYear?: number;
+  releaseDate?: string;
+  releaseType?: string;
   source: string;
+  itemType?: 'artist' | 'album';
 }
 
 /**
@@ -25,7 +29,7 @@ export interface ReviewItemInput {
  * If not found: creates new item
  */
 export async function findOrCreateReviewItem(input: ReviewItemInput): Promise<{ id: number; created: boolean }> {
-  const { userId, artistName, mbid, spotifyId, source, albumName, releaseYear } = input;
+  const { userId, artistName, mbid, spotifyId, source, albumName, albumMbid, releaseYear, releaseDate, releaseType, itemType = 'artist' } = input;
   
   // Try to find existing by MBID first (most reliable)
   if (mbid) {
@@ -89,11 +93,15 @@ export async function findOrCreateReviewItem(input: ReviewItemInput): Promise<{ 
   const created = await prisma.reviewItem.create({
     data: {
       userId,
+      itemType,
       artistName,
       mbid,
       spotifyId,
       albumName,
+      albumMbid,
       releaseYear,
+      releaseDate,
+      releaseType,
       source,
       status: 'pending',
     },

@@ -193,6 +193,7 @@ describe('findOrCreateReviewItem', () => {
           releaseYear: 2024,
           source: 'import-spotify',
           status: 'pending',
+          itemType: 'artist',
         },
       });
     });

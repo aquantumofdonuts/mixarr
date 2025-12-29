@@ -30,6 +30,15 @@ interface ArtistToAdd {
   source: string;
 }
 
+interface AlbumToAdd {
+  albumName: string;
+  artistName: string;
+  releaseDate?: string;
+  releaseYear?: number;
+  releaseType?: string;
+  source: string;
+}
+
 async function processSubscription(job: Job<SubscriptionJobData>): Promise<void> {
   const { subscriptionId, userId } = job.data;
   
@@ -114,6 +123,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     const config = subscription.config as Record<string, any>;
     
     let artists: ArtistToAdd[] = [];
+    let albumsToAdd: AlbumToAdd[] = [];
 
     // Fetch artists based on subscription type
     switch (subscription.type) {
@@ -263,18 +273,31 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         const spotify = new SpotifyService(spotifyConfig);
         const albums = await spotify.getAllNewReleases(config.limit || 50, config.country);
         
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const album of albums) {
-          for (const artist of album.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'spotify-new-releases',
-              });
+        if (config.discoverAlbums) {
+          // Album discovery mode - add albums to review queue
+          albumsToAdd = albums.map(album => ({
+            albumName: album.name,
+            artistName: album.artists[0]?.name || 'Unknown Artist',
+            releaseDate: album.release_date,
+            releaseYear: album.release_date ? parseInt(album.release_date.split('-')[0]) : undefined,
+            releaseType: 'album',
+            source: 'spotify-new-releases',
+          }));
+        } else {
+          // Artist discovery mode (default) - extract artists from albums
+          const artistMap = new Map<string, ArtistToAdd>();
+          for (const album of albums) {
+            for (const artist of album.artists) {
+              if (!artistMap.has(artist.name)) {
+                artistMap.set(artist.name, {
+                  name: artist.name,
+                  source: 'spotify-new-releases',
+                });
+              }
             }
           }
+          artists = Array.from(artistMap.values());
         }
-        artists = Array.from(artistMap.values());
         break;
       }
 
@@ -1586,12 +1609,75 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       });
     }
 
+    // Process albums (from album discovery subscriptions)
+    for (let i = 0; i < albumsToAdd.length; i++) {
+      const album = albumsToAdd[i];
+      
+      // For albums, we add to review queue or directly to Lidarr
+      const sourcesArray = [album.source];
+      
+      if (resultHandling === 'preview') {
+        // Just record without adding to queue
+        await prisma.subscriptionResult.create({
+          data: {
+            subscriptionId,
+            runId: run.id,
+            itemType: 'album',
+            name: `${album.albumName} - ${album.artistName}`,
+            status: 'pending',
+            sources: sourcesArray,
+            matchCount: 1,
+          },
+        });
+        queued++;
+      } else if (resultHandling === 'queue') {
+        // Add to review queue as album type
+        const reviewResult = await findOrCreateReviewItem({
+          userId,
+          artistName: album.artistName,
+          albumName: album.albumName,
+          releaseYear: album.releaseYear,
+          releaseDate: album.releaseDate,
+          releaseType: album.releaseType,
+          source: `subscription:${subscription.name}`,
+          itemType: 'album',
+        });
+        
+        await prisma.subscriptionResult.create({
+          data: {
+            subscriptionId,
+            runId: run.id,
+            itemType: 'album',
+            name: `${album.albumName} - ${album.artistName}`,
+            status: reviewResult.created ? 'queued' : 'deduplicated',
+            sources: sourcesArray,
+            matchCount: 1,
+          },
+        });
+        
+        if (reviewResult.created) {
+          queued++;
+        }
+      }
+      // Note: auto_add for albums would require MBID lookup, deferred for now
+      
+      await job.updateProgress({
+        phase: 'processing-albums',
+        current: i + 1,
+        total: albumsToAdd.length,
+        added,
+        skipped,
+        queued,
+      });
+    }
+
     // Update run record
+    const totalResults = artists.length + albumsToAdd.length;
     await prisma.subscriptionRun.update({
       where: { id: run.id },
       data: {
         status: 'completed',
-        resultsCount: artists.length,
+        resultsCount: totalResults,
         addedCount: added,
         skippedCount: skipped,
         completedAt: new Date(),
@@ -1614,6 +1700,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       subscriptionName: subscription.name,
       type: subscription.type,
       artistsFound: artists.length,
+      albumsFound: albumsToAdd.length,
       added,
       skipped,
       queued,
@@ -1622,7 +1709,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     // Send notification for completed subscription
     await notificationService.send(userId, 'subscription.completed', {
       subscriptionName: subscription.name,
-      artistCount: artists.length,
+      artistCount: artists.length + albumsToAdd.length,
       queuedCount: queued,
       addedCount: added,
     });
