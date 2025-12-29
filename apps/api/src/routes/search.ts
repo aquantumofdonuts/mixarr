@@ -148,7 +148,8 @@ searchRouter.get('/discover', async (req, res) => {
 // AI-powered natural language search
 searchRouter.post('/ai', async (req, res) => {
   try {
-    const { prompt, limit = 20 } = req.body;
+    const { prompt, limit: rawLimit } = req.body;
+    const limit = Math.min(Math.max(Number(rawLimit) || 20, 1), 100);
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
       res.status(400).json({ error: 'Search prompt is required' });
@@ -173,7 +174,8 @@ searchRouter.post('/ai', async (req, res) => {
     }
 
     // Get AI recommendations
-    console.log(`[AI Search] Processing prompt: "${prompt.substring(0, 50)}..."`);
+    const truncated = prompt.length > 50 ? `${prompt.substring(0, 50)}...` : prompt;
+    console.log(`[AI Search] Processing prompt: "${truncated}"`);
     const { artists: artistNames, providers } = await aiService.searchByPrompt(prompt.trim(), limit);
 
     if (artistNames.length === 0) {
@@ -217,16 +219,16 @@ searchRouter.post('/ai', async (req, res) => {
     );
 
     // Filter out nulls (artists that couldn't be resolved)
-    const validResults = enrichedResults.filter(r => r !== null);
+    const validResults = enrichedResults.filter((r): r is NonNullable<typeof r> => r !== null);
 
     // Fetch images from Deezer
-    const artistNamesForImages = validResults.map(r => r!.artistName);
+    const artistNamesForImages = validResults.map(r => r.artistName);
     const imageMap = await fetchDeezerArtistImages(artistNamesForImages);
 
     // Add images to results
     const finalResults = validResults.map(r => ({
-      ...r!,
-      imageUrl: imageMap.get(r!.artistName) || null,
+      ...r,
+      imageUrl: imageMap.get(r.artistName) || null,
     }));
 
     console.log(`[AI Search] Returning ${finalResults.length} results from ${providers.join(', ')}`);
