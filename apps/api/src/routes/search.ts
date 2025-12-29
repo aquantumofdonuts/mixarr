@@ -200,33 +200,47 @@ searchRouter.post('/ai', async (req, res) => {
 
     // Resolve each artist name to MBID via Lidarr search
     const cache = new LidarrCache(lidarr);
-    await cache.refresh();
+    try {
+      await cache.refresh();
+    } catch (cacheError) {
+      console.error('[AI Search] Failed to refresh library cache:', cacheError);
+      // Continue without cache - inLibrary will be false for all
+    }
 
-    const enrichedResults = await Promise.all(
-      artistNames.map(async (name) => {
-        try {
-          const searchResults = await lidarr.searchArtist(name);
-          if (searchResults.length === 0) {
-            console.log(`[AI Search] No Lidarr results for: ${name}`);
-            return null;
-          }
+    // Resolve artists sequentially to avoid overwhelming Lidarr API
+    // (parallel requests can trigger rate limiting on MusicBrainz)
+    const enrichedResults: ({
+      foreignArtistId: string;
+      artistName: string;
+      overview: string | undefined;
+      imageUrl: null;
+      inLibrary: boolean;
+    } | null)[] = [];
 
-          const artist = searchResults[0];
-          const inLibrary = await cache.exists({ mbid: artist.foreignArtistId });
-
-          return {
-            foreignArtistId: artist.foreignArtistId,
-            artistName: artist.artistName,
-            overview: artist.overview,
-            imageUrl: null, // Will be enriched below
-            inLibrary,
-          };
-        } catch (error) {
-          console.error(`[AI Search] Error resolving artist "${name}":`, error);
-          return null;
+    for (const name of artistNames) {
+      try {
+        const searchResults = await lidarr.searchArtist(name);
+        if (searchResults.length === 0) {
+          console.log(`[AI Search] No Lidarr results for: ${name}`);
+          enrichedResults.push(null);
+          continue;
         }
-      })
-    );
+
+        const artist = searchResults[0];
+        const inLibrary = await cache.exists({ mbid: artist.foreignArtistId });
+
+        enrichedResults.push({
+          foreignArtistId: artist.foreignArtistId,
+          artistName: artist.artistName,
+          overview: artist.overview,
+          imageUrl: null, // Will be enriched below
+          inLibrary,
+        });
+      } catch (error) {
+        console.error(`[AI Search] Error resolving artist "${name}":`, error);
+        enrichedResults.push(null);
+      }
+    }
 
     // Filter out nulls (artists that couldn't be resolved)
     const validResults = enrichedResults.filter((r): r is NonNullable<typeof r> => r !== null);
