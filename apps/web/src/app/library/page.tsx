@@ -36,6 +36,7 @@ interface IssueStats {
 type SortField = 'name' | 'albumCount' | 'issues';
 type SortDirection = 'asc' | 'desc';
 type FilterType = 'all' | 'needs_refresh' | 'no_albums' | 'no_poster' | 'no_overview' | 'no_genres' | 'complete';
+type TabType = 'health' | 'duplicates';
 
 export default function LibraryPage() {
   const router = useRouter();
@@ -51,6 +52,12 @@ export default function LibraryPage() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [sortField, setSortField] = useState<SortField>('issues');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [activeTab, setActiveTab] = useState<TabType>('health');
+  const [duplicateCount, setDuplicateCount] = useState<number>(0);
+
+  const handleDuplicateCountChange = useCallback((count: number) => {
+    setDuplicateCount(count);
+  }, []);
 
   // Redirect non-admin users
   useEffect(() => {
@@ -193,14 +200,45 @@ export default function LibraryPage() {
         </CardContent>
       </Card>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-5 mb-6">
-        <Card>
-          <CardContent className="pt-4">
-            <div className="text-2xl font-bold">{artists.length}</div>
-            <p className="text-xs text-muted-foreground">Total Artists</p>
-          </CardContent>
-        </Card>
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6 border-b">
+        <button
+          onClick={() => setActiveTab('health')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'health'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <AlertTriangle className="w-4 h-4 inline mr-2" />
+          Health Issues
+        </button>
+        <button
+          onClick={() => setActiveTab('duplicates')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'duplicates'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Copy className="w-4 h-4 inline mr-2" />
+          Duplicates{duplicateCount > 0 ? ` (${duplicateCount})` : ''}
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'duplicates' ? (
+        <DuplicatesContent onCountChange={handleDuplicateCountChange} />
+      ) : (
+        <>
+          {/* Stats Cards */}
+          <div className="grid gap-4 md:grid-cols-5 mb-6">
+            <Card>
+              <CardContent className="pt-4">
+                <div className="text-2xl font-bold">{artists.length}</div>
+                <p className="text-xs text-muted-foreground">Total Artists</p>
+              </CardContent>
+            </Card>
         <Card className={issueStats?.noAlbums ? 'border-yellow-500/50' : ''}>
           <CardContent className="pt-4">
             <div className={`text-2xl font-bold ${issueStats?.noAlbums ? 'text-yellow-500' : 'text-green-500'}`}>
@@ -360,6 +398,8 @@ export default function LibraryPage() {
           )}
         </CardContent>
       </Card>
+        </>
+      )}
     </>
   );
 }
