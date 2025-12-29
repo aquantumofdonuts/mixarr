@@ -15,7 +15,12 @@ import {
   Disc,
   Loader2,
   AlertTriangle,
-  CheckCircle
+  CheckCircle,
+  Check,
+  FolderOpen,
+  Settings2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 interface ArtistInfo {
@@ -43,12 +48,35 @@ interface ScanResult {
   fromCache?: boolean;
 }
 
+interface ArtistDetails {
+  id: number;
+  name: string;
+  foreignArtistId: string;
+  path: string;
+  rootFolder: string;
+  qualityProfile: string;
+  monitored: boolean;
+  albumCount: number;
+  trackCount: number;
+  trackFileCount: number;
+  percentComplete: number;
+  sizeOnDisk: number;
+  avgBitrate: number | null;
+  formats: string[];
+  primaryFormat: string | null;
+  musicbrainzUrl: string;
+}
+
 interface Guidance {
   recommendation: 'keep_first' | 'keep_second' | 'merge_in_musicbrainz';
   reasoning: string;
-  firstArtist: ArtistInfo & { name: string };
-  secondArtist: ArtistInfo & { name: string };
+  firstArtist: ArtistDetails;
+  secondArtist: ArtistDetails;
   musicbrainzUrl: string;
+  comparison?: {
+    artist1: ArtistDetails;
+    artist2: ArtistDetails;
+  };
 }
 
 export default function DuplicatesPage() {
@@ -303,6 +331,7 @@ export default function DuplicatesPage() {
                           </div>
                         ) : candidateGuidance ? (
                           <div className="space-y-4">
+                            {/* Recommendation */}
                             <div className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
                               <AlertTriangle className="w-5 h-5 text-yellow-500 mt-0.5" />
                               <div>
@@ -313,14 +342,150 @@ export default function DuplicatesPage() {
                               </div>
                             </div>
                             
+                            {/* Comparison Table */}
+                            {candidateGuidance.comparison && (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="border-b">
+                                      <th className="text-left py-2 px-3 font-medium text-muted-foreground">Attribute</th>
+                                      <th className="text-left py-2 px-3 font-medium">{candidateGuidance.comparison.artist1.name}</th>
+                                      <th className="text-left py-2 px-3 font-medium">{candidateGuidance.comparison.artist2.name}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {/* Path */}
+                                    <tr className="border-b border-muted/50">
+                                      <td className="py-2 px-3 text-muted-foreground flex items-center gap-2">
+                                        <FolderOpen className="w-4 h-4" /> Path
+                                      </td>
+                                      <td className="py-2 px-3 font-mono text-xs break-all">{candidateGuidance.comparison.artist1.path || '—'}</td>
+                                      <td className="py-2 px-3 font-mono text-xs break-all">{candidateGuidance.comparison.artist2.path || '—'}</td>
+                                    </tr>
+                                    {/* Albums */}
+                                    <tr className="border-b border-muted/50">
+                                      <td className="py-2 px-3 text-muted-foreground flex items-center gap-2">
+                                        <Disc className="w-4 h-4" /> Albums
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={candidateGuidance.comparison.artist1.albumCount >= candidateGuidance.comparison.artist2.albumCount && candidateGuidance.comparison.artist1.albumCount > 0 ? 'text-green-500 font-medium' : ''}>
+                                          {candidateGuidance.comparison.artist1.albumCount}
+                                          {candidateGuidance.comparison.artist1.albumCount > candidateGuidance.comparison.artist2.albumCount && <Check className="w-4 h-4 inline ml-1" />}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={candidateGuidance.comparison.artist2.albumCount > candidateGuidance.comparison.artist1.albumCount ? 'text-green-500 font-medium' : ''}>
+                                          {candidateGuidance.comparison.artist2.albumCount}
+                                          {candidateGuidance.comparison.artist2.albumCount > candidateGuidance.comparison.artist1.albumCount && <Check className="w-4 h-4 inline ml-1" />}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                    {/* Downloaded */}
+                                    <tr className="border-b border-muted/50">
+                                      <td className="py-2 px-3 text-muted-foreground flex items-center gap-2">
+                                        <Music2 className="w-4 h-4" /> Downloaded
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={candidateGuidance.comparison.artist1.percentComplete >= candidateGuidance.comparison.artist2.percentComplete && candidateGuidance.comparison.artist1.trackFileCount > 0 ? 'text-green-500 font-medium' : ''}>
+                                          {candidateGuidance.comparison.artist1.trackFileCount}/{candidateGuidance.comparison.artist1.trackCount} ({candidateGuidance.comparison.artist1.percentComplete}%)
+                                          {candidateGuidance.comparison.artist1.percentComplete > candidateGuidance.comparison.artist2.percentComplete && <Check className="w-4 h-4 inline ml-1" />}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={candidateGuidance.comparison.artist2.percentComplete > candidateGuidance.comparison.artist1.percentComplete ? 'text-green-500 font-medium' : ''}>
+                                          {candidateGuidance.comparison.artist2.trackFileCount}/{candidateGuidance.comparison.artist2.trackCount} ({candidateGuidance.comparison.artist2.percentComplete}%)
+                                          {candidateGuidance.comparison.artist2.percentComplete > candidateGuidance.comparison.artist1.percentComplete && <Check className="w-4 h-4 inline ml-1" />}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                    {/* Size */}
+                                    <tr className="border-b border-muted/50">
+                                      <td className="py-2 px-3 text-muted-foreground flex items-center gap-2">
+                                        <HardDrive className="w-4 h-4" /> Size
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={candidateGuidance.comparison.artist1.sizeOnDisk >= candidateGuidance.comparison.artist2.sizeOnDisk && candidateGuidance.comparison.artist1.sizeOnDisk > 0 ? 'text-green-500 font-medium' : ''}>
+                                          {formatBytes(candidateGuidance.comparison.artist1.sizeOnDisk)}
+                                          {candidateGuidance.comparison.artist1.sizeOnDisk > candidateGuidance.comparison.artist2.sizeOnDisk && <Check className="w-4 h-4 inline ml-1" />}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={candidateGuidance.comparison.artist2.sizeOnDisk > candidateGuidance.comparison.artist1.sizeOnDisk ? 'text-green-500 font-medium' : ''}>
+                                          {formatBytes(candidateGuidance.comparison.artist2.sizeOnDisk)}
+                                          {candidateGuidance.comparison.artist2.sizeOnDisk > candidateGuidance.comparison.artist1.sizeOnDisk && <Check className="w-4 h-4 inline ml-1" />}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                    {/* Bitrate */}
+                                    <tr className="border-b border-muted/50">
+                                      <td className="py-2 px-3 text-muted-foreground">Avg Bitrate</td>
+                                      <td className="py-2 px-3">
+                                        <span className={candidateGuidance.comparison.artist1.avgBitrate && (!candidateGuidance.comparison.artist2.avgBitrate || candidateGuidance.comparison.artist1.avgBitrate >= candidateGuidance.comparison.artist2.avgBitrate) ? 'text-green-500 font-medium' : ''}>
+                                          {candidateGuidance.comparison.artist1.avgBitrate ? `${candidateGuidance.comparison.artist1.avgBitrate} kbps` : '—'}
+                                          {candidateGuidance.comparison.artist1.avgBitrate && candidateGuidance.comparison.artist2.avgBitrate && candidateGuidance.comparison.artist1.avgBitrate > candidateGuidance.comparison.artist2.avgBitrate && <Check className="w-4 h-4 inline ml-1" />}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={candidateGuidance.comparison.artist2.avgBitrate && candidateGuidance.comparison.artist1.avgBitrate && candidateGuidance.comparison.artist2.avgBitrate > candidateGuidance.comparison.artist1.avgBitrate ? 'text-green-500 font-medium' : ''}>
+                                          {candidateGuidance.comparison.artist2.avgBitrate ? `${candidateGuidance.comparison.artist2.avgBitrate} kbps` : '—'}
+                                          {candidateGuidance.comparison.artist2.avgBitrate && candidateGuidance.comparison.artist1.avgBitrate && candidateGuidance.comparison.artist2.avgBitrate > candidateGuidance.comparison.artist1.avgBitrate && <Check className="w-4 h-4 inline ml-1" />}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                    {/* Format */}
+                                    <tr className="border-b border-muted/50">
+                                      <td className="py-2 px-3 text-muted-foreground">Format</td>
+                                      <td className="py-2 px-3">{candidateGuidance.comparison.artist1.primaryFormat || '—'}</td>
+                                      <td className="py-2 px-3">{candidateGuidance.comparison.artist2.primaryFormat || '—'}</td>
+                                    </tr>
+                                    {/* Quality Profile */}
+                                    <tr className="border-b border-muted/50">
+                                      <td className="py-2 px-3 text-muted-foreground flex items-center gap-2">
+                                        <Settings2 className="w-4 h-4" /> Quality Profile
+                                      </td>
+                                      <td className="py-2 px-3">{candidateGuidance.comparison.artist1.qualityProfile}</td>
+                                      <td className="py-2 px-3">{candidateGuidance.comparison.artist2.qualityProfile}</td>
+                                    </tr>
+                                    {/* Monitored */}
+                                    <tr>
+                                      <td className="py-2 px-3 text-muted-foreground">Monitored</td>
+                                      <td className="py-2 px-3">
+                                        {candidateGuidance.comparison.artist1.monitored ? (
+                                          <span className="text-green-500 flex items-center gap-1"><Eye className="w-4 h-4" /> Yes</span>
+                                        ) : (
+                                          <span className="text-muted-foreground flex items-center gap-1"><EyeOff className="w-4 h-4" /> No</span>
+                                        )}
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        {candidateGuidance.comparison.artist2.monitored ? (
+                                          <span className="text-green-500 flex items-center gap-1"><Eye className="w-4 h-4" /> Yes</span>
+                                        ) : (
+                                          <span className="text-muted-foreground flex items-center gap-1"><EyeOff className="w-4 h-4" /> No</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                            
+                            {/* Action buttons */}
                             <div className="flex gap-2 flex-wrap">
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => window.open(candidateGuidance.musicbrainzUrl, '_blank')}
+                                onClick={() => window.open(candidateGuidance.firstArtist.musicbrainzUrl, '_blank')}
                               >
                                 <ExternalLink className="w-4 h-4 mr-2" />
-                                View on MusicBrainz
+                                {candidateGuidance.firstArtist.name} on MusicBrainz
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(candidateGuidance.secondArtist.musicbrainzUrl, '_blank')}
+                              >
+                                <ExternalLink className="w-4 h-4 mr-2" />
+                                {candidateGuidance.secondArtist.name} on MusicBrainz
                               </Button>
                             </div>
                           </div>

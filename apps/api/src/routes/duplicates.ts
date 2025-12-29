@@ -194,8 +194,12 @@ duplicatesRouter.get('/:id/guidance', async (req, res) => {
       return res.status(400).json({ error: 'Lidarr not configured' });
     }
 
-    // Fetch both artists
-    const artists = await lidarr.getArtists();
+    // Fetch artists, quality profiles, and track files in parallel
+    const [artists, qualityProfiles] = await Promise.all([
+      lidarr.getArtists(),
+      lidarr.getQualityProfiles(),
+    ]);
+    
     const artist1 = artists.find((a: any) => a.id === parseInt(artist1Id as string, 10));
     const artist2 = artists.find((a: any) => a.id === parseInt(artist2Id as string, 10));
 
@@ -203,31 +207,87 @@ duplicatesRouter.get('/:id/guidance', async (req, res) => {
       return res.status(404).json({ error: 'Artists not found' });
     }
 
-    // Determine recommendation
-    const a1Stats = {
-      albumCount: artist1.statistics?.albumCount || 0,
-      trackCount: artist1.statistics?.trackCount || 0,
-      sizeOnDisk: artist1.statistics?.sizeOnDisk || 0,
-    };
-    const a2Stats = {
-      albumCount: artist2.statistics?.albumCount || 0,
-      trackCount: artist2.statistics?.trackCount || 0,
-      sizeOnDisk: artist2.statistics?.sizeOnDisk || 0,
+    // Fetch track files for both artists in parallel
+    const [trackFiles1, trackFiles2] = await Promise.all([
+      lidarr.getTrackFilesForArtist(artist1.id).catch(() => []),
+      lidarr.getTrackFilesForArtist(artist2.id).catch(() => []),
+    ]);
+
+    // Helper to calculate audio stats from track files
+    const calcAudioStats = (trackFiles: any[]) => {
+      if (!trackFiles || trackFiles.length === 0) {
+        return { avgBitrate: null, formats: [], primaryFormat: null };
+      }
+      
+      const formatCounts: Record<string, number> = {};
+      let totalBitrate = 0;
+      let bitrateCount = 0;
+      
+      for (const tf of trackFiles) {
+        const codec = tf.mediaInfo?.audioCodec || tf.quality?.quality?.name || 'Unknown';
+        formatCounts[codec] = (formatCounts[codec] || 0) + 1;
+        
+        if (tf.mediaInfo?.audioBitrate) {
+          totalBitrate += tf.mediaInfo.audioBitrate;
+          bitrateCount++;
+        }
+      }
+      
+      const formats = Object.keys(formatCounts).sort((a, b) => formatCounts[b] - formatCounts[a]);
+      const primaryFormat = formats[0] || null;
+      const avgBitrate = bitrateCount > 0 ? Math.round(totalBitrate / bitrateCount / 1000) : null;
+      
+      return { avgBitrate, formats, primaryFormat };
     };
 
+    const audio1 = calcAudioStats(trackFiles1);
+    const audio2 = calcAudioStats(trackFiles2);
+
+    // Helper to build detailed artist info
+    const buildArtistDetails = (artist: any, audioStats: any, qProfiles: any[]) => {
+      const stats = artist.statistics || {};
+      const trackCount = stats.trackCount || 0;
+      const trackFileCount = stats.trackFileCount || 0;
+      const percentComplete = trackCount > 0 ? Math.round((trackFileCount / trackCount) * 100) : 0;
+      const qualityProfile = qProfiles.find(p => p.id === artist.qualityProfileId);
+      
+      return {
+        id: artist.id,
+        name: artist.artistName,
+        foreignArtistId: artist.foreignArtistId,
+        path: artist.path || artist.rootFolderPath || '',
+        rootFolder: artist.rootFolderPath || '',
+        qualityProfile: qualityProfile?.name || 'Unknown',
+        monitored: artist.monitored,
+        albumCount: stats.albumCount || 0,
+        trackCount,
+        trackFileCount,
+        percentComplete,
+        sizeOnDisk: stats.sizeOnDisk || 0,
+        avgBitrate: audioStats.avgBitrate,
+        formats: audioStats.formats,
+        primaryFormat: audioStats.primaryFormat,
+        musicbrainzUrl: `https://musicbrainz.org/artist/${artist.foreignArtistId}`,
+      };
+    };
+
+    const details1 = buildArtistDetails(artist1, audio1, qualityProfiles);
+    const details2 = buildArtistDetails(artist2, audio2, qualityProfiles);
+
+    // Determine recommendation
     let recommendation: 'keep_first' | 'keep_second' | 'merge_in_musicbrainz';
     let reasoning: string;
 
-    if (a1Stats.albumCount > a2Stats.albumCount) {
+    if (details1.albumCount > details2.albumCount) {
       recommendation = 'keep_first';
-      reasoning = `"${artist1.artistName}" has more albums (${a1Stats.albumCount} vs ${a2Stats.albumCount})`;
-    } else if (a2Stats.albumCount > a1Stats.albumCount) {
+      reasoning = `"${artist1.artistName}" has more albums (${details1.albumCount} vs ${details2.albumCount})`;
+    } else if (details2.albumCount > details1.albumCount) {
       recommendation = 'keep_second';
-      reasoning = `"${artist2.artistName}" has more albums (${a2Stats.albumCount} vs ${a1Stats.albumCount})`;
-    } else if (a1Stats.sizeOnDisk > a2Stats.sizeOnDisk) {
+      reasoning = `"${artist2.artistName}" has more albums (${details2.albumCount} vs ${details1.albumCount})`;
+    } else if (details1.sizeOnDisk > details2.sizeOnDisk) {
       recommendation = 'keep_first';
       reasoning = `"${artist1.artistName}" has more content downloaded`;
-    } else if (a2Stats.sizeOnDisk > a1Stats.sizeOnDisk) {
+    } else if (details2.sizeOnDisk > details1.sizeOnDisk) {
       recommendation = 'keep_second';
       reasoning = `"${artist2.artistName}" has more content downloaded`;
     } else {
@@ -238,19 +298,13 @@ duplicatesRouter.get('/:id/guidance', async (req, res) => {
     res.json({
       recommendation,
       reasoning,
-      firstArtist: {
-        id: artist1.id,
-        name: artist1.artistName,
-        foreignArtistId: artist1.foreignArtistId,
-        ...a1Stats,
-      },
-      secondArtist: {
-        id: artist2.id,
-        name: artist2.artistName,
-        foreignArtistId: artist2.foreignArtistId,
-        ...a2Stats,
-      },
+      firstArtist: details1,
+      secondArtist: details2,
       musicbrainzUrl: `https://musicbrainz.org/artist/${artist1.foreignArtistId}`,
+      comparison: {
+        artist1: details1,
+        artist2: details2,
+      },
     });
   } catch (error) {
     console.error('Get guidance error:', error);

@@ -75,6 +75,27 @@ export interface LidarrCommand {
   stateChangeTime?: string;
 }
 
+export interface LidarrTrackFile {
+  id: number;
+  artistId: number;
+  albumId: number;
+  path: string;
+  size: number;
+  quality: {
+    quality: {
+      id: number;
+      name: string;
+    };
+  };
+  mediaInfo?: {
+    audioBitrate?: number;
+    audioCodec?: string;
+    audioChannels?: number;
+    audioBits?: number;
+    audioSampleRate?: number;
+  };
+}
+
 export class LidarrService {
   private baseUrl: string;
   private apiKey: string;
@@ -517,6 +538,10 @@ export class LidarrService {
   async artistExists(mbid: string): Promise<boolean> {
     const artists = await this.getArtists();
     return artists.some(a => a.foreignArtistId === mbid);
+  }
+
+  async getTrackFilesForArtist(artistId: number): Promise<LidarrTrackFile[]> {
+    return this.request<LidarrTrackFile[]>(`/trackfile?artistId=${artistId}`);
   }
 }
 
