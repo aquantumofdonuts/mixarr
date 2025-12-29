@@ -1068,6 +1068,14 @@ export default function ConnectionsPage() {
                     Save this connection first, then the exact URI will be shown.
                   </p>
                 )}
+                <a 
+                  href="https://developer.spotify.com/dashboard" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline flex items-center gap-1 mt-2"
+                >
+                  <ExternalLink className="h-3 w-3" /> Spotify Developer Dashboard
+                </a>
               </div>
 
               <div>
@@ -1102,6 +1110,20 @@ export default function ConnectionsPage() {
 
           {form.type === 'lastfm' && (
             <>
+              <div className="p-3 bg-muted/50 rounded-lg border">
+                <p className="text-sm font-medium mb-1">Last.fm API Setup</p>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Create an API account to get your API key.
+                </p>
+                <a 
+                  href="https://www.last.fm/api/account/create" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  <ExternalLink className="h-3 w-3" /> Last.fm API Account
+                </a>
+              </div>
               <div>
                 <label className="text-sm font-medium">Last.fm Username</label>
                 <Input
@@ -1138,6 +1160,20 @@ export default function ConnectionsPage() {
 
           {form.type === 'listenbrainz' && (
             <>
+              <div className="p-3 bg-muted/50 rounded-lg border">
+                <p className="text-sm font-medium mb-1">ListenBrainz Setup</p>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Get your user token from your profile settings.
+                </p>
+                <a 
+                  href="https://listenbrainz.org/settings/" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  <ExternalLink className="h-3 w-3" /> ListenBrainz Settings
+                </a>
+              </div>
               <div>
                 <label className="text-sm font-medium">ListenBrainz Username</label>
                 <Input
@@ -1177,6 +1213,20 @@ export default function ConnectionsPage() {
 
           {form.type === 'discogs' && (
             <>
+              <div className="p-3 bg-muted/50 rounded-lg border">
+                <p className="text-sm font-medium mb-1">Discogs Setup</p>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Generate a personal access token from your Discogs developer settings.
+                </p>
+                <a 
+                  href="https://www.discogs.com/settings/developers" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  <ExternalLink className="h-3 w-3" /> Discogs Developer Settings
+                </a>
+              </div>
               <div>
                 <label className="text-sm font-medium">Personal Access Token</label>
                 <div className="relative">
@@ -1195,9 +1245,6 @@ export default function ConnectionsPage() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Get from discogs.com/settings/developers
-                </p>
               </div>
             </>
           )}
