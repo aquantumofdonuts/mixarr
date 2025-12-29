@@ -486,8 +486,14 @@ export class LidarrService {
       monitored: true,
     });
 
-    // Step 5: Trigger search for that album only
-    await this.searchAlbumCommand([updatedAlbum.id]);
+    // Step 5: Trigger search for that album only (if not already downloaded)
+    const percentComplete = updatedAlbum.statistics?.percentOfTracks ?? 0;
+    if (percentComplete >= 100) {
+      console.log(`[Lidarr] Album "${updatedAlbum.title}" already fully downloaded (${percentComplete}%), skipping search`);
+    } else {
+      console.log(`[Lidarr] Album "${updatedAlbum.title}" at ${percentComplete}% - triggering search`);
+      await this.searchAlbumCommand([updatedAlbum.id]);
+    }
 
     return {
       artist,
