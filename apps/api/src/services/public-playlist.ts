@@ -104,17 +104,24 @@ export async function fetchPublicPlaylist(playlistId: string): Promise<PublicPla
     }
     
     // Extract tracks from trackList
-    const tracks: PlaylistTrack[] = (entity.trackList || []).map((item: any) => ({
-      name: item.track?.name || item.name || 'Unknown',
-      artists: (item.track?.artists || item.artists || []).map((a: any) => ({
-        name: a.name,
-      })),
-    }));
+    // New Spotify embed format: title = track name, subtitle = artist name(s)
+    const tracks: PlaylistTrack[] = (entity.trackList || []).map((item: any) => {
+      // New format uses subtitle for artist, comma-separated for multiple artists
+      const subtitle = item.subtitle || '';
+      const artistNames = subtitle.split(/,\s*/).filter(Boolean);
+      
+      return {
+        name: item.title || item.track?.name || item.name || 'Unknown',
+        artists: artistNames.length > 0 
+          ? artistNames.map((name: string) => ({ name: name.trim() }))
+          : (item.track?.artists || item.artists || []).map((a: any) => ({ name: a.name })),
+      };
+    });
     
     return {
-      name: entity.name || 'Unknown Playlist',
+      name: entity.name || entity.title || 'Unknown Playlist',
       description: entity.description,
-      imageUrl: entity.images?.[0]?.url,
+      imageUrl: entity.coverArt?.extractedColors?.colorDark?.hex || entity.images?.[0]?.url,
       tracks,
       totalTracks: tracks.length,
     };

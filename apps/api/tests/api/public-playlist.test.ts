@@ -81,7 +81,7 @@ describe('Public Playlist Import', () => {
       global.fetch = originalFetch;
     });
 
-    it('fetches and parses playlist data from embed endpoint', async () => {
+    it('fetches and parses playlist data from embed endpoint (legacy format)', async () => {
       const mockHtml = `
         <!DOCTYPE html>
         <html>
@@ -121,6 +121,94 @@ describe('Public Playlist Import', () => {
       expect(result?.name).toBe('Test Playlist');
       expect(result?.tracks).toHaveLength(2);
       expect(result?.tracks[0].artists[0].name).toBe('Artist A');
+    });
+
+    it('fetches and parses playlist data from new Spotify format (title/subtitle)', async () => {
+      // New Spotify embed format uses title for song name and subtitle for artist
+      const mockHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <script id="__NEXT_DATA__" type="application/json">
+            {
+              "props": {
+                "pageProps": {
+                  "state": {
+                    "data": {
+                      "entity": {
+                        "title": "Christmas Hits",
+                        "trackList": [
+                          {"title": "Rockin' Around The Christmas Tree", "subtitle": "Brenda Lee"},
+                          {"title": "All I Want for Christmas Is You", "subtitle": "Mariah Carey"},
+                          {"title": "Last Christmas", "subtitle": "Wham!"}
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          </script>
+        </head>
+        <body></body>
+        </html>
+      `;
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(mockHtml),
+      });
+
+      const result = await fetchPublicPlaylist('newFormatPlaylist');
+      
+      expect(result).not.toBeNull();
+      expect(result?.name).toBe('Christmas Hits');
+      expect(result?.tracks).toHaveLength(3);
+      expect(result?.tracks[0].name).toBe("Rockin' Around The Christmas Tree");
+      expect(result?.tracks[0].artists[0].name).toBe('Brenda Lee');
+      expect(result?.tracks[1].artists[0].name).toBe('Mariah Carey');
+      expect(result?.tracks[2].artists[0].name).toBe('Wham!');
+    });
+
+    it('handles comma-separated artists in subtitle', async () => {
+      const mockHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <script id="__NEXT_DATA__" type="application/json">
+            {
+              "props": {
+                "pageProps": {
+                  "state": {
+                    "data": {
+                      "entity": {
+                        "title": "Collabs Playlist",
+                        "trackList": [
+                          {"title": "Collab Song", "subtitle": "Artist A, Artist B, Artist C"}
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          </script>
+        </head>
+        <body></body>
+        </html>
+      `;
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(mockHtml),
+      });
+
+      const result = await fetchPublicPlaylist('collabPlaylist');
+      
+      expect(result?.tracks[0].artists).toHaveLength(3);
+      expect(result?.tracks[0].artists[0].name).toBe('Artist A');
+      expect(result?.tracks[0].artists[1].name).toBe('Artist B');
+      expect(result?.tracks[0].artists[2].name).toBe('Artist C');
     });
 
     it('throws error for invalid playlist ID', async () => {

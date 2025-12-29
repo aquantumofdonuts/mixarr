@@ -98,7 +98,7 @@ export class DiscogsMetadataAdapter {
       throw new Error(`Discogs search error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { results?: DiscogsSearchResult[] };
     return data.results || [];
   }
 
@@ -118,7 +118,7 @@ export class DiscogsMetadataAdapter {
       throw new Error(`Discogs artist fetch error: ${response.status} ${response.statusText}`);
     }
 
-    return response.json();
+    return await response.json() as DiscogsArtist;
   }
 
   /**
