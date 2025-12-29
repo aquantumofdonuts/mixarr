@@ -145,6 +145,7 @@ enum SubscriptionType {
   spotify_featured
   spotify_category
   spotify_library
+  spotify_public_playlist
   ai_recommendation
   tautulli_similar
   // Deezer subscription types

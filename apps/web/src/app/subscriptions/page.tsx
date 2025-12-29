@@ -55,6 +55,7 @@ const subscriptionTypes = [
   { value: 'spotify_saved_albums', label: 'Spotify', icon: Music2, description: 'Your saved albums' },
   { value: 'spotify_liked_songs', label: 'Spotify', icon: Music2, description: 'Your liked songs' },
   { value: 'spotify_library', label: 'Spotify Library', icon: Music2, description: 'All artists from your library' },
+  { value: 'spotify_public_playlist', label: 'Public Spotify Playlist', icon: Music2, description: 'Any public playlist (no login required)' },
   { value: 'spotify_featured', label: 'Spotify Featured', icon: Music2, description: 'Featured playlists' },
   { value: 'spotify_category', label: 'Spotify Category', icon: Music2, description: 'Playlists by category/genre' },
   { value: 'spotify_discover_weekly', label: 'Spotify', icon: Music2, description: 'Discover Weekly playlist', warning: 'Must be followed/saved in Spotify first' },
@@ -158,6 +159,10 @@ export default function SubscriptionsPage() {
     listenbrainzPlaylistId: '',
     listenbrainzSeedMbid: '',
     listenbrainzRadioMode: 'medium',
+    // Public playlist fields
+    publicPlaylistUrl: '',
+    includeAllArtists: false,
+    discoverAlbums: false,
   });
 
   // Invalidate queries to trigger refetch
@@ -211,6 +216,11 @@ export default function SubscriptionsPage() {
     // spotify_new_releases always discovers albums (new releases are albums by definition)
     if (form.type === 'spotify_new_releases') {
       config.discoverAlbums = true;
+    }
+    if (form.type === 'spotify_public_playlist') {
+      config.playlistUrl = form.publicPlaylistUrl;
+      config.includeAllArtists = form.includeAllArtists;
+      config.discoverAlbums = form.discoverAlbums;
     }
 
     const payload = {
@@ -289,6 +299,9 @@ export default function SubscriptionsPage() {
         listenbrainzPlaylistId: subscription.config.playlistId || '',
         listenbrainzSeedMbid: subscription.config.seedMbid || '',
         listenbrainzRadioMode: subscription.config.mode || 'medium',
+        publicPlaylistUrl: subscription.config.playlistUrl || '',
+        includeAllArtists: subscription.config.includeAllArtists || false,
+        discoverAlbums: subscription.config.discoverAlbums || false,
       });
     } else {
       setEditingId(null);
@@ -314,6 +327,9 @@ export default function SubscriptionsPage() {
         listenbrainzPlaylistId: '',
         listenbrainzSeedMbid: '',
         listenbrainzRadioMode: 'medium',
+        publicPlaylistUrl: '',
+        includeAllArtists: false,
+        discoverAlbums: false,
       });
       setModalStep('presets');
       setSelectedCategory(null);
@@ -351,6 +367,9 @@ export default function SubscriptionsPage() {
       listenbrainzPlaylistId: preset.config.playlistId || '',
       listenbrainzSeedMbid: preset.config.seedMbid || '',
       listenbrainzRadioMode: preset.config.mode || 'medium',
+      publicPlaylistUrl: preset.config.playlistUrl || '',
+      includeAllArtists: preset.config.includeAllArtists || false,
+      discoverAlbums: preset.config.discoverAlbums || false,
     });
     setModalStep('form');
   };
@@ -648,6 +667,54 @@ export default function SubscriptionsPage() {
                   onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                   placeholder="Spotify playlist ID"
                 />
+              </div>
+            )}
+
+            {form.type === 'spotify_public_playlist' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium">Playlist URL</label>
+                  <Input
+                    value={form.publicPlaylistUrl}
+                    onChange={(e) => setForm({ ...form, publicPlaylistUrl: e.target.value })}
+                    placeholder="https://open.spotify.com/playlist/..."
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Paste any public Spotify playlist URL (no login required)
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="discoverAlbums"
+                    checked={form.discoverAlbums}
+                    onChange={(e) => setForm({ ...form, discoverAlbums: e.target.checked })}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <label htmlFor="discoverAlbums" className="text-sm">
+                    <span className="font-medium">Discover Albums</span>
+                    <p className="text-muted-foreground text-xs mt-0.5">
+                      Queue albums instead of artists. Only specific albums will be monitored in Lidarr.
+                    </p>
+                  </label>
+                </div>
+                {!form.discoverAlbums && (
+                  <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                    <input
+                      type="checkbox"
+                      id="includeAllArtists"
+                      checked={form.includeAllArtists}
+                      onChange={(e) => setForm({ ...form, includeAllArtists: e.target.checked })}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <label htmlFor="includeAllArtists" className="text-sm">
+                      <span className="font-medium">Include Featured Artists</span>
+                      <p className="text-muted-foreground text-xs mt-0.5">
+                        Include all artists from collaborations, not just primary artists.
+                      </p>
+                    </label>
+                  </div>
+                )}
               </div>
             )}
 

@@ -19,6 +19,7 @@ import { TidalService } from '../services/tidal.js';
 import { ListenBrainzService, VALID_PERIODS, type ListenBrainzPeriod } from '../services/listenbrainz.js';
 import { DiscogsService } from '../services/discogs.js';
 import { BandcampService } from '../services/bandcamp.js';
+import { fetchPublicPlaylist, parseSpotifyPlaylistUrl, extractArtistsFromPlaylist } from '../services/public-playlist.js';
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
@@ -501,6 +502,44 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         }
         
         artists = Array.from(artistMap.values());
+        break;
+      }
+
+      case 'spotify_public_playlist': {
+        // Public playlist import - no auth required
+        const playlistUrl = config.playlistUrl;
+        if (!playlistUrl) throw new Error('Playlist URL is required');
+        
+        const playlistId = parseSpotifyPlaylistUrl(playlistUrl);
+        if (!playlistId) throw new Error('Invalid Spotify playlist URL');
+        
+        const playlist = await fetchPublicPlaylist(playlistId);
+        const includeAllArtists = config.includeAllArtists || false;
+        
+        if (config.discoverAlbums) {
+          // Album discovery mode - extract unique albums from tracks
+          const albumMap = new Map<string, AlbumToAdd>();
+          for (const track of playlist.tracks) {
+            // Use track name as album approximation (tracks from same album would have same name pattern)
+            const artistName = track.artists[0]?.name || 'Unknown Artist';
+            const key = `${artistName}-${track.name}`.toLowerCase();
+            if (!albumMap.has(key)) {
+              albumMap.set(key, {
+                albumName: track.name,
+                artistName,
+                source: `spotify-public-playlist-${playlistId}`,
+              });
+            }
+          }
+          albumsToAdd = Array.from(albumMap.values()).slice(0, config.limit || 100);
+        } else {
+          // Artist discovery mode (default)
+          const artistNames = extractArtistsFromPlaylist(playlist.tracks, { includeAllArtists });
+          artists = artistNames.slice(0, config.limit || 100).map(name => ({
+            name,
+            source: `spotify-public-playlist-${playlistId}`,
+          }));
+        }
         break;
       }
 
