@@ -33,6 +33,8 @@ interface ArtistToAdd {
 interface AlbumToAdd {
   albumName: string;
   artistName: string;
+  albumMbid?: string;
+  artistMbid?: string;
   releaseDate?: string;
   releaseYear?: number;
   releaseType?: string;
@@ -203,23 +205,21 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       }
 
       case 'spotify_saved_albums': {
+        // User's saved albums - discover albums, not artists
         if (!spotifyConn) throw new Error('No active Spotify connection');
         const spotifyConfig = spotifyConn.config as any;
         const spotify = new SpotifyService(spotifyConfig);
         const albums = await spotify.getAllSavedAlbums();
         
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const album of albums) {
-          for (const artist of album.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'spotify-saved-albums',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
+        // Saved albums = album discovery (user explicitly saved these albums)
+        albumsToAdd = albums.map(album => ({
+          albumName: album.name,
+          artistName: album.artists[0]?.name || 'Unknown Artist',
+          releaseDate: album.release_date,
+          releaseYear: album.release_date ? parseInt(album.release_date.split('-')[0]) : undefined,
+          releaseType: 'album',
+          source: 'spotify-saved-albums',
+        }));
         break;
       }
 
@@ -245,25 +245,25 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       }
 
       case 'musicbrainz_new': {
-        // Search for recent releases
+        // New releases from MusicBrainz - discover albums, not artists
         const year = new Date().getFullYear();
         const result = await musicbrainz.searchByYear(year, config.limit || 50);
         
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const rg of result.releaseGroups) {
+        // Release groups = album discovery
+        albumsToAdd = result.releaseGroups.map(rg => {
           const artistCredit = rg['artist-credit'];
-          if (artistCredit?.[0]?.artist) {
-            const artist = artistCredit[0].artist;
-            if (!artistMap.has(artist.id)) {
-              artistMap.set(artist.id, {
-                name: artist.name,
-                mbid: artist.id,
-                source: 'musicbrainz-new',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
+          const artist = artistCredit?.[0]?.artist;
+          return {
+            albumName: rg.title,
+            artistName: artist?.name || 'Unknown Artist',
+            albumMbid: rg.id,
+            artistMbid: artist?.id,
+            releaseDate: rg['first-release-date'],
+            releaseYear: rg['first-release-date'] ? parseInt(rg['first-release-date'].split('-')[0]) : year,
+            releaseType: rg['primary-type'] || 'album',
+            source: 'musicbrainz-new',
+          };
+        });
         break;
       }
 
@@ -959,6 +959,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       }
 
       case 'tidal_new_arrivals': {
+        // New arrivals - discover albums, not artists
         if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
         const tidalConfig = tidalConn.config as any;
         const tidal = new TidalService({
@@ -969,18 +970,19 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         });
         const tracks = await tidal.getNewArrivalTracks();
         
-        const artistMap = new Map<string, ArtistToAdd>();
+        // New arrivals = album discovery - extract unique albums from tracks
+        const albumMap = new Map<string, AlbumToAdd>();
         for (const track of tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'tidal-new-arrivals',
-              });
-            }
+          if (track.album && !albumMap.has(track.album.id)) {
+            albumMap.set(track.album.id, {
+              albumName: track.album.title,
+              artistName: track.artists[0]?.name || 'Unknown Artist',
+              releaseType: 'album',
+              source: 'tidal-new-arrivals',
+            });
           }
         }
-        artists = Array.from(artistMap.values()).slice(0, config.limit || 50);
+        albumsToAdd = Array.from(albumMap.values()).slice(0, config.limit || 50);
         break;
       }
 
@@ -1159,33 +1161,24 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       }
 
       case 'listenbrainz_explore': {
-        // Fresh releases don't require a connection since it's public data
-        // But we'll use connection if available for consistency
+        // Fresh releases - discover albums, not artists
         const lbConfig = listenbrainzConn?.config as any;
         const listenbrainz = new ListenBrainzService(lbConfig?.username || 'anonymous');
         const limit = config.limit || 50;
         
         const result = await listenbrainz.getFreshReleases();
         
-        // Extract unique artists from fresh releases
-        const artistMap = new Map<string, { name: string; mbid?: string }>();
-        for (const release of result.releases.slice(0, limit * 2)) { // Get more releases to ensure enough unique artists
-          const key = release.artist_credit_name.toLowerCase();
-          if (!artistMap.has(key)) {
-            artistMap.set(key, {
-              name: release.artist_credit_name,
-              mbid: release.artist_mbids?.[0],
-            });
-          }
-        }
-        
-        artists = Array.from(artistMap.values())
-          .slice(0, limit)
-          .map(a => ({
-            name: a.name,
-            mbid: a.mbid,
-            source: 'listenbrainz-explore',
-          }));
+        // Fresh releases = album discovery
+        albumsToAdd = result.releases.slice(0, limit).map(release => ({
+          albumName: release.release_name,
+          artistName: release.artist_credit_name,
+          albumMbid: release.release_mbid,
+          artistMbid: release.artist_mbids?.[0],
+          releaseDate: release.release_date,
+          releaseYear: release.release_date ? parseInt(release.release_date.split('-')[0]) : undefined,
+          releaseType: 'album',
+          source: 'listenbrainz-explore',
+        }));
         break;
       }
 
@@ -1406,7 +1399,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       }
 
       case 'bandcamp_new': {
-        // Bandcamp is public - no connection required
+        // New releases by tag - discover albums, not artists
         const tag = config.tag || 'all';
         const limit = config.limit || 50;
         
@@ -1415,18 +1408,13 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         // Sort by date to get newest releases
         const result = await bandcamp.getTagReleases(tag, 'date', 0);
         
-        // Extract unique artists from releases
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const release of result.releases.slice(0, limit)) {
-          if (release.artistName && !artistMap.has(release.artistName)) {
-            artistMap.set(release.artistName, {
-              name: release.artistName,
-              source: `bandcamp-new-${tag}`,
-            });
-          }
-        }
-        
-        artists = Array.from(artistMap.values());
+        // New releases = album discovery
+        albumsToAdd = result.releases.slice(0, limit).map(release => ({
+          albumName: release.title,
+          artistName: release.artistName,
+          releaseType: release.type === 'a' ? 'album' : 'single',
+          source: `bandcamp-new-${tag}`,
+        }));
         break;
       }
     }
