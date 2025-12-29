@@ -395,23 +395,47 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
         lidarr.getRootFolders(),
       ]);
 
-      // Add to Lidarr with metadata refresh for complete MusicBrainz data
-      await lidarr.addArtistWithRefresh(
-        mbid,
-        qualityProfiles[0].id,
-        metadataProfiles[0].id,
-        rootFolders[0].path
-      );
+      // Check if this is an album item - use addAlbum for targeted download
+      const isAlbumItem = result.itemType === 'album' && result.albumMbid;
+      
+      if (isAlbumItem) {
+        // Album approval - add artist with monitor:none, then monitor only this album
+        await lidarr.addAlbum(
+          mbid,
+          result.albumMbid!,
+          qualityProfiles[0].id,
+          metadataProfiles[0].id,
+          rootFolders[0].path
+        );
 
-      // Log success
-      await prisma.logEntry.create({
-        data: {
-          level: 'info',
-          category: 'subscription',
-          message: `Added artist "${result.name}" to Lidarr from subscription "${subscription.name}"`,
-          metadata: { artistName: result.name, mbid, subscriptionId: id },
-        },
-      });
+        // Log success
+        await prisma.logEntry.create({
+          data: {
+            level: 'info',
+            category: 'subscription',
+            message: `Added album "${result.name}" to Lidarr from subscription "${subscription.name}"`,
+            metadata: { artistName: result.artistName, albumName: result.name, mbid, albumMbid: result.albumMbid, subscriptionId: id },
+          },
+        });
+      } else {
+        // Artist approval - add with metadata refresh for complete MusicBrainz data
+        await lidarr.addArtistWithRefresh(
+          mbid,
+          qualityProfiles[0].id,
+          metadataProfiles[0].id,
+          rootFolders[0].path
+        );
+
+        // Log success
+        await prisma.logEntry.create({
+          data: {
+            level: 'info',
+            category: 'subscription',
+            message: `Added artist "${result.name}" to Lidarr from subscription "${subscription.name}"`,
+            metadata: { artistName: result.name, mbid, subscriptionId: id },
+          },
+        });
+      }
 
       await prisma.subscriptionResult.update({
         where: { id: resultId },
