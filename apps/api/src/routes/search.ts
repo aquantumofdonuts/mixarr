@@ -8,6 +8,7 @@ import { fetchDeezerArtistImages } from '../services/deezer.js';
 import { multiSourceSearch, resolveMbid, SearchSource } from '../services/multi-search.js';
 import { MetadataEnrichmentService } from '../services/metadata-enrichment.js';
 import { notificationService } from '../services/notifications.js';
+import { aiService } from '../services/ai.js';
 
 export const searchRouter = Router();
 
@@ -140,6 +141,104 @@ searchRouter.get('/discover', async (req, res) => {
   } catch (error) {
     console.error('Multi-source search error:', error);
     const message = error instanceof Error ? error.message : 'Search failed';
+    res.status(500).json({ error: message });
+  }
+});
+
+// AI-powered natural language search
+searchRouter.post('/ai', async (req, res) => {
+  try {
+    const { prompt, limit = 20 } = req.body;
+
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      res.status(400).json({ error: 'Search prompt is required' });
+      return;
+    }
+
+    // Check if AI is available
+    const aiAvailable = await aiService.isAvailable();
+    if (!aiAvailable) {
+      res.status(400).json({ 
+        error: 'AI Search requires OpenAI or Anthropic API keys. Configure in Settings → AI.',
+        configured: false,
+      });
+      return;
+    }
+
+    // Get Lidarr service for enrichment
+    const lidarr = await getLidarrService(req.user!.id);
+    if (!lidarr) {
+      res.status(400).json({ error: 'No active Lidarr connection' });
+      return;
+    }
+
+    // Get AI recommendations
+    console.log(`[AI Search] Processing prompt: "${prompt.substring(0, 50)}..."`);
+    const { artists: artistNames, providers } = await aiService.searchByPrompt(prompt.trim(), limit);
+
+    if (artistNames.length === 0) {
+      res.json({
+        prompt: prompt.trim(),
+        results: [],
+        aiProviders: providers,
+        message: 'No recommendations found. Try rephrasing your query.',
+      });
+      return;
+    }
+
+    // Resolve each artist name to MBID via Lidarr search
+    const cache = new LidarrCache(lidarr);
+    await cache.refresh();
+
+    const enrichedResults = await Promise.all(
+      artistNames.map(async (name) => {
+        try {
+          const searchResults = await lidarr.searchArtist(name);
+          if (searchResults.length === 0) {
+            console.log(`[AI Search] No Lidarr results for: ${name}`);
+            return null;
+          }
+
+          const artist = searchResults[0];
+          const inLibrary = await cache.exists({ mbid: artist.foreignArtistId });
+
+          return {
+            foreignArtistId: artist.foreignArtistId,
+            artistName: artist.artistName,
+            overview: artist.overview,
+            imageUrl: null, // Will be enriched below
+            inLibrary,
+          };
+        } catch (error) {
+          console.error(`[AI Search] Error resolving artist "${name}":`, error);
+          return null;
+        }
+      })
+    );
+
+    // Filter out nulls (artists that couldn't be resolved)
+    const validResults = enrichedResults.filter(r => r !== null);
+
+    // Fetch images from Deezer
+    const artistNamesForImages = validResults.map(r => r!.artistName);
+    const imageMap = await fetchDeezerArtistImages(artistNamesForImages);
+
+    // Add images to results
+    const finalResults = validResults.map(r => ({
+      ...r!,
+      imageUrl: imageMap.get(r!.artistName) || null,
+    }));
+
+    console.log(`[AI Search] Returning ${finalResults.length} results from ${providers.join(', ')}`);
+
+    res.json({
+      prompt: prompt.trim(),
+      results: finalResults,
+      aiProviders: providers,
+    });
+  } catch (error) {
+    console.error('[AI Search] Error:', error);
+    const message = error instanceof Error ? error.message : 'AI search failed';
     res.status(500).json({ error: message });
   }
 });
