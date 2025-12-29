@@ -1651,6 +1651,11 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             runId: run.id,
             itemType: 'album',
             name: `${album.albumName} - ${album.artistName}`,
+            artistName: album.artistName,
+            mbid: album.artistMbid,
+            albumMbid: album.albumMbid,
+            releaseDate: album.releaseDate,
+            releaseType: album.releaseType,
             status: 'pending',
             sources: sourcesArray,
             matchCount: 1,
@@ -1662,7 +1667,9 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         const reviewResult = await findOrCreateReviewItem({
           userId,
           artistName: album.artistName,
+          mbid: album.artistMbid,  // Pass artist MBID to avoid unreliable name search on approval
           albumName: album.albumName,
+          albumMbid: album.albumMbid,
           releaseYear: album.releaseYear,
           releaseDate: album.releaseDate,
           releaseType: album.releaseType,
