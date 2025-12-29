@@ -926,6 +926,14 @@ subscriptionsRouter.get('/presets/list', async (_req, res) => {
       config: { playlistId: '37i9dQZF1DXcF6B6QPhFDv', limit: 50 },
     },
     {
+      id: 'spotify-public-playlist',
+      name: 'Public Playlist (Any URL)',
+      description: 'Import from any public Spotify playlist - no login required',
+      type: 'spotify_public_playlist',
+      category: 'spotify',
+      config: { publicPlaylistUrl: '', discoverAlbums: false, includeAllArtists: false },
+    },
+    {
       id: 'spotify-category-pop',
       name: 'Pop Hits',
       description: 'Top pop artists from category playlists',
