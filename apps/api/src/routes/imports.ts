@@ -443,10 +443,11 @@ importsRouter.post('/review/bulk', async (req, res) => {
 
     for (const item of items) {
       try {
-        console.log(`Processing review item: ${item.artistName} (mbid: ${item.mbid || 'none'})`);
+        const isAlbum = item.itemType === 'album';
+        console.log(`Processing review item: ${item.artistName}${isAlbum ? ` - ${item.albumName}` : ''} (mbid: ${item.mbid || 'none'}, type: ${item.itemType || 'artist'})`);
         
-        // Skip if already in library
-        if (await cache.exists({ name: item.artistName, mbid: item.mbid || undefined })) {
+        // For artists: Skip if already in library
+        if (!isAlbum && await cache.exists({ name: item.artistName, mbid: item.mbid || undefined })) {
           console.log(`Artist ${item.artistName} already in library, marking approved`);
           await prisma.reviewItem.update({
             where: { id: item.id },
@@ -493,27 +494,70 @@ importsRouter.post('/review/bulk', async (req, res) => {
           continue;
         }
 
-        // Add to Lidarr with metadata refresh for complete data
-        console.log(`Adding ${item.artistName} (${foreignArtistId}) to Lidarr...`);
-        await lidarr.addArtistWithRefresh(
-          foreignArtistId,
-          qualityProfiles[0].id,
-          metadataProfiles[0].id,
-          rootFolders[0].path
-        );
-        console.log(`Successfully added ${item.artistName} to Lidarr`);
+        if (isAlbum) {
+          // For album items: add artist as unmonitored and monitor specific album
+          console.log(`Adding album "${item.albumName}" by ${item.artistName} (${foreignArtistId}) to Lidarr...`);
+          
+          // Get album MBID if not available
+          let albumMbid = item.albumMbid;
+          if (!albumMbid && item.albumName) {
+            // Search for the album in Lidarr
+            const albumSearchResults = await lidarr.searchAlbum(`${item.albumName} ${item.artistName}`);
+            if (albumSearchResults.length > 0) {
+              albumMbid = albumSearchResults[0].foreignAlbumId;
+              console.log(`Found album via Lidarr search: ${albumMbid}`);
+            }
+          }
+          
+          if (!albumMbid) {
+            console.log(`No album MBID found for "${item.albumName}" by ${item.artistName}`);
+            failedItems.push({ name: `${item.artistName} - ${item.albumName}`, error: 'Album not found' });
+            await prisma.reviewItem.update({
+              where: { id: item.id },
+              data: { status: 'rejected' },
+            });
+            failed++;
+            continue;
+          }
+          
+          await lidarr.addAlbum(
+            foreignArtistId,
+            albumMbid,
+            qualityProfiles[0].id,
+            metadataProfiles[0].id,
+            rootFolders[0].path
+          );
+          console.log(`Successfully added album "${item.albumName}" by ${item.artistName} to Lidarr`);
+          
+          await addLogEntry('info', 'review', `Added album "${item.albumName}" by "${item.artistName}" to Lidarr`, {
+            artistName: item.artistName,
+            albumName: item.albumName,
+            mbid: foreignArtistId,
+            albumMbid: albumMbid,
+          });
+        } else {
+          // For artist items: add with metadata refresh for complete data
+          console.log(`Adding ${item.artistName} (${foreignArtistId}) to Lidarr...`);
+          await lidarr.addArtistWithRefresh(
+            foreignArtistId,
+            qualityProfiles[0].id,
+            metadataProfiles[0].id,
+            rootFolders[0].path
+          );
+          console.log(`Successfully added ${item.artistName} to Lidarr`);
+          
+          // Log each successful add
+          await addLogEntry('info', 'review', `Added artist "${item.artistName}" to Lidarr`, {
+            artistName: item.artistName,
+            mbid: foreignArtistId,
+          });
+        }
 
         await prisma.reviewItem.update({
           where: { id: item.id },
           data: { status: 'approved', mbid: foreignArtistId },
         });
         added++;
-
-        // Log each successful add
-        await addLogEntry('info', 'review', `Added artist "${item.artistName}" to Lidarr`, {
-          artistName: item.artistName,
-          mbid: foreignArtistId,
-        });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         console.error(`Failed to add ${item.artistName}:`, errorMsg);

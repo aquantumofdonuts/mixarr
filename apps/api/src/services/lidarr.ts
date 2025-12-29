@@ -41,6 +41,15 @@ interface LidarrSearchResult {
   images?: Array<{ coverType: string; url: string }>;
 }
 
+interface LidarrAlbumSearchResult {
+  foreignAlbumId: string;
+  title: string;
+  artistName?: string;
+  artist?: { foreignArtistId: string; artistName: string };
+  releaseDate?: string;
+  albumType?: string;
+}
+
 export interface LidarrAlbum {
   id: number;
   title: string;
@@ -188,6 +197,10 @@ export class LidarrService {
 
   async searchArtist(term: string): Promise<LidarrSearchResult[]> {
     return this.request<LidarrSearchResult[]>(`/artist/lookup?term=${encodeURIComponent(term)}`);
+  }
+
+  async searchAlbum(term: string): Promise<LidarrAlbumSearchResult[]> {
+    return this.request<LidarrAlbumSearchResult[]>(`/album/lookup?term=${encodeURIComponent(term)}`);
   }
 
   async addArtist(
