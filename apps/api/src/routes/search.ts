@@ -145,6 +145,16 @@ searchRouter.get('/discover', async (req, res) => {
   }
 });
 
+// Check if AI search is available
+searchRouter.get('/ai/status', async (_req, res) => {
+  try {
+    const available = await aiService.isAvailable();
+    res.json({ available });
+  } catch (error) {
+    res.json({ available: false });
+  }
+});
+
 // AI-powered natural language search
 searchRouter.post('/ai', async (req, res) => {
   try {
