@@ -34,17 +34,28 @@ async function request<T>(
 
   try {
     const res = await fetch(`${API_URL}${endpoint}`, config);
-    const data = await res.json();
+    
+    // Check content type before parsing - handles HTML error pages from proxies
+    const contentType = res.headers.get('content-type') || '';
+    let data: unknown;
+    
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      // Non-JSON response (likely HTML error page from Caddy/proxy)
+      const text = await res.text();
+      data = { error: `Server error (${res.status}): ${text.substring(0, 100)}` };
+    }
 
     if (!res.ok) {
       return {
         data: null,
-        error: data.error || `HTTP ${res.status}`,
+        error: (data as { error?: string }).error || `HTTP ${res.status}`,
         status: res.status,
       };
     }
 
-    return { data, error: null, status: res.status };
+    return { data: data as T, error: null, status: res.status };
   } catch (err) {
     return {
       data: null,
