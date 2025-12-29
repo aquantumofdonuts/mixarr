@@ -35,6 +35,7 @@ model User {
   settings             UserSetting[]
   notificationChannels NotificationChannel[]
   dismissedDuplicates  DismissedDuplicate[]
+  authIdentities       AuthIdentity[]
 
   @@map("users")
 }
@@ -78,6 +79,24 @@ model SsoProvider {
   updatedAt DateTime        @updatedAt @map("updated_at")
 
   @@map("sso_providers")
+}
+
+model AuthIdentity {
+  id             Int             @id @default(autoincrement())
+  userId         Int             @map("user_id")
+  provider       SsoProviderType
+  providerUserId String          @map("provider_user_id") @db.VarChar(255)
+  email          String          @db.VarChar(255)
+  metadata       Json?           // Provider-specific data
+  createdAt      DateTime        @default(now()) @map("created_at")
+  lastUsedAt     DateTime?       @map("last_used_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@index([provider, email])
+  @@map("auth_identities")
 }
 
 // ============================================================================
