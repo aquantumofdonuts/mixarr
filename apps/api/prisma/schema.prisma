@@ -33,6 +33,7 @@ model User {
   reviewItems          ReviewItem[]
   settings             UserSetting[]
   notificationChannels NotificationChannel[]
+  dismissedDuplicates  DismissedDuplicate[]
 
   @@map("users")
 }
@@ -314,6 +315,23 @@ enum ReviewStatus {
   pending
   approved
   rejected
+}
+
+// ============================================================================
+// DUPLICATE DETECTION
+// ============================================================================
+
+model DismissedDuplicate {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @map("user_id")
+  mbid1       String   @db.VarChar(36)
+  mbid2       String   @db.VarChar(36)
+  dismissedAt DateTime @default(now()) @map("dismissed_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, mbid1, mbid2])
+  @@map("dismissed_duplicates")
 }
 
 // ============================================================================
