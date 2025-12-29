@@ -17,7 +17,8 @@ datasource db {
 model User {
   id           Int       @id @default(autoincrement())
   username     String    @unique @db.VarChar(50)
-  passwordHash String    @map("password_hash") @db.VarChar(255)
+  email        String?   @unique @db.VarChar(255)  // For SSO matching
+  passwordHash String?   @map("password_hash") @db.VarChar(255)  // Nullable for SSO-only users
   displayName  String    @map("display_name") @db.VarChar(100)
   role         UserRole  @default(user)
   isActive     Boolean   @default(true) @map("is_active")
