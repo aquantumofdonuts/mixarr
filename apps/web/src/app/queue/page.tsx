@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { Button, Card, CardContent, Badge, useToast, Input } from '@/components/ui';
 import { PageHeader } from '@/components/layout/page-header';
-import { PublicPlaylistImport } from '@/components/imports/public-playlist-import';
 import { useAuth } from '@/lib/auth';
 import { useReviewQueue, useUpdateReviewItem, useBulkUpdateReview } from '@/lib/hooks';
 import { Check, X, Music2, Clock, User, Search, CheckSquare, Square, Loader2, Disc, Users } from 'lucide-react';
@@ -99,13 +98,6 @@ export default function QueuePage() {
         title="Review Queue"
         description="Review and approve pending artist imports"
       />
-
-      {/* Public Playlist Import */}
-      <div className="mb-6">
-        <PublicPlaylistImport onImportComplete={() => {
-          // Refetch will happen automatically via React Query
-        }} />
-      </div>
 
       {/* Filters and bulk actions */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
