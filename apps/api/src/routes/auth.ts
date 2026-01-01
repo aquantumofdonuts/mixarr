@@ -7,6 +7,7 @@ import { loginLimiter, setupLimiter, createUserLimiter } from '../middleware/rat
 import { SsoProviderService } from '../services/sso-provider.js';
 import { createGoogleStrategy } from '../auth/strategies/google.js';
 import { createLdapStrategy } from '../auth/strategies/ldap.js';
+import { createSamlStrategy } from '../auth/strategies/saml.js';
 
 export const authRouter = Router();
 const ssoService = new SsoProviderService(prisma);
@@ -127,6 +128,60 @@ authRouter.post('/sso/ldap', async (req, res, next) => {
     console.error('LDAP login error:', error);
     res.status(500).json({ error: 'LDAP authentication failed' });
   }
+});
+
+// SAML - initiate
+authRouter.get('/sso/saml', async (req, res, next) => {
+  const provider = await prisma.ssoProvider.findUnique({
+    where: { type: 'saml' },
+  });
+  
+  if (!provider?.isEnabled) {
+    res.status(400).json({ error: 'SAML authentication is not available' });
+    return;
+  }
+
+  const config = provider.config as {
+    idpSsoUrl?: string;
+    idpCertificate?: string;
+    idpMetadataUrl?: string;
+    emailAttribute?: string;
+    displayNameAttribute?: string;
+  };
+  
+  const baseUrlSetting = await prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
+  const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
+  
+  passport.use('saml-sso', createSamlStrategy({
+    callbackUrl: `${baseUrl}/api/auth/sso/saml/callback`,
+    entryPoint: config.idpSsoUrl,
+    idpCertificate: config.idpCertificate,
+    issuer: baseUrl,
+    emailAttribute: config.emailAttribute,
+    displayNameAttribute: config.displayNameAttribute,
+  }, prisma));
+
+  passport.authenticate('saml-sso')(req, res, next);
+});
+
+// SAML - callback (POST from IdP)
+authRouter.post('/sso/saml/callback', (req, res, next) => {
+  passport.authenticate('saml-sso', (err: Error | null, user: Express.User | false, info: { message?: string }) => {
+    if (err) {
+      console.error('SAML auth error:', err);
+      return res.redirect('/login?error=auth_failed');
+    }
+    if (!user) {
+      const msg = encodeURIComponent(info?.message || 'Authentication failed');
+      return res.redirect(`/login?error=${msg}`);
+    }
+    req.logIn(user, (loginErr) => {
+      if (loginErr) {
+        return res.redirect('/login?error=login_failed');
+      }
+      return res.redirect('/');
+    });
+  })(req, res, next);
 });
 
 // Create first admin user (setup wizard) - rate limited
