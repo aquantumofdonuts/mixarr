@@ -149,8 +149,32 @@ ssoRouter.post('/providers/:type/test', async (req, res) => {
       return;
     }
 
-    // Provider-specific tests will be added next
-    res.json({ success: true, message: `${type} connection test not yet implemented` });
+    const config = provider.config as Record<string, string>;
+
+    // Provider-specific tests
+    switch (type) {
+      case 'google': {
+        const clientId = config.clientId || '';
+        const clientSecret = config.clientSecret || '';
+        
+        if (!clientId.endsWith('.apps.googleusercontent.com')) {
+          res.json({ success: false, message: 'Client ID must end with .apps.googleusercontent.com' });
+          return;
+        }
+        if (!clientSecret || clientSecret.length < 10) {
+          res.json({ success: false, message: 'Client Secret appears invalid (too short)' });
+          return;
+        }
+        res.json({ success: true, message: 'Credentials format valid. Full OAuth test requires browser redirect.' });
+        return;
+      }
+      case 'plex': {
+        res.json({ success: true, message: 'Plex uses PIN-based authentication. No connection test needed.' });
+        return;
+      }
+      default:
+        res.json({ success: true, message: `${type} connection test not yet implemented` });
+    }
   } catch (error) {
     console.error('Failed to test SSO provider:', error);
     res.status(500).json({ success: false, message: 'Connection test failed' });
