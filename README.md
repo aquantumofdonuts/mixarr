@@ -163,7 +163,7 @@ LLM-powered artist discovery using OpenAI, Anthropic, or Ollama.
 ```bash
 # Clone and enter project
 git clone <repo-url>
-cd lidarr-spotify-scraper
+cd mixarr
 
 # Install dependencies
 npm install
@@ -276,14 +276,6 @@ Spotify requires HTTPS for OAuth redirect URIs (except localhost). This stack in
    - Enter Client ID and Client Secret
    - Click "Authorize" to complete OAuth flow
 
-### Ports
-
-| Port | Protocol | Description |
-|------|----------|-------------|
-| 3443 | HTTPS | Caddy reverse proxy (use for Spotify OAuth) |
-| 3080 | HTTP | Redirects to HTTPS |
-| 3010 | HTTP | Direct web access (bypasses Caddy) |
-
 > **Note**: Your browser will show a certificate warning for the self-signed certificate. This is expected - click "Advanced" → "Proceed" to continue.
 
 ## TIDAL OAuth Setup
@@ -338,6 +330,41 @@ Click any record label to browse all artists on that label.
 ### User Management
 Multi-user support with admin/user roles. Admins can create users and manage permissions.
 
+### SSO Authentication
+Enterprise single sign-on options:
+- **Google OAuth**: Sign in with Google accounts
+- **LDAP/Active Directory**: Enterprise directory integration
+- **SAML 2.0**: Enterprise identity provider support
+- **Plex**: Sign in with your Plex account
+
+### Notifications
+Receive alerts via Discord webhooks or generic webhooks:
+- Subscription completed/failed
+- Artist added to Lidarr
+- Review queue has pending items
+- Metadata enrichment completed
+
+### Library Health
+Analyze and maintain your Lidarr library:
+- **Health Dashboard**: Overview of library completeness
+- **Issue Detection**: Find artists missing albums, posters, bios, or genres
+- **Duplicate Detection**: Scan for and resolve duplicate artists
+- **Metadata Enrichment**: Auto-fill missing data from Last.fm, Deezer, Discogs
+- **Bulk Refresh**: Trigger metadata refresh for incomplete artists
+
+### Dashboard
+System overview with:
+- Active subscription count and status
+- Recent activity feed (artists added, subscriptions run)
+- Connection health summary
+- Review queue stats
+
+### Public Playlist Import
+Import artists from Spotify public playlists without OAuth:
+- Paste any public playlist URL
+- Preview artists before importing
+- Add to review queue or directly to Lidarr
+
 ### Connections
 Configure API connections for:
 - Lidarr (required)
@@ -372,7 +399,7 @@ Background job monitoring:
 ### Backend (apps/api)
 - **Framework**: Express.js with TypeScript
 - **ORM**: Prisma with MySQL
-- **Auth**: Passport.js (local strategy)
+- **Auth**: Passport.js (local, Google, LDAP, SAML, Plex)
 - **Queue**: BullMQ with Redis
 - **WebSocket**: Socket.IO
 
