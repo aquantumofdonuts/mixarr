@@ -6,8 +6,9 @@ import Link from 'next/link';
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, useToast, Select } from '@/components/ui';
 import { PageHeader } from '@/components/layout/page-header';
 import { AISettings } from '@/components/settings/ai-settings';
+import { SSOSettings } from '@/components/settings/sso-settings';
 import { api } from '@/lib/api';
-import { Settings as SettingsIcon, Save, RefreshCw, Bell, Globe, ChevronRight } from 'lucide-react';
+import { Settings as SettingsIcon, Save, RefreshCw, Bell, Globe, ChevronRight, Shield } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 
 interface SettingGroup {
@@ -198,6 +199,24 @@ export default function SettingsPage() {
       <div className="space-y-6">
         {/* AI Integration Settings */}
         <AISettings />
+
+        {/* SSO Settings (Admin only) */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                <Shield className="h-5 w-5" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Single Sign-On</CardTitle>
+                <CardDescription>Configure LDAP, SAML, Google, and Plex authentication</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <SSOSettings />
+          </CardContent>
+        </Card>
 
         {settingGroups.map((group) => {
           const GroupIcon = group.icon;
