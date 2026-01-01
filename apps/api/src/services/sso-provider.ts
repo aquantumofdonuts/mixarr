@@ -15,6 +15,7 @@ interface SsoProviderInput {
 
 // Fields that should be masked in responses
 const SECRET_FIELDS = ['bindPassword', 'clientSecret', 'idpCertificate'];
+const MASK_VALUE = '********';
 
 export class SsoProviderService {
   constructor(private prisma: PrismaClient) {}
@@ -48,8 +49,27 @@ export class SsoProviderService {
     // Validate config based on type
     validateSsoConfig(type, input.config);
     
+    // Get existing provider to preserve masked secret fields
+    const existing = await this.prisma.ssoProvider.findUnique({
+      where: { type },
+    });
+    
+    // Merge config: preserve existing secrets if masked placeholder is sent
+    let mergedConfig = input.config;
+    if (existing && existing.config && typeof existing.config === 'object' && !Array.isArray(existing.config)) {
+      const existingConfig = existing.config as Record<string, unknown>;
+      mergedConfig = { ...input.config };
+      
+      for (const secretField of SECRET_FIELDS) {
+        if (mergedConfig[secretField] === MASK_VALUE && existingConfig[secretField]) {
+          // Keep the existing secret value
+          mergedConfig[secretField] = existingConfig[secretField];
+        }
+      }
+    }
+    
     // TODO: Encrypt sensitive fields before storing
-    const encryptedConfig = input.config as Prisma.InputJsonValue;
+    const encryptedConfig = mergedConfig as Prisma.InputJsonValue;
     
     const provider = await this.prisma.ssoProvider.upsert({
       where: { type },
@@ -116,7 +136,7 @@ export class SsoProviderService {
     
     for (const [key, value] of Object.entries(config)) {
       if (SECRET_FIELDS.includes(key) && typeof value === 'string') {
-        masked[key] = '********';
+        masked[key] = MASK_VALUE;
       } else {
         masked[key] = value;
       }

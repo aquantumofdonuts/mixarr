@@ -155,6 +155,47 @@ describe('SsoProviderService', () => {
         })
       ).rejects.toThrow('clientSecret is required');
     });
+
+    it('should preserve existing secrets when masked placeholder is sent', async () => {
+      // Existing provider with real secret
+      mockPrisma.ssoProvider.findUnique.mockResolvedValue({
+        id: 1,
+        type: 'google',
+        name: 'Google',
+        config: { clientId: 'id', clientSecret: 'real-secret-value' },
+        isEnabled: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      mockPrisma.ssoProvider.upsert.mockResolvedValue({
+        id: 1,
+        type: 'google',
+        name: 'Google',
+        config: { clientId: 'new-id', clientSecret: 'real-secret-value' },
+        isEnabled: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      // Update with masked placeholder for secret
+      await service.upsert('google', {
+        name: 'Google',
+        config: { clientId: 'new-id', clientSecret: '********' },
+      });
+
+      // Verify upsert was called with preserved secret
+      expect(mockPrisma.ssoProvider.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            config: { clientId: 'new-id', clientSecret: 'real-secret-value' },
+          }),
+          update: expect.objectContaining({
+            config: { clientId: 'new-id', clientSecret: 'real-secret-value' },
+          }),
+        })
+      );
+    });
   });
 
   describe('getEnabled', () => {
