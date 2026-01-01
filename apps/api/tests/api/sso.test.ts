@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { validateLdapConfig, validateSamlConfig, validateGoogleConfig, validatePlexConfig } from '../../src/types/sso.js';
+import { validateLdapConfig, validateSamlConfig, validateGoogleConfig, validatePlexConfig, validateSsoConfig } from '../../src/types/sso.js';
 
 describe('SSO Config Validation', () => {
   describe('validateLdapConfig', () => {
@@ -74,6 +74,20 @@ describe('SSO Config Validation', () => {
     it('should accept Plex config with server restriction', () => {
       const config = { restrictToServerId: 'abc123' };
       expect(() => validatePlexConfig(config)).not.toThrow();
+    });
+  });
+
+  describe('validateSsoConfig', () => {
+    it('should validate google config through dispatcher', () => {
+      const config = {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+      };
+      expect(() => validateSsoConfig('google', config)).not.toThrow();
+    });
+
+    it('should throw for unknown provider type', () => {
+      expect(() => validateSsoConfig('unknown', {})).toThrow('Unknown SSO provider type: unknown');
     });
   });
 });

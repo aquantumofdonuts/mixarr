@@ -42,11 +42,20 @@ export function validateLdapConfig(config: unknown): asserts config is LdapConfi
   if (!c.bindDn || typeof c.bindDn !== 'string') {
     throw new Error('bindDn is required');
   }
+  if (!c.bindPassword || typeof c.bindPassword !== 'string') {
+    throw new Error('bindPassword is required');
+  }
   if (!c.searchBaseDn || typeof c.searchBaseDn !== 'string') {
     throw new Error('searchBaseDn is required');
   }
+  if (!c.searchFilter || typeof c.searchFilter !== 'string') {
+    throw new Error('searchFilter is required');
+  }
   if (!c.emailAttribute || typeof c.emailAttribute !== 'string') {
     throw new Error('emailAttribute is required');
+  }
+  if (!c.displayNameAttribute || typeof c.displayNameAttribute !== 'string') {
+    throw new Error('displayNameAttribute is required');
   }
 }
 
