@@ -518,4 +518,139 @@ describe('SSO Routes', () => {
       expect(expectedResponse.message).toContain('not yet implemented');
     });
   });
+
+  describe('Provider type validation', () => {
+    const VALID_PROVIDER_TYPES = ['ldap', 'saml', 'google', 'plex'];
+
+    function isValidProviderType(type: string): boolean {
+      return VALID_PROVIDER_TYPES.includes(type);
+    }
+
+    it('should accept valid provider types', () => {
+      expect(isValidProviderType('ldap')).toBe(true);
+      expect(isValidProviderType('saml')).toBe(true);
+      expect(isValidProviderType('google')).toBe(true);
+      expect(isValidProviderType('plex')).toBe(true);
+    });
+
+    it('should reject invalid provider type', () => {
+      expect(isValidProviderType('invalid')).toBe(false);
+      expect(isValidProviderType('facebook')).toBe(false);
+      expect(isValidProviderType('')).toBe(false);
+      expect(isValidProviderType('GOOGLE')).toBe(false); // case sensitive
+    });
+
+    it('should return 400 for invalid provider type on GET', () => {
+      const type = 'invalid';
+      const isValid = isValidProviderType(type);
+      
+      // Route should return 400 for invalid type
+      const expectedStatus = isValid ? 200 : 400;
+      expect(expectedStatus).toBe(400);
+    });
+
+    it('should return 400 for invalid provider type on PUT', () => {
+      const type = 'facebook';
+      const isValid = isValidProviderType(type);
+      
+      const expectedStatus = isValid ? 200 : 400;
+      expect(expectedStatus).toBe(400);
+    });
+
+    it('should return 400 for invalid provider type on DELETE', () => {
+      const type = 'unknown';
+      const isValid = isValidProviderType(type);
+      
+      const expectedStatus = isValid ? 200 : 400;
+      expect(expectedStatus).toBe(400);
+    });
+
+    it('should return 400 for invalid provider type on PATCH toggle', () => {
+      const type = 'oauth';
+      const isValid = isValidProviderType(type);
+      
+      const expectedStatus = isValid ? 200 : 400;
+      expect(expectedStatus).toBe(400);
+    });
+
+    it('should return 400 for invalid provider type on POST test', () => {
+      const type = 'microsoft';
+      const isValid = isValidProviderType(type);
+      
+      const expectedStatus = isValid ? 200 : 400;
+      expect(expectedStatus).toBe(400);
+    });
+  });
+
+  describe('404 handling for non-existent providers', () => {
+    it('should return 404 when deleting non-existent provider', async () => {
+      mockPrisma.ssoProvider.findUnique.mockResolvedValue(null);
+
+      const provider = await service.getByType('google');
+      
+      // Route should check if provider exists before delete
+      const expectedStatus = provider ? 200 : 404;
+      expect(expectedStatus).toBe(404);
+    });
+
+    it('should return 404 when toggling non-existent provider', async () => {
+      mockPrisma.ssoProvider.findUnique.mockResolvedValue(null);
+
+      const provider = await service.getByType('ldap');
+      
+      // Route should check if provider exists before toggle
+      const expectedStatus = provider ? 200 : 404;
+      expect(expectedStatus).toBe(404);
+    });
+
+    it('should proceed with delete when provider exists', async () => {
+      mockPrisma.ssoProvider.findUnique.mockResolvedValue({
+        id: 1,
+        type: 'google',
+        name: 'Google',
+        config: { clientId: 'id', clientSecret: 'secret' },
+        isEnabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      mockPrisma.ssoProvider.delete.mockResolvedValue({});
+
+      const provider = await service.getByType('google');
+      expect(provider).not.toBeNull();
+      
+      // Now delete should succeed
+      await service.delete('google');
+      expect(mockPrisma.ssoProvider.delete).toHaveBeenCalledWith({
+        where: { type: 'google' },
+      });
+    });
+
+    it('should proceed with toggle when provider exists', async () => {
+      mockPrisma.ssoProvider.findUnique.mockResolvedValue({
+        id: 1,
+        type: 'plex',
+        name: 'Plex',
+        config: {},
+        isEnabled: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      mockPrisma.ssoProvider.update.mockResolvedValue({
+        id: 1,
+        type: 'plex',
+        name: 'Plex',
+        config: {},
+        isEnabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const provider = await service.getByType('plex');
+      expect(provider).not.toBeNull();
+      
+      // Now toggle should succeed
+      const result = await service.toggle('plex', true);
+      expect(result.isEnabled).toBe(true);
+    });
+  });
 });

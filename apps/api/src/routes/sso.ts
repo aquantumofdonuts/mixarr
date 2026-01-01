@@ -14,6 +14,13 @@ import type { SsoProviderType } from '@prisma/client';
 export const ssoRouter = Router();
 const ssoService = new SsoProviderService(prisma);
 
+// Valid SSO provider types
+const VALID_PROVIDER_TYPES: SsoProviderType[] = ['ldap', 'saml', 'google', 'plex'];
+
+function isValidProviderType(type: string): type is SsoProviderType {
+  return VALID_PROVIDER_TYPES.includes(type as SsoProviderType);
+}
+
 // All routes require admin
 ssoRouter.use(requireAuth, requireAdmin);
 
@@ -31,7 +38,11 @@ ssoRouter.get('/providers', async (_req, res) => {
 // Get single provider
 ssoRouter.get('/providers/:type', async (req, res) => {
   try {
-    const type = req.params.type as SsoProviderType;
+    if (!isValidProviderType(req.params.type)) {
+      res.status(400).json({ error: 'Invalid provider type' });
+      return;
+    }
+    const type = req.params.type;
     const provider = await ssoService.getByType(type);
     
     if (!provider) {
@@ -49,7 +60,11 @@ ssoRouter.get('/providers/:type', async (req, res) => {
 // Create/update provider
 ssoRouter.put('/providers/:type', async (req, res) => {
   try {
-    const type = req.params.type as SsoProviderType;
+    if (!isValidProviderType(req.params.type)) {
+      res.status(400).json({ error: 'Invalid provider type' });
+      return;
+    }
+    const type = req.params.type;
     const { name, config, isEnabled } = req.body;
     
     if (!name || !config) {
@@ -72,7 +87,16 @@ ssoRouter.put('/providers/:type', async (req, res) => {
 // Delete provider
 ssoRouter.delete('/providers/:type', async (req, res) => {
   try {
-    const type = req.params.type as SsoProviderType;
+    if (!isValidProviderType(req.params.type)) {
+      res.status(400).json({ error: 'Invalid provider type' });
+      return;
+    }
+    const type = req.params.type;
+    const provider = await ssoService.getByType(type);
+    if (!provider) {
+      res.status(404).json({ error: 'Provider not found' });
+      return;
+    }
     await ssoService.delete(type);
     res.json({ success: true });
   } catch (error) {
@@ -84,11 +108,21 @@ ssoRouter.delete('/providers/:type', async (req, res) => {
 // Toggle provider enabled/disabled
 ssoRouter.patch('/providers/:type/toggle', async (req, res) => {
   try {
-    const type = req.params.type as SsoProviderType;
+    if (!isValidProviderType(req.params.type)) {
+      res.status(400).json({ error: 'Invalid provider type' });
+      return;
+    }
+    const type = req.params.type;
     const { isEnabled } = req.body;
     
     if (typeof isEnabled !== 'boolean') {
       res.status(400).json({ error: 'isEnabled must be a boolean' });
+      return;
+    }
+    
+    const existingProvider = await ssoService.getByType(type);
+    if (!existingProvider) {
+      res.status(404).json({ error: 'Provider not found' });
       return;
     }
     
@@ -103,7 +137,11 @@ ssoRouter.patch('/providers/:type/toggle', async (req, res) => {
 // Test connection (placeholder)
 ssoRouter.post('/providers/:type/test', async (req, res) => {
   try {
-    const type = req.params.type as SsoProviderType;
+    if (!isValidProviderType(req.params.type)) {
+      res.status(400).json({ error: 'Invalid provider type' });
+      return;
+    }
+    const type = req.params.type;
     res.json({ success: true, message: `${type} connection test not yet implemented` });
   } catch (error) {
     console.error('Failed to test SSO provider:', error);
