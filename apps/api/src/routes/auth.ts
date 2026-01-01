@@ -5,6 +5,7 @@ import prisma from '../lib/db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { loginLimiter, setupLimiter, createUserLimiter } from '../middleware/rate-limiter.js';
 import { SsoProviderService } from '../services/sso-provider.js';
+import { createGoogleStrategy } from '../auth/strategies/google.js';
 
 export const authRouter = Router();
 const ssoService = new SsoProviderService(prisma);
@@ -28,6 +29,58 @@ authRouter.get('/sso/enabled', async (_req, res) => {
     console.error('Failed to fetch enabled SSO providers:', error);
     res.status(500).json({ error: 'Failed to fetch providers' });
   }
+});
+
+// Google OAuth - initiate
+authRouter.get('/sso/google', async (req, res, next) => {
+  try {
+    // Load Google config from database
+    const provider = await prisma.ssoProvider.findUnique({
+      where: { type: 'google' },
+    });
+    
+    if (!provider?.isEnabled) {
+      res.status(400).json({ error: 'Google authentication is not available' });
+      return;
+    }
+
+    const config = provider.config as { clientId: string; clientSecret: string; allowedDomains?: string };
+    const baseUrlSetting = await prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
+    const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
+    
+    // Register strategy dynamically
+    passport.use('google-sso', createGoogleStrategy({
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      callbackUrl: `${baseUrl}/api/auth/sso/google/callback`,
+      allowedDomains: config.allowedDomains?.split(',').map((d: string) => d.trim()),
+    }, prisma));
+
+    passport.authenticate('google-sso', { scope: ['profile', 'email'] })(req, res, next);
+  } catch (error) {
+    console.error('Google OAuth initiation error:', error);
+    res.status(500).json({ error: 'Failed to initiate Google authentication' });
+  }
+});
+
+// Google OAuth - callback
+authRouter.get('/sso/google/callback', (req, res, next) => {
+  passport.authenticate('google-sso', (err: Error | null, user: Express.User | false, info: { message?: string }) => {
+    if (err) {
+      console.error('Google OAuth error:', err);
+      return res.redirect('/login?error=auth_failed');
+    }
+    if (!user) {
+      const msg = encodeURIComponent(info?.message || 'Authentication failed');
+      return res.redirect(`/login?error=${msg}`);
+    }
+    req.logIn(user, (loginErr) => {
+      if (loginErr) {
+        return res.redirect('/login?error=login_failed');
+      }
+      return res.redirect('/');
+    });
+  })(req, res, next);
 });
 
 // Create first admin user (setup wizard) - rate limited

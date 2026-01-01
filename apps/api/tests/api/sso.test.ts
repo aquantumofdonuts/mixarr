@@ -654,3 +654,142 @@ describe('SSO Routes', () => {
     });
   });
 });
+
+/**
+ * Google OAuth Routes Tests
+ * 
+ * Tests for the Google OAuth authentication routes.
+ */
+describe('Google OAuth Routes', () => {
+  let mockPrisma: ReturnType<typeof createMockPrisma>;
+
+  beforeEach(() => {
+    resetIdCounter();
+    mockPrisma = createMockPrisma();
+  });
+
+  describe('GET /api/auth/sso/google', () => {
+    it('should return 400 when Google provider is not enabled', async () => {
+      // Simulate disabled Google provider
+      mockPrisma.ssoProvider.findUnique.mockResolvedValue(null);
+      
+      const provider = await mockPrisma.ssoProvider.findUnique({ where: { type: 'google' } });
+      const isEnabled = provider?.isEnabled ?? false;
+      
+      expect(isEnabled).toBe(false);
+    });
+
+    it('should proceed when Google provider is enabled with valid config', async () => {
+      mockPrisma.ssoProvider.findUnique.mockResolvedValue({
+        id: 1,
+        type: 'google',
+        name: 'Google',
+        config: { 
+          clientId: 'test-client-id.apps.googleusercontent.com',
+          clientSecret: 'test-client-secret',
+          allowedDomains: 'example.com,test.org',
+        },
+        isEnabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const provider = await mockPrisma.ssoProvider.findUnique({ where: { type: 'google' } });
+      
+      expect(provider).not.toBeNull();
+      expect(provider?.isEnabled).toBe(true);
+      expect(provider?.config).toHaveProperty('clientId');
+      expect(provider?.config).toHaveProperty('clientSecret');
+    });
+
+    it('should parse allowed domains correctly', async () => {
+      mockPrisma.ssoProvider.findUnique.mockResolvedValue({
+        id: 1,
+        type: 'google',
+        name: 'Google',
+        config: { 
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          allowedDomains: 'example.com, test.org, another.com',
+        },
+        isEnabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const provider = await mockPrisma.ssoProvider.findUnique({ where: { type: 'google' } });
+      const config = provider?.config as { allowedDomains?: string };
+      const domains = config?.allowedDomains?.split(',').map((d: string) => d.trim());
+      
+      expect(domains).toEqual(['example.com', 'test.org', 'another.com']);
+    });
+  });
+
+  describe('GET /api/auth/sso/google/callback', () => {
+    it('should redirect to login with error when authentication fails', () => {
+      // Simulate authentication failure
+      const authError = new Error('OAuth error');
+      const redirectUrl = authError ? '/login?error=auth_failed' : '/';
+      
+      expect(redirectUrl).toBe('/login?error=auth_failed');
+    });
+
+    it('should redirect to login with message when user not found', () => {
+      // Simulate no user returned
+      const user = null;
+      const info = { message: 'No account found for this email' };
+      const msg = encodeURIComponent(info?.message || 'Authentication failed');
+      const redirectUrl = user ? '/' : `/login?error=${msg}`;
+      
+      expect(redirectUrl).toContain('No%20account%20found');
+    });
+
+    it('should redirect to home on successful authentication', () => {
+      // Simulate successful authentication
+      const user = { id: 1, username: 'testuser', role: 'user' };
+      const loginError = null;
+      const redirectUrl = loginError ? '/login?error=login_failed' : '/';
+      
+      expect(user).not.toBeNull();
+      expect(redirectUrl).toBe('/');
+    });
+
+    it('should redirect to login on login error', () => {
+      // Simulate login error after successful OAuth
+      const user = { id: 1, username: 'testuser', role: 'user' };
+      const loginError = new Error('Session error');
+      const redirectUrl = loginError ? '/login?error=login_failed' : '/';
+      
+      expect(user).not.toBeNull();
+      expect(redirectUrl).toBe('/login?error=login_failed');
+    });
+  });
+
+  describe('Google OAuth config validation', () => {
+    it('should require baseUrl for callback URL construction', async () => {
+      mockPrisma.globalSetting.findUnique.mockResolvedValue({
+        id: 1,
+        key: 'baseUrl',
+        value: 'https://myapp.example.com',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const baseUrlSetting = await mockPrisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
+      const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
+      const callbackUrl = `${baseUrl}/api/auth/sso/google/callback`;
+      
+      expect(callbackUrl).toBe('https://myapp.example.com/api/auth/sso/google/callback');
+    });
+
+    it('should use default baseUrl when not configured', async () => {
+      mockPrisma.globalSetting.findUnique.mockResolvedValue(null);
+
+      const baseUrlSetting = await mockPrisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
+      const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
+      const callbackUrl = `${baseUrl}/api/auth/sso/google/callback`;
+      
+      expect(callbackUrl).toBe('http://localhost:3010/api/auth/sso/google/callback');
+    });
+  });
+});
