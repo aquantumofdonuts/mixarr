@@ -12,6 +12,7 @@ interface UserData {
   id: number;
   username: string;
   displayName: string;
+  email?: string;
   role: 'admin' | 'user';
   isActive: boolean;
   lastLogin: string | null;
@@ -32,8 +33,8 @@ export default function UsersPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
-  const [createForm, setCreateForm] = useState({ username: '', password: '', displayName: '', role: 'user' as 'admin' | 'user' });
-  const [editForm, setEditForm] = useState({ displayName: '', role: 'user' as 'admin' | 'user', isActive: true, password: '' });
+  const [createForm, setCreateForm] = useState({ username: '', password: '', displayName: '', email: '', role: 'user' as 'admin' | 'user' });
+  const [editForm, setEditForm] = useState({ displayName: '', email: '', role: 'user' as 'admin' | 'user', isActive: true, password: '' });
 
   // Fetch users with React Query (only for admins)
   const { data: usersData, isLoading, isFetching } = useQuery({
@@ -86,7 +87,7 @@ export default function UsersPage() {
     } else {
       addToast({ type: 'success', title: 'User created successfully' });
       setShowCreateModal(false);
-      setCreateForm({ username: '', password: '', displayName: '', role: 'user' });
+      setCreateForm({ username: '', password: '', displayName: '', email: '', role: 'user' });
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
     }
   };
@@ -96,6 +97,7 @@ export default function UsersPage() {
     
     const payload: Record<string, any> = {
       displayName: editForm.displayName,
+      email: editForm.email || null,
       role: editForm.role,
       isActive: editForm.isActive,
     };
@@ -133,6 +135,7 @@ export default function UsersPage() {
     setEditingUser(u);
     setEditForm({
       displayName: u.displayName,
+      email: u.email || '',
       role: u.role,
       isActive: u.isActive,
       password: '',
@@ -343,6 +346,15 @@ export default function UsersPage() {
             />
           </div>
           <div>
+            <label className="text-sm font-medium">Email</label>
+            <Input
+              type="email"
+              value={createForm.email}
+              onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+              placeholder="john@example.com (for SSO)"
+            />
+          </div>
+          <div>
             <label className="text-sm font-medium">Password *</label>
             <Input
               type="password"
@@ -382,6 +394,15 @@ export default function UsersPage() {
             <Input
               value={editForm.displayName}
               onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Email</label>
+            <Input
+              type="email"
+              value={editForm.email}
+              onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+              placeholder="john@example.com (for SSO)"
             />
           </div>
           <div>
