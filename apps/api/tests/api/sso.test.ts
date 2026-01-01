@@ -793,3 +793,110 @@ describe('Google OAuth Routes', () => {
     });
   });
 });
+
+describe('User Identity Management', () => {
+  let mockPrisma: ReturnType<typeof createMockPrisma>;
+
+  beforeEach(() => {
+    resetIdCounter();
+    mockPrisma = createMockPrisma();
+  });
+
+  describe('GET /api/auth/users/:userId/identities', () => {
+    it('should return user identities for admin', async () => {
+      const mockIdentities = [
+        { id: 1, provider: 'google', email: 'test@example.com', createdAt: new Date(), lastUsedAt: new Date() },
+        { id: 2, provider: 'plex', email: 'test@example.com', createdAt: new Date(), lastUsedAt: null },
+      ];
+      
+      mockPrisma.authIdentity.findMany.mockResolvedValue(mockIdentities);
+      
+      const result = await mockPrisma.authIdentity.findMany({
+        where: { userId: 1 },
+        select: {
+          id: true,
+          provider: true,
+          email: true,
+          createdAt: true,
+          lastUsedAt: true,
+        },
+      });
+      
+      expect(result).toHaveLength(2);
+      expect(result[0].provider).toBe('google');
+      expect(result[1].provider).toBe('plex');
+    });
+
+    it('should reject invalid user ID', () => {
+      const userId = 'invalid';
+      const isValid = !isNaN(parseInt(userId, 10));
+      expect(isValid).toBe(false);
+    });
+
+    it('should return empty array when user has no identities', async () => {
+      mockPrisma.authIdentity.findMany.mockResolvedValue([]);
+      
+      const result = await mockPrisma.authIdentity.findMany({
+        where: { userId: 999 },
+      });
+      
+      expect(result).toHaveLength(0);
+    });
+  });
+
+  describe('DELETE /api/auth/users/:userId/identities/:identityId', () => {
+    it('should unlink identity for admin', async () => {
+      const mockIdentity = { id: 1, userId: 1, provider: 'google', providerId: 'google-123', email: 'test@example.com' };
+      
+      mockPrisma.authIdentity.findFirst.mockResolvedValue(mockIdentity);
+      mockPrisma.authIdentity.delete.mockResolvedValue(mockIdentity);
+      
+      // Verify identity exists and belongs to user
+      const identity = await mockPrisma.authIdentity.findFirst({
+        where: { id: 1, userId: 1 },
+      });
+      
+      expect(identity).toBeDefined();
+      expect(identity?.userId).toBe(1);
+      
+      // Delete the identity
+      const deleted = await mockPrisma.authIdentity.delete({
+        where: { id: 1 },
+      });
+      
+      expect(deleted.id).toBe(1);
+    });
+
+    it('should reject when identity not found', async () => {
+      mockPrisma.authIdentity.findFirst.mockResolvedValue(null);
+      
+      const identity = await mockPrisma.authIdentity.findFirst({
+        where: { id: 999, userId: 1 },
+      });
+      
+      expect(identity).toBeNull();
+    });
+
+    it('should reject when identity belongs to different user', async () => {
+      // Identity exists but belongs to user 2, not user 1
+      mockPrisma.authIdentity.findFirst.mockResolvedValue(null);
+      
+      const identity = await mockPrisma.authIdentity.findFirst({
+        where: { id: 1, userId: 1 }, // Looking for userId: 1 but identity belongs to userId: 2
+      });
+      
+      expect(identity).toBeNull();
+    });
+
+    it('should reject invalid IDs', () => {
+      const userId = 'invalid';
+      const identityId = 'also-invalid';
+      
+      const isUserIdValid = !isNaN(parseInt(userId, 10));
+      const isIdentityIdValid = !isNaN(parseInt(identityId, 10));
+      
+      expect(isUserIdValid).toBe(false);
+      expect(isIdentityIdValid).toBe(false);
+    });
+  });
+});

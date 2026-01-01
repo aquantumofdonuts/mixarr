@@ -488,3 +488,63 @@ authRouter.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Failed to delete user' });
   }
 });
+
+// Admin: Get user's linked SSO identities
+authRouter.get('/users/:userId/identities', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    
+    if (isNaN(userId)) {
+      res.status(400).json({ error: 'Invalid user ID' });
+      return;
+    }
+
+    const identities = await prisma.authIdentity.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        provider: true,
+        email: true,
+        createdAt: true,
+        lastUsedAt: true,
+      },
+    });
+
+    res.json({ identities });
+  } catch (error) {
+    console.error('Failed to fetch user identities:', error);
+    res.status(500).json({ error: 'Failed to fetch identities' });
+  }
+});
+
+// Admin: Unlink a user's SSO identity
+authRouter.delete('/users/:userId/identities/:identityId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    const identityId = parseInt(req.params.identityId, 10);
+    
+    if (isNaN(userId) || isNaN(identityId)) {
+      res.status(400).json({ error: 'Invalid ID' });
+      return;
+    }
+
+    // Verify identity belongs to user
+    const identity = await prisma.authIdentity.findFirst({
+      where: { id: identityId, userId },
+    });
+
+    if (!identity) {
+      res.status(404).json({ error: 'Identity not found' });
+      return;
+    }
+
+    await prisma.authIdentity.delete({
+      where: { id: identityId },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete identity:', error);
+    res.status(500).json({ error: 'Failed to delete identity' });
+  }
+});
