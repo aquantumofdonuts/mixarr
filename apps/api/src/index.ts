@@ -19,6 +19,7 @@ import { adminRouter } from './routes/admin.js';
 import { discoverRouter } from './routes/discover.js';
 import notificationsRouter from './routes/notifications.js';
 import { duplicatesRouter } from './routes/duplicates.js';
+import { ssoRouter } from './routes/sso.js';
 import { setupPassport, sessionMiddleware } from './auth/passport.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requestLogger } from './middleware/request-logger.js';
@@ -75,6 +76,7 @@ app.use('/api/admin', adminRouter);
 app.use('/api/discover', discoverRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/duplicates', duplicatesRouter);
+app.use('/api/sso', ssoRouter);
 
 // Error handler
 app.use(errorHandler);

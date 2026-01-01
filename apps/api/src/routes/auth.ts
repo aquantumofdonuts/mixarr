@@ -4,8 +4,10 @@ import bcrypt from 'bcryptjs';
 import prisma from '../lib/db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { loginLimiter, setupLimiter, createUserLimiter } from '../middleware/rate-limiter.js';
+import { SsoProviderService } from '../services/sso-provider.js';
 
 export const authRouter = Router();
+const ssoService = new SsoProviderService(prisma);
 
 // Check if setup is required (no users exist)
 authRouter.get('/setup-required', async (_req, res) => {
@@ -14,6 +16,17 @@ authRouter.get('/setup-required', async (_req, res) => {
     res.json({ setupRequired: userCount === 0 });
   } catch (error) {
     res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// Public: Get enabled SSO providers (for login page)
+authRouter.get('/sso/enabled', async (_req, res) => {
+  try {
+    const providers = await ssoService.getEnabled();
+    res.json({ providers });
+  } catch (error) {
+    console.error('Failed to fetch enabled SSO providers:', error);
+    res.status(500).json({ error: 'Failed to fetch providers' });
   }
 });
 
