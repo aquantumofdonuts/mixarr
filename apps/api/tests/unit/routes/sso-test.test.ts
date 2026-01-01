@@ -5,8 +5,12 @@ import request from 'supertest';
 // Use global for mock state (hoisting workaround)
 declare global {
   var __ssoTestMockResult: any;
+  var __ldapMockBind: { success: boolean; error?: string } | null;
+  var __fetchMockResult: { ok: boolean; text: string } | { error: string } | null;
 }
 globalThis.__ssoTestMockResult = null;
+globalThis.__ldapMockBind = null;
+globalThis.__fetchMockResult = null;
 
 // Mock auth middleware
 vi.mock('../../../src/middleware/auth.js', () => ({
@@ -35,6 +39,21 @@ vi.mock('../../../src/services/sso-provider.js', () => {
   };
 });
 
+// Mock ldapjs
+vi.mock('ldapjs', () => ({
+  createClient: () => ({
+    bind: (_dn: string, _password: string, callback: (err: Error | null) => void) => {
+      const mockResult = globalThis.__ldapMockBind;
+      if (mockResult && mockResult.success) {
+        callback(null);
+      } else {
+        callback(new Error(mockResult?.error || 'Bind failed'));
+      }
+    },
+    unbind: () => {},
+  }),
+}));
+
 // Mock prisma (still needed for service constructor)
 vi.mock('../../../src/lib/db.js', () => ({
   default: {},
@@ -48,6 +67,8 @@ describe('SSO Test Connection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     globalThis.__ssoTestMockResult = null;
+    globalThis.__ldapMockBind = null;
+    globalThis.__fetchMockResult = null;
     app = express();
     app.use(express.json());
     app.use('/api/sso', ssoRouter);
@@ -127,6 +148,136 @@ describe('SSO Test Connection', () => {
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         expect(response.body.message).toContain('PIN');
+      });
+    });
+
+    describe('SAML provider', () => {
+      it('should return success when metadata URL returns valid XML', async () => {
+        globalThis.__ssoTestMockResult = {
+          id: 1,
+          type: 'saml',
+          name: 'SAML',
+          config: { idpMetadataUrl: 'https://example.com/metadata' },
+          isEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        // Mock global fetch
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          text: () => Promise.resolve('<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata"></EntityDescriptor>'),
+        });
+
+        const response = await request(app)
+          .post('/api/sso/providers/saml/test')
+          .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.message).toContain('metadata');
+      });
+
+      it('should return error when metadata URL unreachable', async () => {
+        globalThis.__ssoTestMockResult = {
+          id: 1,
+          type: 'saml',
+          name: 'SAML',
+          config: { idpMetadataUrl: 'https://unreachable.example.com/metadata' },
+          isEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+
+        const response = await request(app)
+          .post('/api/sso/providers/saml/test')
+          .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(false);
+        expect(response.body.message).toContain('fetch');
+      });
+
+      it('should validate manual config when no metadata URL', async () => {
+        globalThis.__ssoTestMockResult = {
+          id: 1,
+          type: 'saml',
+          name: 'SAML',
+          config: { 
+            idpSsoUrl: 'https://idp.example.com/sso', 
+            idpCertificate: '-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----' 
+          },
+          isEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const response = await request(app)
+          .post('/api/sso/providers/saml/test')
+          .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.message).toContain('valid');
+      });
+    });
+
+    describe('LDAP provider', () => {
+      it('should return success when LDAP bind succeeds', async () => {
+        globalThis.__ssoTestMockResult = {
+          id: 1,
+          type: 'ldap',
+          name: 'LDAP',
+          config: {
+            serverUrl: 'ldap://localhost:389',
+            bindDn: 'cn=admin,dc=example,dc=com',
+            bindPassword: 'password',
+            searchBaseDn: 'ou=users,dc=example,dc=com',
+          },
+          isEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        // Mock will be set up in implementation
+        globalThis.__ldapMockBind = { success: true };
+
+        const response = await request(app)
+          .post('/api/sso/providers/ldap/test')
+          .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.message).toContain('successful');
+      });
+
+      it('should return error when LDAP bind fails', async () => {
+        globalThis.__ssoTestMockResult = {
+          id: 1,
+          type: 'ldap',
+          name: 'LDAP',
+          config: {
+            serverUrl: 'ldap://localhost:389',
+            bindDn: 'cn=admin,dc=example,dc=com',
+            bindPassword: 'wrongpassword',
+            searchBaseDn: 'ou=users,dc=example,dc=com',
+          },
+          isEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        globalThis.__ldapMockBind = { success: false, error: 'Invalid credentials' };
+
+        const response = await request(app)
+          .post('/api/sso/providers/ldap/test')
+          .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(false);
+        expect(response.body.message).toContain('Invalid credentials');
       });
     });
   });

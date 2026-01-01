@@ -172,6 +172,81 @@ ssoRouter.post('/providers/:type/test', async (req, res) => {
         res.json({ success: true, message: 'Plex uses PIN-based authentication. No connection test needed.' });
         return;
       }
+      case 'saml': {
+        const metadataUrl = config.idpMetadataUrl || '';
+        const ssoUrl = config.idpSsoUrl || '';
+        const certificate = config.idpCertificate || '';
+
+        if (metadataUrl) {
+          // Test metadata URL fetch
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            const response = await fetch(metadataUrl, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+              res.json({ success: false, message: `Failed to fetch metadata: HTTP ${response.status}` });
+              return;
+            }
+            const text = await response.text();
+            if (!text.includes('EntityDescriptor')) {
+              res.json({ success: false, message: 'Response does not appear to be valid SAML metadata' });
+              return;
+            }
+            res.json({ success: true, message: 'Successfully fetched SAML metadata' });
+            return;
+          } catch (err) {
+            if (err instanceof Error && err.name === 'AbortError') {
+              res.json({ success: false, message: 'Timeout: Failed to fetch metadata within 10 seconds' });
+              return;
+            }
+            res.json({ success: false, message: `Failed to fetch metadata: ${err instanceof Error ? err.message : 'Unknown error'}` });
+            return;
+          }
+        } else {
+          // Validate manual config
+          if (!ssoUrl || !certificate) {
+            res.json({ success: false, message: 'Manual configuration requires IdP SSO URL and certificate' });
+            return;
+          }
+          res.json({ success: true, message: 'SAML configuration valid (manual entry)' });
+          return;
+        }
+      }
+      case 'ldap': {
+        const ldap = await import('ldapjs');
+        const url = config.serverUrl || '';
+        const bindDN = config.bindDn || '';
+        const bindPassword = config.bindPassword || '';
+
+        if (!url || !bindDN || !bindPassword) {
+          res.json({ success: false, message: 'LDAP requires serverUrl, bindDn, and bindPassword' });
+          return;
+        }
+
+        try {
+          const client = ldap.createClient({ url, timeout: 10000 });
+          
+          await new Promise<void>((resolve, reject) => {
+            client.bind(bindDN, bindPassword, (err: Error | null) => {
+              client.unbind();
+              if (err) {
+                reject(err);
+              } else {
+                resolve();
+              }
+            });
+          });
+
+          res.json({ success: true, message: 'LDAP bind successful' });
+          return;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          res.json({ success: false, message: `Invalid credentials: ${message}` });
+          return;
+        }
+      }
       default:
         res.json({ success: true, message: `${type} connection test not yet implemented` });
     }
