@@ -257,6 +257,7 @@ export function SSOSettings() {
           const provider = getProvider(config.type);
           const isExpanded = expandedProvider === config.type;
           const isEnabled = provider?.isEnabled ?? false;
+          const isSaved = !!provider;
 
           return (
             <div key={config.type} className="rounded-lg border">
@@ -283,21 +284,32 @@ export function SSOSettings() {
                     <p className="text-sm text-muted-foreground">{config.description}</p>
                   </div>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggle(config.type);
-                  }}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    isEnabled ? 'bg-primary' : 'bg-muted'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      isEnabled ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
+                <div className="relative" title={!isSaved ? 'Save configuration first to enable' : undefined}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isSaved) {
+                        handleToggle(config.type);
+                      } else {
+                        addToast({
+                          type: 'warning',
+                          title: 'Configuration required',
+                          message: `Please configure and save ${config.name} settings first`,
+                        });
+                        setExpandedProvider(config.type);
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      isEnabled ? 'bg-primary' : 'bg-muted'
+                    } ${!isSaved ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        isEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
 
               {/* Accordion Content */}
@@ -368,7 +380,7 @@ export function SSOSettings() {
                     <Button
                       variant="outline"
                       onClick={() => handleTest(config.type)}
-                      disabled={testingProvider === config.type || !isEnabled}
+                      disabled={testingProvider === config.type || !isSaved}
                       size="sm"
                     >
                       {testingProvider === config.type ? (
