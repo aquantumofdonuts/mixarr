@@ -112,14 +112,9 @@ export class PlexAuthService {
     user?: { id: number; username: string; displayName: string; role: string };
     error?: string;
   }> {
-    // Find user by email (case-insensitive)
+    // Find user by email (MySQL is case-insensitive by default for VARCHAR)
     const user = await this.prisma.user.findFirst({
-      where: { 
-        email: {
-          equals: plexUser.email,
-          mode: 'insensitive',
-        },
-      },
+      where: { email: plexUser.email.toLowerCase() },
     });
 
     if (!user) {
