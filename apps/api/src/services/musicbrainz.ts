@@ -175,10 +175,53 @@ export class MusicBrainzService {
       return aliasMatch;
     }
 
-    // Priority 3: High score match (>= 95) - must be very confident for partial matches
+    // Helper: Get significant words from a name (filter out short words like "the", "a", "of")
+    const getSignificantWords = (text: string): Set<string> => {
+      const stopWords = new Set(['the', 'a', 'an', 'of', 'and', '&']);
+      return new Set(
+        text.toLowerCase().split(/\s+/)
+          .filter(word => word.length > 1 && !stopWords.has(word))
+      );
+    };
+
+    // Helper: Check if search words have sufficient overlap with artist name
+    const hasWordOverlap = (artistName: string, searchName: string): boolean => {
+      const artistWords = getSignificantWords(artistName);
+      const searchWords = getSignificantWords(searchName);
+      
+      if (searchWords.size === 0 || artistWords.size === 0) {
+        return false;
+      }
+      
+      // Count how many search words appear in the artist name
+      let matchCount = 0;
+      for (const word of searchWords) {
+        if (artistWords.has(word)) {
+          matchCount++;
+        }
+      }
+      
+      // For multi-word names: require ALL words to match (strict matching)
+      // "neil amsterdam" searching → "Neil Amsterdam" must match, not "Neil Young"
+      // For single-word names: require that word to match
+      if (searchWords.size > 1) {
+        // Multi-word: all words must match
+        return matchCount === searchWords.size;
+      } else {
+        // Single word: must match
+        return matchCount >= 1;
+      }
+    };
+
+    // Priority 3: High score match (>= 95) BUT require word overlap to avoid wrong artists
     const sorted = artists.sort((a, b) => (b.score || 0) - (a.score || 0));
     if (sorted[0].score && sorted[0].score >= 95) {
-      return sorted[0];
+      // Only accept high-score match if there's sufficient word overlap
+      if (hasWordOverlap(sorted[0].name, name)) {
+        return sorted[0];
+      }
+      // Log when we reject a high-score match due to name mismatch
+      console.log(`MusicBrainz: Rejected high-score match "${sorted[0].name}" (score ${sorted[0].score}) for query "${name}" - insufficient word overlap`);
     }
 
     // Priority 4: Name contains the full search term (for "Artist Name" matching "Artist Name feat. X")
