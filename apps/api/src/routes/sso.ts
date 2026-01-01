@@ -134,17 +134,25 @@ ssoRouter.patch('/providers/:type/toggle', async (req, res) => {
   }
 });
 
-// Test connection (placeholder)
+// Test connection
 ssoRouter.post('/providers/:type/test', async (req, res) => {
   try {
     if (!isValidProviderType(req.params.type)) {
-      res.status(400).json({ error: 'Invalid provider type' });
+      res.status(400).json({ success: false, message: 'Invalid provider type' });
       return;
     }
     const type = req.params.type;
+    
+    const provider = await ssoService.getByType(type);
+    if (!provider) {
+      res.status(404).json({ success: false, message: 'Provider not configured. Save configuration first.' });
+      return;
+    }
+
+    // Provider-specific tests will be added next
     res.json({ success: true, message: `${type} connection test not yet implemented` });
   } catch (error) {
     console.error('Failed to test SSO provider:', error);
-    res.status(500).json({ error: 'Connection test failed' });
+    res.status(500).json({ success: false, message: 'Connection test failed' });
   }
 });
