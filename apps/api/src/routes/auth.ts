@@ -8,6 +8,7 @@ import { SsoProviderService } from '../services/sso-provider.js';
 import { createGoogleStrategy } from '../auth/strategies/google.js';
 import { createLdapStrategy } from '../auth/strategies/ldap.js';
 import { createSamlStrategy } from '../auth/strategies/saml.js';
+import { PlexAuthService } from '../auth/strategies/plex.js';
 
 export const authRouter = Router();
 const ssoService = new SsoProviderService(prisma);
@@ -182,6 +183,97 @@ authRouter.post('/sso/saml/callback', (req, res, next) => {
       return res.redirect('/');
     });
   })(req, res, next);
+});
+
+// Store Plex PINs temporarily (in production, use Redis/session)
+const plexPins = new Map<number, number>(); // pinId -> timestamp
+
+// Plex - initiate
+authRouter.get('/sso/plex', async (req, res) => {
+  const provider = await prisma.ssoProvider.findUnique({
+    where: { type: 'plex' },
+  });
+  
+  if (!provider?.isEnabled) {
+    res.status(400).json({ error: 'Plex authentication is not available' });
+    return;
+  }
+
+  const config = provider.config as { restrictToServerId?: string };
+  const baseUrlSetting = await prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
+  const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
+
+  const plexService = new PlexAuthService({
+    callbackUrl: `${baseUrl}/api/auth/sso/plex/callback`,
+    restrictToServerId: config.restrictToServerId,
+  }, prisma);
+
+  try {
+    const { pinId, authUrl } = await plexService.createAuthUrl();
+    plexPins.set(pinId, Date.now());
+    
+    // Store pinId in session for callback
+    (req.session as any).plexPinId = pinId;
+    
+    res.redirect(authUrl);
+  } catch (error) {
+    console.error('Plex auth error:', error);
+    res.redirect('/login?error=plex_init_failed');
+  }
+});
+
+// Plex - callback
+authRouter.get('/sso/plex/callback', async (req, res) => {
+  const pinId = (req.session as any)?.plexPinId;
+  
+  if (!pinId) {
+    return res.redirect('/login?error=missing_plex_pin');
+  }
+
+  const provider = await prisma.ssoProvider.findUnique({
+    where: { type: 'plex' },
+  });
+  
+  if (!provider?.isEnabled) {
+    return res.redirect('/login?error=plex_not_available');
+  }
+
+  const config = provider.config as { restrictToServerId?: string };
+  const baseUrlSetting = await prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
+  const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
+
+  const plexService = new PlexAuthService({
+    callbackUrl: `${baseUrl}/api/auth/sso/plex/callback`,
+    restrictToServerId: config.restrictToServerId,
+  }, prisma);
+
+  try {
+    const plexAuth = await plexService.handleCallback(pinId);
+    
+    if (!plexAuth) {
+      return res.redirect('/login?error=plex_auth_failed');
+    }
+
+    const result = await plexService.authenticateUser(plexAuth.user);
+    
+    if (!result.success || !result.user) {
+      const msg = encodeURIComponent(result.error || 'Authentication failed');
+      return res.redirect(`/login?error=${msg}`);
+    }
+
+    req.logIn(result.user, (loginErr) => {
+      if (loginErr) {
+        return res.redirect('/login?error=login_failed');
+      }
+      // Clean up
+      plexPins.delete(pinId);
+      delete (req.session as any).plexPinId;
+      return res.redirect('/');
+    });
+  } catch (error) {
+    console.error('Plex callback error:', error);
+    res.redirect('/login?error=plex_callback_failed');
+  }
 });
 
 // Create first admin user (setup wizard) - rate limited
