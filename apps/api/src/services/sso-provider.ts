@@ -106,6 +106,11 @@ export class SsoProviderService {
    * Mask secret fields in config
    */
   private maskSecrets(provider: SsoProvider): SsoProvider {
+    // Handle null, undefined, or non-object config
+    if (!provider.config || typeof provider.config !== 'object' || Array.isArray(provider.config)) {
+      return provider;
+    }
+    
     const config = provider.config as Record<string, unknown>;
     const masked: Record<string, string | unknown> = {};
     

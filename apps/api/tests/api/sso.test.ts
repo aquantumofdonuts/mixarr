@@ -235,4 +235,38 @@ describe('SsoProviderService', () => {
       });
     });
   });
+
+  describe('maskSecrets edge cases', () => {
+    it('should handle empty config', async () => {
+      mockPrisma.ssoProvider.findMany.mockResolvedValue([{
+        id: 1,
+        type: 'plex',
+        name: 'Plex',
+        config: {},
+        isEnabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }]);
+
+      const result = await service.getAll();
+      
+      expect(result[0].config).toEqual({});
+    });
+
+    it('should handle null config', async () => {
+      mockPrisma.ssoProvider.findMany.mockResolvedValue([{
+        id: 1,
+        type: 'plex',
+        name: 'Plex',
+        config: null,
+        isEnabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }]);
+
+      const result = await service.getAll();
+      
+      expect(result[0].config).toBeNull();
+    });
+  });
 });
