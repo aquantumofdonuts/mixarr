@@ -216,6 +216,14 @@ export function createMockPrisma() {
       upsert: vi.fn(),
       delete: vi.fn(),
     },
+    authIdentity: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    },
     $transaction: vi.fn((fn: (tx: unknown) => unknown) => fn({})),
   };
 }
