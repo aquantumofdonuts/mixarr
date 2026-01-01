@@ -9,6 +9,10 @@ import { multiSourceSearch, resolveMbid, SearchSource } from '../services/multi-
 import { MetadataEnrichmentService } from '../services/metadata-enrichment.js';
 import { notificationService } from '../services/notifications.js';
 import { aiService } from '../services/ai.js';
+import { addLogEntry } from './logs.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Search');
 
 export const searchRouter = Router();
 
@@ -96,7 +100,7 @@ searchRouter.get('/artists', async (req, res) => {
 
     res.json({ results: finalResults });
   } catch (error) {
-    console.error('Search /artists error:', error);
+    log.error('Search /artists error:', error);
     const message = error instanceof Error ? error.message : 'Search failed';
     res.status(500).json({ error: `Lidarr API error: ${message}` });
   }
@@ -139,7 +143,7 @@ searchRouter.get('/discover', async (req, res) => {
       sources: enabledSources,
     });
   } catch (error) {
-    console.error('Multi-source search error:', error);
+    log.error('Multi-source search error:', error);
     const message = error instanceof Error ? error.message : 'Search failed';
     res.status(500).json({ error: message });
   }
@@ -185,7 +189,7 @@ searchRouter.post('/ai', async (req, res) => {
 
     // Get AI recommendations
     const truncated = prompt.length > 50 ? `${prompt.substring(0, 50)}...` : prompt;
-    console.log(`[AI Search] Processing prompt: "${truncated}"`);
+    log.debug(`Processing prompt: "${truncated}"`);
     const { artists: artistNames, providers } = await aiService.searchByPrompt(prompt.trim(), limit);
 
     if (artistNames.length === 0) {
@@ -203,7 +207,7 @@ searchRouter.post('/ai', async (req, res) => {
     try {
       await cache.refresh();
     } catch (cacheError) {
-      console.error('[AI Search] Failed to refresh library cache:', cacheError);
+      log.error('Failed to refresh library cache:', cacheError);
       // Continue without cache - inLibrary will be false for all
     }
 
@@ -221,7 +225,7 @@ searchRouter.post('/ai', async (req, res) => {
       try {
         const searchResults = await lidarr.searchArtist(name);
         if (searchResults.length === 0) {
-          console.log(`[AI Search] No Lidarr results for: ${name}`);
+          log.debug(`No Lidarr results for: ${name}`);
           enrichedResults.push(null);
           continue;
         }
@@ -237,7 +241,7 @@ searchRouter.post('/ai', async (req, res) => {
           inLibrary,
         });
       } catch (error) {
-        console.error(`[AI Search] Error resolving artist "${name}":`, error);
+        log.error(`Error resolving artist "${name}":`, error);
         enrichedResults.push(null);
       }
     }
@@ -255,7 +259,7 @@ searchRouter.post('/ai', async (req, res) => {
       imageUrl: imageMap.get(r.artistName) || null,
     }));
 
-    console.log(`[AI Search] Returning ${finalResults.length} results from ${providers.join(', ')}`);
+    log.debug(`Returning ${finalResults.length} results from ${providers.join(', ')}`);
 
     res.json({
       prompt: prompt.trim(),
@@ -263,7 +267,7 @@ searchRouter.post('/ai', async (req, res) => {
       aiProviders: providers,
     });
   } catch (error) {
-    console.error('[AI Search] Error:', error);
+    log.error('Error:', error);
     const message = error instanceof Error ? error.message : 'AI search failed';
     res.status(500).json({ error: message });
   }
@@ -346,8 +350,30 @@ searchRouter.post('/discover/add', async (req, res) => {
 
     // Use addArtistWithRefresh to trigger metadata refresh for complete MusicBrainz data
     const { artist, refreshCommand } = await lidarr.addArtistWithRefresh(resolvedMbid, qpId, mpId, rfPath);
+    
+    // Log the successful artist addition
+    await addLogEntry('info', 'search', `Added artist "${artistName}" from search`, {
+      artistName,
+      mbid: resolvedMbid,
+      source: 'discover-search',
+      userId: req.user!.id,
+      username: req.user!.username,
+      status: 'success',
+    });
+    
     res.json({ success: true, artist, mbid: resolvedMbid, refreshTriggered: !!refreshCommand });
   } catch (error) {
+    // Log the failed artist addition
+    await addLogEntry('error', 'search', `Failed to add artist "${req.body.artistName}" from search`, {
+      artistName: req.body.artistName,
+      mbid: req.body.mbid,
+      source: 'discover-search',
+      userId: req.user!.id,
+      username: req.user!.username,
+      status: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to add artist' 
     });
@@ -399,13 +425,34 @@ searchRouter.post('/artists/add', async (req, res) => {
     // Use addArtistWithRefresh to trigger metadata refresh for complete MusicBrainz data
     const { artist, refreshCommand } = await lidarr.addArtistWithRefresh(foreignArtistId, qpId, mpId, rfPath);
     
+    // Log the successful artist addition
+    const artistName = artist.artistName || 'Unknown Artist';
+    await addLogEntry('info', 'search', `Added artist "${artistName}" from search`, {
+      artistName,
+      mbid: foreignArtistId,
+      source: 'search',
+      userId: req.user!.id,
+      username: req.user!.username,
+      status: 'success',
+    });
+    
     // Send notification
     await notificationService.send(req.user!.id, 'artist.added', {
-      artistName: artist.artistName || 'Unknown Artist',
+      artistName,
     });
     
     res.json({ success: true, artist, refreshTriggered: !!refreshCommand });
   } catch (error) {
+    // Log the failed artist addition
+    await addLogEntry('error', 'search', `Failed to add artist from search`, {
+      mbid: req.body.foreignArtistId,
+      source: 'search',
+      userId: req.user!.id,
+      username: req.user!.username,
+      status: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to add artist' 
     });
@@ -627,7 +674,7 @@ searchRouter.post('/lidarr/artists/refresh-incomplete', async (req, res) => {
         // Small delay between refreshes
         await new Promise(resolve => setTimeout(resolve, 500));
       } catch (err) {
-        console.error(`Failed to refresh artist ${artist.id} (${artist.artistName}):`, err);
+        log.error(`Failed to refresh artist ${artist.id} (${artist.artistName}):`, err);
       }
     }
 
@@ -694,7 +741,7 @@ searchRouter.post('/lidarr/artists/refresh-by-issue', async (req, res) => {
         // Small delay between refreshes
         await new Promise(resolve => setTimeout(resolve, 500));
       } catch (err) {
-        console.error(`Failed to refresh artist ${artist.id} (${artist.artistName}):`, err);
+        log.error(`Failed to refresh artist ${artist.id} (${artist.artistName}):`, err);
       }
     }
 
@@ -755,7 +802,7 @@ searchRouter.post('/lidarr/artists/:id/enrich', async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    console.error('Error enriching artist:', error);
+    log.error('Error enriching artist:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to enrich artist',
     });
@@ -832,7 +879,7 @@ searchRouter.post('/lidarr/artists/enrich-incomplete', async (req, res) => {
       results,
     });
   } catch (error) {
-    console.error('Error enriching incomplete artists:', error);
+    log.error('Error enriching incomplete artists:', error);
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to enrich artists',
     });

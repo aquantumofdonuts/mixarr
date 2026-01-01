@@ -160,7 +160,7 @@ authRouter.get('/sso/saml', async (req, res, next) => {
     issuer: baseUrl,
     emailAttribute: config.emailAttribute,
     displayNameAttribute: config.displayNameAttribute,
-  }, prisma));
+  }, prisma) as any); // Type assertion needed for passport-saml compatibility
 
   passport.authenticate('saml-sso')(req, res, next);
 });

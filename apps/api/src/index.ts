@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import { createLogger } from './lib/logger.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { connectionsRouter } from './routes/connections.js';
@@ -96,21 +97,23 @@ io.use((socket, next) => {
   });
 });
 
+const log = createLogger('Server');
+
 io.on('connection', (socket) => {
   const userId = (socket as any).userId;
   // Join a room for this user so we can send targeted events
   socket.join(`user:${userId}`);
-  console.log(`Client connected: ${socket.id} (user: ${userId})`);
+  log.debug(`Client connected: ${socket.id} (user: ${userId})`);
   
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    log.debug('Client disconnected:', socket.id);
   });
 });
 
 const PORT = process.env.PORT || 3010;
 
 httpServer.listen(PORT, () => {
-  console.log(`API server running on port ${PORT}`);
+  log.info(`API server running on port ${PORT}`);
   
   // Initialize job scheduler
   initializeScheduler();
@@ -118,24 +121,24 @@ httpServer.listen(PORT, () => {
 
 // Graceful shutdown
 const gracefulShutdown = async (signal: string) => {
-  console.log(`Received ${signal}, shutting down gracefully...`);
+  log.info(`Received ${signal}, shutting down gracefully...`);
   
   // Stop accepting new connections
   httpServer.close(() => {
-    console.log('HTTP server closed');
+    log.info('HTTP server closed');
   });
   
   // Close Redis connection
   try {
     await redis.quit();
-    console.log('Redis connection closed');
+    log.info('Redis connection closed');
   } catch (err) {
-    console.error('Error closing Redis:', err);
+    log.error('Error closing Redis:', err);
   }
   
   // Give time for cleanup
   setTimeout(() => {
-    console.log('Shutdown complete');
+    log.info('Shutdown complete');
     process.exit(0);
   }, 1000);
 };

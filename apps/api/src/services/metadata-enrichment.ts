@@ -6,11 +6,14 @@ import { LastfmMetadataAdapter } from './adapters/lastfm-adapter.js';
 import { DeezerMetadataAdapter } from './adapters/deezer-adapter.js';
 import { DiscogsMetadataAdapter } from './adapters/discogs-adapter.js';
 import { MetadataMerger } from './metadata-merger.js';
+import { createLogger } from '../lib/logger.js';
 import type {
   NormalizedArtistMetadata,
   EnrichmentResult,
   EnrichmentOptions,
 } from './metadata-enrichment.types.js';
+
+const log = createLogger('MetadataEnrichment');
 
 /**
  * Service to enrich Lidarr artist metadata from multiple sources
@@ -44,23 +47,23 @@ export class MetadataEnrichmentService {
     try {
       // Get current artist from Lidarr
       const artist = await this.lidarrService.getArtist(artistId);
-      console.log(`[MetadataEnrichment] Enriching artist: ${artist.artistName} (ID: ${artistId})`);
-      console.log(`[MetadataEnrichment] Current state - overview: ${artist.overview ? 'YES' : 'NO'}, genres: ${artist.genres?.length || 0}, images: ${artist.images?.length || 0}`);
+      log.debug(`Enriching artist: ${artist.artistName} (ID: ${artistId})`);
+      log.debug(`Current state - overview: ${artist.overview ? 'YES' : 'NO'}, genres: ${artist.genres?.length || 0}, images: ${artist.images?.length || 0}`);
 
       // Fetch metadata from all sources in parallel
       const metadataSources = await this.fetchFromAllSources(artist.artistName);
-      console.log(`[MetadataEnrichment] Fetched ${metadataSources.length} sources with data`);
+      log.debug(`Fetched ${metadataSources.length} sources with data`);
       for (const source of metadataSources) {
-        console.log(`[MetadataEnrichment] Source ${source.source}: overview=${source.overview ? 'YES' : 'NO'}, genres=${source.genres?.length || 0}, images=${source.images?.length || 0}`);
+        log.debug(`Source ${source.source}: overview=${source.overview ? 'YES' : 'NO'}, genres=${source.genres?.length || 0}, images=${source.images?.length || 0}`);
       }
 
       // Merge using Best Quality heuristics
       const merged = this.merger.merge(metadataSources);
-      console.log(`[MetadataEnrichment] Merged result: overview=${merged.overview ? 'YES' : 'NO'}, genres=${merged.genres.length}, images=${merged.images.length}`);
+      log.debug(`Merged result: overview=${merged.overview ? 'YES' : 'NO'}, genres=${merged.genres.length}, images=${merged.images.length}`);
 
       // Determine what fields would be updated
       const fieldsToUpdate = this.getFieldsToUpdate(artist, merged, forceUpdate);
-      console.log(`[MetadataEnrichment] Fields to update: ${fieldsToUpdate.join(', ') || 'NONE'}`);
+      log.debug(`Fields to update: ${fieldsToUpdate.join(', ') || 'NONE'}`);
 
       if (fieldsToUpdate.length === 0) {
         return {
@@ -92,9 +95,9 @@ export class MetadataEnrichmentService {
           }));
         }
 
-        console.log(`[MetadataEnrichment] Updating Lidarr with:`, JSON.stringify(updates, null, 2));
+        log.debug('Updating Lidarr with:', updates);
         await this.lidarrService.patchArtist(artistId, updates);
-        console.log(`[MetadataEnrichment] Lidarr update complete`);
+        log.debug('Lidarr update complete');
       }
 
       return {
@@ -108,7 +111,7 @@ export class MetadataEnrichmentService {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[MetadataEnrichment] Error enriching artist ${artistId}:`, error);
+      log.error(`Error enriching artist ${artistId}:`, error);
 
       return {
         artistId,

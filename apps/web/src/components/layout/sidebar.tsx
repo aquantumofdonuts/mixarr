@@ -35,9 +35,9 @@ const navItems = [
   { href: '/discover', label: 'Discover', icon: Sparkles },
   { href: '/subscriptions', label: 'Subscriptions', icon: TrendingUp },
   { href: '/queue', label: 'Review Queue', icon: ListChecks },
-  { href: '/jobs', label: 'Jobs', icon: Layers },
-  { href: '/logs', label: 'Logs', icon: FileText },
-  { href: '/users', label: 'Users', icon: Users },
+  { href: '/jobs', label: 'Jobs', icon: Layers, adminOnly: true },
+  { href: '/logs', label: 'Logs', icon: FileText, adminOnly: true },
+  { href: '/users', label: 'Users', icon: Users, adminOnly: true },
   { href: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
 ];
 
@@ -185,12 +185,12 @@ export function Sidebar() {
                 <button
                   onClick={() => {
                     setUserMenuOpen(false);
-                    router.push('/settings');
+                    router.push(user?.role === 'admin' ? '/settings' : '/users/me');
                   }}
                   className="flex w-full items-center gap-2 rounded px-3 py-2 text-sm hover:bg-accent"
                 >
                   <Settings className="h-4 w-4" />
-                  Settings
+                  {user?.role === 'admin' ? 'Settings' : 'My Profile'}
                 </button>
                 <button
                   onClick={() => {

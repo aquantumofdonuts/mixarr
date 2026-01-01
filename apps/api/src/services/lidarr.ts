@@ -5,6 +5,9 @@
  */
 
 import { rateLimit } from './rate-limiter.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Lidarr');
 
 interface LidarrConfig {
   url: string;
@@ -127,7 +130,7 @@ export class LidarrService {
         // Add delay between retries with exponential backoff
         if (attempt > 0) {
           const delay = this.baseDelay * Math.pow(2, attempt - 1) + Math.random() * 500;
-          console.log(`[Lidarr] Retry ${attempt}/${this.maxRetries} after ${Math.round(delay)}ms for ${endpoint}`);
+          log.debug(`Retry ${attempt}/${this.maxRetries} after ${Math.round(delay)}ms for ${endpoint}`);
           await this.sleep(delay);
           await rateLimit('lidarr'); // Re-acquire rate limit for retry
         }
@@ -265,8 +268,8 @@ export class LidarrService {
       },
     };
     
-    console.log(`[Lidarr] Adding artist ${artist.artistName} (MBID: ${foreignArtistId})`);
-    console.log(`[Lidarr] addOptions: ${JSON.stringify(requestBody.addOptions)}`);
+    log.info(`Adding artist ${artist.artistName} (MBID: ${foreignArtistId})`);
+    log.debug('addOptions', requestBody.addOptions);
 
     return this.request<LidarrArtist>('/artist', {
       method: 'POST',
@@ -325,9 +328,9 @@ export class LidarrService {
       ...updates,
     };
 
-    console.log(`[Lidarr] patchArtist ${artistId}: Sending overview=${merged.overview ? 'YES' : 'NO'}, genres=${merged.genres?.length || 0}, images=${merged.images?.length || 0}`);
+    log.debug(`patchArtist ${artistId}: Sending overview=${merged.overview ? 'YES' : 'NO'}, genres=${merged.genres?.length || 0}, images=${merged.images?.length || 0}`);
     const result = await this.updateArtist(merged);
-    console.log(`[Lidarr] patchArtist ${artistId}: Response overview=${result.overview ? 'YES' : 'NO'}, genres=${result.genres?.length || 0}, images=${result.images?.length || 0}`);
+    log.debug(`patchArtist ${artistId}: Response overview=${result.overview ? 'YES' : 'NO'}, genres=${result.genres?.length || 0}, images=${result.images?.length || 0}`);
     return result;
   }
 
@@ -473,7 +476,7 @@ export class LidarrService {
 
       // Wait for Lidarr to fetch artist metadata (albums list)
       // Lidarr queues a RefreshArtist command when an artist is added
-      console.log(`[Lidarr] Waiting for artist metadata to be fetched...`);
+      log.debug('Waiting for artist metadata to be fetched...');
       await this.sleep(2000); // Give Lidarr time to start fetching
     }
 
@@ -492,7 +495,7 @@ export class LidarrService {
       }
       
       if (attempt < maxRetries) {
-        console.log(`[Lidarr] Album not found yet, retry ${attempt}/${maxRetries}...`);
+        log.debug(`Album not found yet, retry ${attempt}/${maxRetries}...`);
         await this.sleep(retryDelay);
       }
     }
@@ -510,9 +513,9 @@ export class LidarrService {
     // Step 5: Trigger search for that album only (if not already downloaded)
     const percentComplete = updatedAlbum.statistics?.percentOfTracks ?? 0;
     if (percentComplete >= 100) {
-      console.log(`[Lidarr] Album "${updatedAlbum.title}" already fully downloaded (${percentComplete}%), skipping search`);
+      log.debug(`Album "${updatedAlbum.title}" already fully downloaded (${percentComplete}%), skipping search`);
     } else {
-      console.log(`[Lidarr] Album "${updatedAlbum.title}" at ${percentComplete}% - triggering search`);
+      log.debug(`Album "${updatedAlbum.title}" at ${percentComplete}% - triggering search`);
       await this.searchAlbumCommand([updatedAlbum.id]);
     }
 

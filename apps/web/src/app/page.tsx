@@ -1,6 +1,6 @@
 'use client';
 
-import { Music2, Plug, TrendingUp, Activity, Clock, CheckCircle2, Search, FileText, Loader2 } from 'lucide-react';
+import { Plug, TrendingUp, Activity, Clock, CheckCircle2, Search, FileText, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/layout/page-header';
 import { Card, CardContent, Badge } from '@/components/ui';
@@ -10,7 +10,6 @@ const quickLinks = [
   { href: '/connections', title: 'Connections', description: 'Configure music services', icon: Plug },
   { href: '/search', title: 'Search', description: 'Find new artists', icon: Search },
   { href: '/subscriptions', title: 'Subscriptions', description: 'Automated music discovery', icon: TrendingUp },
-  { href: '/spotify-import', title: 'Spotify Import', description: 'Import your personal library', icon: Music2 },
   { href: '/logs', title: 'Logs', description: 'View activity and errors', icon: FileText },
 ];
 

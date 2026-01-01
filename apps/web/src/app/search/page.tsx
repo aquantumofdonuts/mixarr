@@ -3,9 +3,11 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Button, Card, CardContent, Input, Badge, useToast, LoadingOverlay, Modal, ModalFooter, Select } from '@/components/ui';
 import { PageHeader } from '@/components/layout/page-header';
-import { GenrePills } from '@/components/GenrePills';
+import { ArtistCard } from '@/components/ArtistCard';
+import { AlbumCard } from '@/components/AlbumCard';
+import { ExternalLinks } from '@/components/ExternalLinks';
 import { api } from '@/lib/api';
-import { Search as SearchIcon, Plus, Check, Music, ChevronLeft, ChevronRight, CheckSquare, Square, X, Loader2 } from 'lucide-react';
+import { Search as SearchIcon, Plus, Music, ChevronLeft, ChevronRight, CheckSquare, Square, X, Loader2 } from 'lucide-react';
 
 type SearchType = 'artist' | 'album' | 'label' | 'year' | 'ai';
 type SearchSource = 'spotify' | 'deezer' | 'tidal' | 'bandcamp';
@@ -585,60 +587,26 @@ export default function SearchPage() {
             {(searchType === 'artist' || searchType === 'ai') && (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {(results as ArtistResult[]).map((artist, i) => (
-                  <Card key={`${artist.foreignArtistId || artist.artistName}-${i}`} className="overflow-hidden">
-                    <div className="flex">
-                      {!artist.inLibrary && artist.foreignArtistId && (
-                        <button onClick={() => toggleSelect(artist.foreignArtistId)} className="p-2 flex items-center justify-center hover:bg-muted">
-                          {selectedIds.has(artist.foreignArtistId) ? <CheckSquare className="h-5 w-5 text-primary" /> : <Square className="h-5 w-5 text-muted-foreground" />}
-                        </button>
-                      )}
-                      <div className="w-20 h-20 flex-shrink-0 bg-muted flex items-center justify-center">
-                        {artist.imageUrl ? <img src={artist.imageUrl} alt={artist.artistName} className="w-full h-full object-cover" /> : <Music className="h-8 w-8 text-muted-foreground" />}
-                      </div>
-                      <div className="flex-1 p-3 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <h3 className="font-semibold truncate text-sm">{artist.artistName}</h3>
-                            {/* Source badges */}
-                            {artist.sources && artist.sources.length > 0 && (
-                              <div className="flex gap-1 mt-1 flex-wrap">
-                                {artist.sources.map((source: string) => (
-                                  <Badge key={source} variant="outline" className="text-xs py-0 px-1.5">
-                                    {source}
-                                  </Badge>
-                                ))}
-                              </div>
-                            )}
-                            {artist.lastfm?.tags && artist.lastfm.tags.length > 0 && (
-                              <GenrePills genres={artist.lastfm.tags} maxDisplay={3} size="sm" />
-                            )}
-                          </div>
-                          {artist.inLibrary ? (
-                            <Badge variant="success" className="flex-shrink-0 text-xs"><Check className="h-3 w-3 mr-1" /> In Lidarr</Badge>
-                          ) : (
-                            <Button size="sm" onClick={() => handleAdd(artist)} disabled={addingArtist === artist.foreignArtistId || addingArtist === artist.artistName} className="flex-shrink-0 text-xs h-7">
-                              {(addingArtist === artist.foreignArtistId || addingArtist === artist.artistName) ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-4 w-4" />}
-                            </Button>
-                          )}
-                        </div>
-                        {/* Stats */}
-                        {(artist.popularity || artist.followers || artist.fans) && (
-                          <div className="flex gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
-                            {artist.popularity !== undefined && artist.popularity > 0 && (
-                              <span>Pop: {artist.popularity}</span>
-                            )}
-                            {artist.followers !== undefined && artist.followers > 0 && (
-                              <span>{(artist.followers / 1000).toFixed(0)}K followers</span>
-                            )}
-                            {artist.fans !== undefined && artist.fans > 0 && (
-                              <span>{(artist.fans / 1000).toFixed(0)}K fans</span>
-                            )}
-                          </div>
-                        )}
-                        {artist.lastfm && <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground"><span>{artist.lastfm.listeners.toLocaleString()} listeners</span></div>}
-                      </div>
-                    </div>
-                  </Card>
+                  <ArtistCard
+                    key={`${artist.foreignArtistId || artist.artistName}-${i}`}
+                    artistName={artist.artistName}
+                    foreignArtistId={artist.foreignArtistId}
+                    imageUrl={artist.imageUrl}
+                    sources={artist.sources}
+                    inLibrary={artist.inLibrary}
+                    genres={artist.lastfm?.tags}
+                    popularity={artist.popularity}
+                    followers={artist.followers}
+                    fans={artist.fans}
+                    listeners={artist.lastfm?.listeners}
+                    spotifyId={artist.spotifyId}
+                    mbid={artist.foreignArtistId}
+                    showCheckbox={true}
+                    isSelected={selectedIds.has(artist.foreignArtistId)}
+                    onSelect={() => toggleSelect(artist.foreignArtistId)}
+                    onAdd={() => handleAdd(artist)}
+                    isAdding={addingArtist === artist.foreignArtistId || addingArtist === artist.artistName}
+                  />
                 ))}
               </div>
             )}
@@ -646,32 +614,22 @@ export default function SearchPage() {
             {searchType === 'album' && (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {(results as AlbumResult[]).map((album, i) => (
-                  <Card key={`${album.id}-${i}`} className="p-4">
-                    <h3 className="font-semibold truncate">{album.title}</h3>
-                    {album['artist-credit']?.[0]?.artist && (
-                      <div className="flex items-center justify-between mt-1">
-                        <p className="text-sm text-muted-foreground truncate">{album['artist-credit'][0].artist.name}</p>
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={async () => {
-                            const artistId = album['artist-credit']?.[0]?.artist?.id;
-                            const artistName = album['artist-credit']?.[0]?.artist?.name || 'Artist';
-                            if (!artistId) return;
-                            const { error } = await api.post('/api/search/artists/add', { foreignArtistId: artistId });
-                            if (error) {
-                              handleAddArtistError(error, artistName);
-                            } else {
-                              addToast({ type: 'success', title: 'Artist added', message: `${artistName} added to Lidarr` });
-                            }
-                          }}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
-                    {album.date && <p className="text-xs text-muted-foreground mt-1">{album.date}</p>}
-                  </Card>
+                  <AlbumCard
+                    key={`${album.id}-${i}`}
+                    id={album.id}
+                    title={album.title}
+                    artistId={album['artist-credit']?.[0]?.artist?.id}
+                    artistName={album['artist-credit']?.[0]?.artist?.name}
+                    date={album.date}
+                    onAddArtist={async (artistId, artistName) => {
+                      const { error } = await api.post('/api/search/artists/add', { foreignArtistId: artistId });
+                      if (error) {
+                        handleAddArtistError(error, artistName);
+                      } else {
+                        addToast({ type: 'success', title: 'Artist added', message: `${artistName} added to Lidarr` });
+                      }
+                    }}
+                  />
                 ))}
               </div>
             )}
@@ -810,7 +768,7 @@ export default function SearchPage() {
                   {displayedLabelArtists.map((artist) => (
                     <div
                       key={artist.id}
-                      className="flex items-center gap-3 p-2 rounded hover:bg-muted cursor-pointer"
+                      className="flex items-center gap-3 p-3 rounded hover:bg-muted cursor-pointer"
                       onClick={() => toggleLabelArtistSelect(artist.id)}
                     >
                       {selectedLabelArtistIds.has(artist.id) ? (
@@ -818,14 +776,17 @@ export default function SearchPage() {
                       ) : (
                         <Square className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                       )}
-                      <div className="w-10 h-10 rounded bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-md bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden">
                         {artist.imageUrl ? (
                           <img src={artist.imageUrl} alt={artist.name} className="w-full h-full object-cover" />
                         ) : (
-                          <Music className="h-5 w-5 text-muted-foreground" />
+                          <Music className="h-6 w-6 text-muted-foreground" />
                         )}
                       </div>
-                      <span className="font-medium">{artist.name}</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium block">{artist.name}</span>
+                        <ExternalLinks mbid={artist.id} artistName={artist.name} size="sm" />
+                      </div>
                     </div>
                   ))}
                   

@@ -46,6 +46,11 @@ export function setupPassport(app: Express): void {
           return done(null, false, { message: 'Invalid username or password' });
         }
 
+        // SSO users don't have a password hash
+        if (!user.passwordHash) {
+          return done(null, false, { message: 'Invalid username or password' });
+        }
+
         const isValid = await bcrypt.compare(password, user.passwordHash);
 
         if (!isValid) {

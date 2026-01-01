@@ -220,7 +220,7 @@ export default function QueuePage() {
                     </button>
                   )}
 
-                  <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-primary/10">
+                  <div className="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-md overflow-hidden bg-primary/10">
                     {item.imageUrl ? (
                       <img
                         src={item.imageUrl}
@@ -229,7 +229,7 @@ export default function QueuePage() {
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-primary">
-                        <Music2 className="h-5 w-5" />
+                        <Music2 className="h-6 w-6 sm:h-7 sm:w-7" />
                       </div>
                     )}
                   </div>

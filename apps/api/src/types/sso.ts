@@ -76,7 +76,7 @@ export function validateGoogleConfig(config: unknown): asserts config is GoogleC
   }
 }
 
-export function validatePlexConfig(config: unknown): asserts config is PlexConfig {
+export function validatePlexConfig(_config: unknown): asserts _config is PlexConfig {
   // Plex config is optional - no required fields
   return;
 }

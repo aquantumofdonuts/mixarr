@@ -11,8 +11,11 @@ import { fetchDeezerArtistImages } from '../services/deezer.js';
 import { addLogEntry } from './logs.js';
 import { parseSpotifyPlaylistUrl, importPublicPlaylist } from '../services/public-playlist.js';
 import { notificationService } from '../services/notifications.js';
+import { createLogger } from '../lib/logger.js';
 import type { ImportSource } from '@prisma/client';
 import type { Request } from 'express';
+
+const log = createLogger('Imports');
 
 export const importsRouter = Router();
 
@@ -349,7 +352,7 @@ importsRouter.put('/review/:id', async (req, res) => {
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Failed to update review item';
-    console.error('PUT /review/:id error:', error);
+    log.error('PUT /review/:id error:', error);
     await addLogEntry('error', 'review', `Failed to add artist to Lidarr: ${errorMsg}`, {
       error: errorMsg,
     });
@@ -439,16 +442,16 @@ importsRouter.post('/review/bulk', async (req, res) => {
     let failed = 0;
     const failedItems: Array<{ name: string; error: string }> = [];
 
-    console.log(`Processing ${items.length} review items for approval`);
+    log.debug(`Processing ${items.length} review items for approval`);
 
     for (const item of items) {
       try {
         const isAlbum = item.itemType === 'album';
-        console.log(`Processing review item: ${item.artistName}${isAlbum ? ` - ${item.albumName}` : ''} (mbid: ${item.mbid || 'none'}, type: ${item.itemType || 'artist'})`);
+        log.debug(`Processing review item: ${item.artistName}${isAlbum ? ` - ${item.albumName}` : ''} (mbid: ${item.mbid || 'none'}, type: ${item.itemType || 'artist'})`);
         
         // For artists: Skip if already in library
         if (!isAlbum && await cache.exists({ name: item.artistName, mbid: item.mbid || undefined })) {
-          console.log(`Artist ${item.artistName} already in library, marking approved`);
+          log.debug(`Artist ${item.artistName} already in library, marking approved`);
           await prisma.reviewItem.update({
             where: { id: item.id },
             data: { status: 'approved' },
@@ -464,24 +467,24 @@ importsRouter.post('/review/bulk', async (req, res) => {
         let foreignArtistId = item.mbid;
         
         if (!foreignArtistId) {
-          console.log(`No MBID for ${item.artistName}, searching Lidarr...`);
+          log.debug(`No MBID for ${item.artistName}, searching Lidarr...`);
           // Search Lidarr by artist name
           const searchResults = await lidarr.searchArtist(item.artistName);
           if (searchResults.length > 0) {
             foreignArtistId = searchResults[0].foreignArtistId;
-            console.log(`Found via Lidarr search: ${foreignArtistId}`);
+            log.debug(`Found via Lidarr search: ${foreignArtistId}`);
           } else {
             // Fall back to MusicBrainz
-            console.log(`Not found in Lidarr, trying MusicBrainz...`);
+            log.debug(`Not found in Lidarr, trying MusicBrainz...`);
             foreignArtistId = await musicbrainz.getMbidFromSpotifyArtist(item.artistName);
             if (foreignArtistId) {
-              console.log(`Found via MusicBrainz: ${foreignArtistId}`);
+              log.debug(`Found via MusicBrainz: ${foreignArtistId}`);
             }
           }
         }
 
         if (!foreignArtistId) {
-          console.log(`No MBID found for ${item.artistName}`);
+          log.debug(`No MBID found for ${item.artistName}`);
           failedItems.push({ name: item.artistName, error: 'Artist not found' });
           await prisma.reviewItem.update({
             where: { id: item.id },
@@ -496,7 +499,7 @@ importsRouter.post('/review/bulk', async (req, res) => {
 
         if (isAlbum) {
           // For album items: add artist as unmonitored and monitor specific album
-          console.log(`Adding album "${item.albumName}" by ${item.artistName} (${foreignArtistId}) to Lidarr...`);
+          log.debug(`Adding album "${item.albumName}" by ${item.artistName} (${foreignArtistId}) to Lidarr...`);
           
           // Get album MBID if not available
           let albumMbid = item.albumMbid;
@@ -505,12 +508,12 @@ importsRouter.post('/review/bulk', async (req, res) => {
             const albumSearchResults = await lidarr.searchAlbum(`${item.albumName} ${item.artistName}`);
             if (albumSearchResults.length > 0) {
               albumMbid = albumSearchResults[0].foreignAlbumId;
-              console.log(`Found album via Lidarr search: ${albumMbid}`);
+              log.debug(`Found album via Lidarr search: ${albumMbid}`);
             }
           }
           
           if (!albumMbid) {
-            console.log(`No album MBID found for "${item.albumName}" by ${item.artistName}`);
+            log.debug(`No album MBID found for "${item.albumName}" by ${item.artistName}`);
             failedItems.push({ name: `${item.artistName} - ${item.albumName}`, error: 'Album not found' });
             await prisma.reviewItem.update({
               where: { id: item.id },
@@ -527,7 +530,7 @@ importsRouter.post('/review/bulk', async (req, res) => {
             metadataProfiles[0].id,
             rootFolders[0].path
           );
-          console.log(`Successfully added album "${item.albumName}" by ${item.artistName} to Lidarr`);
+          log.info(`Successfully added album "${item.albumName}" by ${item.artistName} to Lidarr`);
           
           await addLogEntry('info', 'review', `Added album "${item.albumName}" by "${item.artistName}" to Lidarr`, {
             artistName: item.artistName,
@@ -537,14 +540,14 @@ importsRouter.post('/review/bulk', async (req, res) => {
           });
         } else {
           // For artist items: add with metadata refresh for complete data
-          console.log(`Adding ${item.artistName} (${foreignArtistId}) to Lidarr...`);
+          log.debug(`Adding ${item.artistName} (${foreignArtistId}) to Lidarr...`);
           await lidarr.addArtistWithRefresh(
             foreignArtistId,
             qualityProfiles[0].id,
             metadataProfiles[0].id,
             rootFolders[0].path
           );
-          console.log(`Successfully added ${item.artistName} to Lidarr`);
+          log.info(`Successfully added ${item.artistName} to Lidarr`);
           
           // Log each successful add
           await addLogEntry('info', 'review', `Added artist "${item.artistName}" to Lidarr`, {
@@ -560,7 +563,7 @@ importsRouter.post('/review/bulk', async (req, res) => {
         added++;
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`Failed to add ${item.artistName}:`, errorMsg);
+        log.error(`Failed to add ${item.artistName}:`, errorMsg);
         failedItems.push({ name: item.artistName, error: errorMsg });
         await prisma.reviewItem.update({
           where: { id: item.id },
@@ -897,7 +900,7 @@ importsRouter.get('/preview/spotify/:connectionId', async (req, res) => {
       filtered: artistMap.size - artists.length,
     });
   } catch (error) {
-    console.error('Spotify preview error:', error);
+    log.error('Spotify preview error:', error);
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to get Spotify preview' 
     });
@@ -995,7 +998,7 @@ importsRouter.get('/preview/lastfm/:connectionId', async (req, res) => {
       filtered: topArtists.artists.length - artists.length,
     });
   } catch (error) {
-    console.error('Last.fm preview error:', error);
+    log.error('Last.fm preview error:', error);
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to get Last.fm preview' 
     });
@@ -1075,7 +1078,7 @@ importsRouter.post('/preview/import', async (req, res) => {
       results,
     });
   } catch (error) {
-    console.error('Preview import error:', error);
+    log.error('Preview import error:', error);
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to import artists' 
     });
@@ -1136,7 +1139,7 @@ importsRouter.post('/public-playlist/preview', async (req, res) => {
       artists: artistsWithStatus,
     });
   } catch (error) {
-    console.error('Public playlist preview error:', error);
+    log.error('Public playlist preview error:', error);
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to fetch playlist' 
     });
@@ -1206,7 +1209,7 @@ importsRouter.post('/public-playlist/import', async (req, res) => {
       message: `Added ${addedArtists.length} artist(s) to review queue${skippedArtists.length > 0 ? `, ${skippedArtists.length} already queued` : ''}`,
     });
   } catch (error) {
-    console.error('Public playlist import error:', error);
+    log.error('Public playlist import error:', error);
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to import playlist' 
     });

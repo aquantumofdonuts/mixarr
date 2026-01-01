@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { ArrowLeft, Play, CheckCircle, XCircle, Clock, RefreshCw, Music2, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { ExternalLinks } from '@/components/ExternalLinks';
 
 interface Subscription {
   id: number;
@@ -312,7 +313,7 @@ export default function SubscriptionDetailPage() {
                 <Card key={result.id}>
                   <CardContent className="flex items-center justify-between py-3">
                     <div className="flex items-center gap-4">
-                      <div className="flex-shrink-0 w-10 h-10 rounded-lg overflow-hidden bg-muted">
+                      <div className="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-md overflow-hidden bg-muted">
                         {result.imageUrl ? (
                           <img
                             src={result.imageUrl}
@@ -321,15 +322,16 @@ export default function SubscriptionDetailPage() {
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
-                            <Music2 className="h-5 w-5 text-muted-foreground" />
+                            <Music2 className="h-6 w-6 sm:h-7 sm:w-7 text-muted-foreground" />
                           </div>
                         )}
                       </div>
-                      <div>
+                      <div className="flex-1 min-w-0">
                         <p className="font-medium">{result.name}</p>
                         {result.skipReason && (
                           <p className="text-xs text-muted-foreground">{result.skipReason}</p>
                         )}
+                        <ExternalLinks mbid={result.mbid || undefined} artistName={result.name} size="sm" />
                       </div>
                     </div>
                     <div className="flex items-center gap-2">

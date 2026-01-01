@@ -71,6 +71,10 @@ vi.mock('../../src/middleware/auth.js', () => ({
     req.user = { id: 1, username: 'test' };
     next();
   }),
+  requireAdmin: vi.fn((req: any, _res: any, next: any) => {
+    req.user = { id: 1, username: 'test', role: 'admin' };
+    next();
+  }),
 }));
 
 import prisma from '../../src/lib/db.js';

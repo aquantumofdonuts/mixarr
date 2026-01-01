@@ -11,6 +11,7 @@ import {
   CheckSquare, Square, Music2, RefreshCw, ChevronDown, ChevronUp, X,
   Download, Filter
 } from 'lucide-react';
+import { LastfmIcon, MusicBrainzIcon } from '@/components/ExternalLinks';
 import { useQuery } from '@tanstack/react-query';
 
 interface LibraryArtist {
@@ -624,8 +625,8 @@ export default function DiscoverPage() {
                           )}
                         </button>
                       )}
-                      {/* Artist Image */}
-                      <div className="flex-shrink-0 w-12 h-12 rounded-md overflow-hidden bg-muted">
+                      {/* Artist Image - larger size */}
+                      <div className="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-md overflow-hidden bg-muted">
                         {rec.imageUrl ? (
                           <img
                             src={rec.imageUrl}
@@ -634,7 +635,7 @@ export default function DiscoverPage() {
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
-                            <Music2 className="h-6 w-6 text-muted-foreground" />
+                            <Music2 className="h-8 w-8 text-muted-foreground" />
                           </div>
                         )}
                       </div>
@@ -647,6 +648,33 @@ export default function DiscoverPage() {
                         {rec.genres && rec.genres.length > 0 && (
                           <GenrePills genres={rec.genres} maxDisplay={3} size="sm" className="mt-1" />
                         )}
+                        {/* External links */}
+                        <div className="flex gap-1 mt-1">
+                          {rec.url && (
+                            <a
+                              href={rec.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open on Last.fm"
+                              className="p-1 rounded text-red-500 hover:text-red-400 hover:bg-muted transition-colors"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <LastfmIcon className="h-3.5 w-3.5" />
+                            </a>
+                          )}
+                          {rec.mbid && (
+                            <a
+                              href={`https://musicbrainz.org/artist/${rec.mbid}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open on MusicBrainz"
+                              className="p-1 rounded text-orange-500 hover:text-orange-400 hover:bg-muted transition-colors"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MusicBrainzIcon className="h-3.5 w-3.5" />
+                            </a>
+                          )}
+                        </div>
                       </div>
                       <Badge variant="outline" className="flex-shrink-0">
                         {rec.matchCount} match{rec.matchCount > 1 ? 'es' : ''}

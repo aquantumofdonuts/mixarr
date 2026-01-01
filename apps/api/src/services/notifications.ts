@@ -10,6 +10,9 @@
  */
 
 import prisma from '../lib/db.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Notifications');
 
 // Notification event types
 export type NotificationEvent =
@@ -80,7 +83,7 @@ export class NotificationService {
       try {
         await this.sendToChannel(channel as unknown as NotificationChannel, event, payload);
       } catch (error) {
-        console.error(`Notification failed for channel ${channel.id}:`, error);
+        log.error(`Notification failed for channel ${channel.id}:`, error);
       }
     }
   }
@@ -100,18 +103,18 @@ export class NotificationService {
         return this.sendWebhook(channel.config as WebhookConfig, event, payload);
       case 'telegram':
         // Future: implement Telegram
-        console.warn('Telegram notifications not yet implemented');
+        log.warn('Telegram notifications not yet implemented');
         break;
       case 'pushover':
         // Future: implement Pushover
-        console.warn('Pushover notifications not yet implemented');
+        log.warn('Pushover notifications not yet implemented');
         break;
       case 'email':
         // Future: implement email
-        console.warn('Email notifications not yet implemented');
+        log.warn('Email notifications not yet implemented');
         break;
       default:
-        console.warn(`Unknown notification channel type: ${channel.type}`);
+        log.warn(`Unknown notification channel type: ${channel.type}`);
     }
   }
 

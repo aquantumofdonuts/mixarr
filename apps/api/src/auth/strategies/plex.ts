@@ -109,7 +109,7 @@ export class PlexAuthService {
    */
   async authenticateUser(plexUser: PlexUser): Promise<{
     success: boolean;
-    user?: { id: number; username: string; displayName: string; role: string };
+    user?: { id: number; username: string; displayName: string; role: 'user' | 'admin' };
     error?: string;
   }> {
     // Find user by email (MySQL is case-insensitive by default for VARCHAR)
@@ -168,7 +168,7 @@ export class PlexAuthService {
         id: user.id,
         username: user.username,
         displayName: user.displayName,
-        role: user.role,
+        role: user.role as 'user' | 'admin',
       },
     };
   }
