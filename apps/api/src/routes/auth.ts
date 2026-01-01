@@ -6,6 +6,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { loginLimiter, setupLimiter, createUserLimiter } from '../middleware/rate-limiter.js';
 import { SsoProviderService } from '../services/sso-provider.js';
 import { createGoogleStrategy } from '../auth/strategies/google.js';
+import { createLdapStrategy } from '../auth/strategies/ldap.js';
 
 export const authRouter = Router();
 const ssoService = new SsoProviderService(prisma);
@@ -81,6 +82,51 @@ authRouter.get('/sso/google/callback', (req, res, next) => {
       return res.redirect('/');
     });
   })(req, res, next);
+});
+
+// LDAP login (POST with username/password in body)
+authRouter.post('/sso/ldap', async (req, res, next) => {
+  try {
+    const provider = await prisma.ssoProvider.findUnique({
+      where: { type: 'ldap' },
+    });
+    
+    if (!provider?.isEnabled) {
+      res.status(400).json({ error: 'LDAP authentication is not available' });
+      return;
+    }
+
+    const config = provider.config as {
+      serverUrl: string;
+      bindDn: string;
+      bindPassword: string;
+      searchBaseDn: string;
+      searchFilter: string;
+      emailAttribute: string;
+      displayNameAttribute?: string;
+    };
+    
+    passport.use('ldap-sso', createLdapStrategy(config, prisma));
+
+    passport.authenticate('ldap-sso', (err: Error | null, user: Express.User | false, info: { message?: string }) => {
+      if (err) {
+        console.error('LDAP auth error:', err);
+        return res.status(500).json({ error: 'Authentication failed' });
+      }
+      if (!user) {
+        return res.status(401).json({ error: info?.message || 'Invalid credentials' });
+      }
+      req.logIn(user, (loginErr) => {
+        if (loginErr) {
+          return res.status(500).json({ error: 'Login failed' });
+        }
+        return res.json({ success: true, user });
+      });
+    })(req, res, next);
+  } catch (error) {
+    console.error('LDAP login error:', error);
+    res.status(500).json({ error: 'LDAP authentication failed' });
+  }
 });
 
 // Create first admin user (setup wizard) - rate limited
