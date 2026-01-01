@@ -16,6 +16,7 @@ adminRouter.get('/users', async (_req, res) => {
       select: {
         id: true,
         username: true,
+        email: true,
         displayName: true,
         role: true,
         isActive: true,
@@ -49,6 +50,7 @@ adminRouter.get('/users/:id', async (req, res) => {
       select: {
         id: true,
         username: true,
+        email: true,
         displayName: true,
         role: true,
         isActive: true,
@@ -80,7 +82,7 @@ adminRouter.get('/users/:id', async (req, res) => {
 // Create new user
 adminRouter.post('/users', async (req, res) => {
   try {
-    const { username, password, displayName, role } = req.body;
+    const { username, password, displayName, email, role } = req.body;
 
     if (!username || !password) {
       res.status(400).json({ error: 'Username and password are required' });
@@ -104,6 +106,7 @@ adminRouter.post('/users', async (req, res) => {
       data: {
         username,
         passwordHash,
+        email: email || null,
         displayName: displayName || username,
         role: role === 'admin' ? 'admin' : 'user',
         isActive: true,
@@ -111,6 +114,7 @@ adminRouter.post('/users', async (req, res) => {
       select: {
         id: true,
         username: true,
+        email: true,
         displayName: true,
         role: true,
         isActive: true,
@@ -129,7 +133,7 @@ adminRouter.post('/users', async (req, res) => {
 adminRouter.put('/users/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const { displayName, role, isActive, password } = req.body;
+    const { displayName, email, role, isActive, password } = req.body;
 
     const existing = await prisma.user.findUnique({
       where: { id },
@@ -154,6 +158,7 @@ adminRouter.put('/users/:id', async (req, res) => {
 
     const updateData: any = {};
     if (displayName !== undefined) updateData.displayName = displayName;
+    if (email !== undefined) updateData.email = email || null;
     if (role !== undefined) updateData.role = role;
     if (isActive !== undefined) updateData.isActive = isActive;
     if (password) {
@@ -166,6 +171,7 @@ adminRouter.put('/users/:id', async (req, res) => {
       select: {
         id: true,
         username: true,
+        email: true,
         displayName: true,
         role: true,
         isActive: true,

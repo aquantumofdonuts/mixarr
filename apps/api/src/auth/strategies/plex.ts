@@ -112,13 +112,18 @@ export class PlexAuthService {
     user?: { id: number; username: string; displayName: string; role: string };
     error?: string;
   }> {
-    // Find user by email
+    // Find user by email (case-insensitive)
     const user = await this.prisma.user.findFirst({
-      where: { email: plexUser.email },
+      where: { 
+        email: {
+          equals: plexUser.email,
+          mode: 'insensitive',
+        },
+      },
     });
 
     if (!user) {
-      return { success: false, error: 'No account found for this email. Contact your administrator.' };
+      return { success: false, error: `No account found for email: ${plexUser.email}. Contact your administrator.` };
     }
 
     if (!user.isActive) {
