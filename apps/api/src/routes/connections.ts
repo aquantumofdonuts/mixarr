@@ -371,8 +371,15 @@ connectionsRouter.get('/setup/:id/spotify/callback', async (req, res) => {
     }
 
     // Verify state signature
-    const stateData = verifySignedState(state as string);
-    if (!stateData || stateData.connectionId !== connectionId || !stateData.setupMode) {
+    let stateData: { connectionId: number; setupMode: boolean; timestamp: number; returnTo?: string };
+    try {
+      stateData = verifySignedState<typeof stateData>(state as string);
+    } catch (err) {
+      res.redirect('/setup?spotify_error=invalid_state');
+      return;
+    }
+    
+    if (stateData.connectionId !== connectionId || !stateData.setupMode) {
       res.redirect('/setup?spotify_error=invalid_state');
       return;
     }
@@ -397,7 +404,7 @@ connectionsRouter.get('/setup/:id/spotify/callback', async (req, res) => {
     const baseUrl = await getBaseUrl();
     const redirectUri = `${baseUrl}/api/connections/setup/${connection.id}/spotify/callback`;
     
-    const tokens = await service.exchangeCodeForTokens(code as string, redirectUri);
+    const tokens = await service.exchangeCode(String(code), redirectUri);
 
     // Update connection with tokens
     await prisma.connection.update({
@@ -407,7 +414,7 @@ connectionsRouter.get('/setup/:id/spotify/callback', async (req, res) => {
           ...config,
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
-          tokenExpiry: tokens.expiresAt.toISOString(),
+          tokenExpiresAt: tokens.expiresAt,
         },
         isActive: true,
       },
@@ -415,7 +422,8 @@ connectionsRouter.get('/setup/:id/spotify/callback', async (req, res) => {
 
     // Redirect back to setup page
     const returnTo = stateData.returnTo || '/setup';
-    res.redirect(returnTo + (returnTo.includes('?') ? '&' : '?') + 'spotify_authorized=true');
+    const separator = returnTo.includes('?') ? '&' : '?';
+    res.redirect(`${returnTo}${separator}spotify_authorized=true`);
   } catch (error) {
     console.error('Setup Spotify OAuth callback error:', error);
     res.redirect('/setup?spotify_error=callback_failed');
