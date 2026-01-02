@@ -14,16 +14,18 @@ export const authRouter = Router();
 const ssoService = new SsoProviderService(prisma);
 
 // Check if setup is required (setup wizard not completed)
-// Also returns adminExists to help frontend resume at the right step
+// Also returns adminExists and baseUrlExists to help frontend resume at the right step
 authRouter.get('/setup-required', async (_req, res) => {
   try {
-    const [setupCompleted, userCount] = await Promise.all([
+    const [setupCompleted, userCount, baseUrl] = await Promise.all([
       prisma.globalSetting.findUnique({ where: { key: 'setupCompleted' } }),
       prisma.user.count(),
+      prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } }),
     ]);
     res.json({ 
       setupRequired: !setupCompleted?.value,
       adminExists: userCount > 0,
+      baseUrlExists: !!baseUrl?.value,
     });
   } catch (error) {
     res.status(500).json({ error: 'Database error' });

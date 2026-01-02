@@ -33,17 +33,22 @@ function SetupPageContent() {
   const { refetchAuth } = useAuth();
 
   // Check if setup is already complete - redirect to login if so
-  // Also check if admin exists to resume at the right step
+  // Also check if admin/baseUrl exists to resume at the right step
   useEffect(() => {
-    api.get<{ setupRequired: boolean; adminExists: boolean }>('/api/auth/setup-required')
+    api.get<{ setupRequired: boolean; adminExists: boolean; baseUrlExists: boolean }>('/api/auth/setup-required')
       .then(({ data }) => {
         if (data && !data.setupRequired) {
           router.replace('/login');
         } else {
-          // If admin already exists but setup not complete, skip to URL step
-          if (data?.adminExists) {
+          // Resume at the appropriate step based on what's already configured
+          if (data?.adminExists && data?.baseUrlExists) {
+            // Both configured - go straight to success step
+            setStep('success');
+          } else if (data?.adminExists) {
+            // Admin exists but no baseUrl - skip to URL step
             setStep('url');
           }
+          // Otherwise start from welcome step (default)
           setCheckingSetup(false);
         }
       })
@@ -118,20 +123,21 @@ function SetupPageContent() {
   };
 
   const handleGoToConnections = async () => {
+    setError('');
     setIsLoading(true);
     try {
       // Mark setup as complete before redirecting
       const res = await fetch('/api/auth/complete-setup', { method: 'POST' });
       if (!res.ok) {
-        throw new Error('Failed to complete setup');
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to complete setup');
       }
       router.push('/connections');
-    } catch (error) {
-      console.error('Error completing setup:', error);
-      // Still redirect even if the flag fails to save
-      router.push('/connections');
+    } catch (err) {
+      console.error('Error completing setup:', err);
+      setError(err instanceof Error ? err.message : 'Failed to complete setup. Please try again.');
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   return (
@@ -333,12 +339,17 @@ function SetupPageContent() {
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10">
                 <Check className="h-8 w-8 text-green-500" />
               </div>
-              <CardTitle className="text-2xl">Account Created!</CardTitle>
+              <CardTitle className="text-2xl">Setup Complete!</CardTitle>
               <CardDescription>
                 Next, connect your services to get started
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {error && (
+                <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
               <Button className="w-full" onClick={handleGoToConnections} isLoading={isLoading}>
                 Continue to Connections <ChevronRight className="ml-2 h-4 w-4" />
               </Button>

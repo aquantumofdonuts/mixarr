@@ -97,10 +97,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return res.json();
     },
     onSuccess: (data) => {
-      // Update auth cache immediately
+      // Update auth cache immediately - use setupRequired from server response
       queryClient.setQueryData(['auth'], { 
         user: data.user, 
-        setupRequired: false 
+        setupRequired: data.setupRequired ?? false 
       });
     },
   });
