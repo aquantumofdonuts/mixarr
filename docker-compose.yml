@@ -14,10 +14,10 @@ services:
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 15
+      start_period: 120s
 
   # Redis for sessions and job queue
   redis:
