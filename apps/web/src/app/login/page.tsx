@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
-import { Eye, EyeOff, LogIn } from 'lucide-react';
+import { Eye, EyeOff, LogIn, Loader2 } from 'lucide-react';
 
-export default function LoginPage() {
+function LoginPageContent() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -16,6 +16,8 @@ export default function LoginPage() {
   const [ssoProviders, setSsoProviders] = useState<Array<{ type: string; name: string }>>([]);
   const { login } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = searchParams.get('returnTo') || '/';
 
   // Check if setup is required (independent of auth context for robustness)
   useEffect(() => {
@@ -41,7 +43,8 @@ export default function LoginPage() {
 
     try {
       await login(username, password);
-      router.push('/');
+      // Redirect to returnTo or default to home
+      router.push(returnTo);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -161,5 +164,17 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    }>
+      <LoginPageContent />
+    </Suspense>
   );
 }

@@ -33,7 +33,9 @@ export function ProtectedLayout({ children }: ProtectedLayoutProps) {
       if (setupRequired) {
         router.push('/setup');
       } else {
-        router.push('/login');
+        // Include returnTo so user is redirected back after login
+        const returnTo = encodeURIComponent(pathname);
+        router.push(`/login?returnTo=${returnTo}`);
       }
     }
 
