@@ -196,6 +196,80 @@ Access:
 - **HTTPS (recommended)**: https://your-ip:3443 (via Caddy reverse proxy)
 - **HTTP**: http://your-ip:3010 (direct access, no SSL)
 
+## Onboarding Steps
+
+After starting Mixarr for the first time, complete these steps to get up and running:
+
+### 1. Create Admin Account
+
+On first launch, you'll be prompted to create an admin account. This account has full access to all settings and features.
+
+### 2. Configure Base URL
+
+Go to **Settings → Global Settings** and set your Base URL:
+```
+https://your-ip:3443
+```
+This is required for OAuth callbacks (Spotify, TIDAL, Plex SSO) to work correctly.
+
+### 3. Connect to Lidarr (Required)
+
+Mixarr needs a Lidarr connection to function. Go to **Connections → Add Lidarr**:
+
+| Setting | Value |
+|---------|-------|
+| **URL** | Your Lidarr instance URL (e.g., `http://192.168.1.100:8686`) |
+| **API Key** | Found in Lidarr → Settings → General → API Key |
+
+Click **Test Connection** to verify, then save.
+
+### 4. Add Last.fm Connection (Recommended)
+
+Last.fm provides artist metadata enrichment and music discovery features. Go to **Connections → Add Last.fm**:
+
+1. Get a free API key at [Last.fm API](https://www.last.fm/api/account/create)
+2. Enter your **API Key** and **Shared Secret**
+3. (Optional) Enter your Last.fm username for personalized features
+
+### 5. Configure AI Recommendations (Optional)
+
+For AI-powered artist discovery, go to **Connections → Add AI**:
+
+| Provider | Setup |
+|----------|-------|
+| **OpenAI** | API key from [OpenAI Platform](https://platform.openai.com/api-keys) |
+| **Anthropic** | API key from [Anthropic Console](https://console.anthropic.com/) |
+| **Ollama** | Local URL (e.g., `http://localhost:11434`), no API key needed |
+
+### 6. Add Music Service Connections (Optional)
+
+Add any services you use for music discovery:
+
+| Service | Auth Type | Setup |
+|---------|-----------|-------|
+| **Spotify** | OAuth | Create app at [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), set redirect URI |
+| **TIDAL** | OAuth | Create app at [TIDAL Developer Portal](https://developer.tidal.com/), set redirect URI |
+| **Deezer** | Public API | No setup needed for charts/search (OAuth currently unavailable) |
+| **Plex/Tautulli** | API Key | Add Tautulli URL and API key for listening history analysis |
+| **ListenBrainz** | Token | Add your ListenBrainz user token |
+
+### 7. Create Your First Subscription
+
+Go to **Subscriptions → Add** and create a subscription to start discovering artists:
+
+- **Last.fm Top Charts**: Discover trending artists globally
+- **Spotify Playlist**: Import artists from any playlist
+- **AI Recommendations**: Get personalized suggestions based on your library
+
+Artists will be added to your **Review Queue** for approval before being sent to Lidarr.
+
+### Quick Verification
+
+After setup, verify everything works:
+1. ✅ Dashboard shows your Lidarr library stats
+2. ✅ Search finds artists across connected services
+3. ✅ Test subscription runs successfully
+
 ## Production Deployment
 
 The default `docker-compose.yml` is configured for production. For development with hot-reload, use `docker-compose.dev.yml`.

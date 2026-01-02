@@ -610,6 +610,9 @@ export default function ConnectionsPage() {
 
   const typeConfig = connectionTypes.find(t => t.value === form.type);
 
+  // Check if this is a fresh setup (no connections yet)
+  const isFirstTimeSetup = connections.length === 0;
+
   return (
     <>
       <PageHeader
@@ -620,6 +623,32 @@ export default function ConnectionsPage() {
           <Plus className="h-4 w-4 mr-2" /> Add Connection
         </Button>
       </PageHeader>
+
+      {/* First-time setup welcome banner */}
+      {isFirstTimeSetup && (
+        <Card className="mb-6 border-primary/20 bg-primary/5">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                <Check className="h-6 w-6 text-primary" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="font-semibold text-lg">Welcome to Mixarr!</h3>
+                <p className="text-muted-foreground">
+                  Your account is ready. To get started, you'll need to connect at least:
+                </p>
+                <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
+                  <li><strong>Lidarr</strong> – Required to manage and download music to your library</li>
+                  <li><strong>Last.fm, Spotify, or another source</strong> – To discover and import music</li>
+                </ul>
+                <p className="text-sm text-muted-foreground pt-2">
+                  Click "Configure" on any service below to add your first connection.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Connection Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
