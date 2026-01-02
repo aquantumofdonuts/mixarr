@@ -17,6 +17,16 @@ export default function LoginPage() {
   const { login } = useAuth();
   const router = useRouter();
 
+  // Check if setup is required (independent of auth context for robustness)
+  useEffect(() => {
+    api.get<{ setupRequired: boolean }>('/api/auth/setup-required')
+      .then(({ data }) => {
+        if (data?.setupRequired) {
+          router.push('/setup');
+        }
+      });
+  }, [router]);
+
   useEffect(() => {
     api.get<{ providers: Array<{ type: string; name: string }> }>('/api/auth/sso/enabled')
       .then(({ data }) => {
