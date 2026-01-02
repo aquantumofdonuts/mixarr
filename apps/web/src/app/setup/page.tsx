@@ -28,8 +28,22 @@ function SetupPageContent() {
   const [baseUrl, setBaseUrl] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [checkingSetup, setCheckingSetup] = useState(true);
   const router = useRouter();
   const { refetchAuth } = useAuth();
+
+  // Check if setup is already complete - redirect to login if so
+  useEffect(() => {
+    api.get<{ setupRequired: boolean }>('/api/auth/setup-required')
+      .then(({ data }) => {
+        if (data && !data.setupRequired) {
+          router.replace('/login');
+        } else {
+          setCheckingSetup(false);
+        }
+      })
+      .catch(() => setCheckingSetup(false));
+  }, [router]);
 
   // Auto-detect base URL on mount
   useEffect(() => {
@@ -37,6 +51,15 @@ function SetupPageContent() {
       setBaseUrl(window.location.origin);
     }
   }, []);
+
+  // Show loading while checking if setup is needed
+  if (checkingSetup) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   const handleAdminSubmit = async () => {
     setError('');
