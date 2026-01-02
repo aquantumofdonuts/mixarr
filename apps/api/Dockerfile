@@ -36,10 +36,14 @@ ENV NODE_ENV=production
 # Install OpenSSL for Prisma
 RUN apk add --no-cache openssl
 
+# Copy the built output
 COPY --from=builder /app/apps/api/dist ./dist
 COPY --from=builder /app/apps/api/package*.json ./
 COPY --from=builder /app/apps/api/prisma ./prisma
+
+# Copy node_modules (both root hoisted deps and api-specific deps)
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/api/node_modules ./node_modules
 
 # Generate Prisma client in production
 RUN npx prisma generate
