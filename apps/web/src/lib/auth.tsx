@@ -43,8 +43,10 @@ async function fetchAuthStatus(): Promise<AuthResponse> {
   });
   
   if (!res.ok) {
-    // Even on error, return a valid response
-    return { user: null, setupRequired: false };
+    // On error (e.g., API not ready), assume setup required
+    // This ensures users land on /setup during first startup
+    // The setup page will redirect to /login if setup is already complete
+    return { user: null, setupRequired: true };
   }
   
   return res.json();
