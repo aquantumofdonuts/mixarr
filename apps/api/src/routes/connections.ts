@@ -186,6 +186,53 @@ connectionsRouter.post('/test', async (req, res) => {
   }
 });
 
+// Setup-only endpoint for testing Lidarr connection (public, only works during first-time setup)
+connectionsRouter.post('/setup/test-lidarr', async (req, res) => {
+  try {
+    // Only allow during setup (no users exist)
+    const userCount = await prisma.user.count();
+    if (userCount > 0) {
+      res.status(403).json({ success: false, message: 'Setup already completed. Use authenticated endpoint.' });
+      return;
+    }
+
+    const { url, apiKey } = req.body;
+    
+    if (!url || !apiKey) {
+      res.status(400).json({ success: false, message: 'URL and API key required' });
+      return;
+    }
+
+    const service = new LidarrService({ url, apiKey });
+    const testResult = await service.testConnection();
+    
+    if (!testResult.success) {
+      res.json({ 
+        success: false, 
+        message: testResult.error || 'Connection failed' 
+      });
+      return;
+    }
+
+    const [qualityProfiles, rootFolders] = await Promise.all([
+      service.getQualityProfiles(),
+      service.getRootFolders(),
+    ]);
+
+    res.json({ 
+      success: true, 
+      message: `Connected to Lidarr v${testResult.version}`,
+      qualityProfiles, 
+      rootFolders 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error instanceof Error ? error.message : 'Test failed' 
+    });
+  }
+});
+
 // Setup-only endpoint for creating initial connections (public, only works during first-time setup)
 connectionsRouter.post('/setup', async (req, res) => {
   try {

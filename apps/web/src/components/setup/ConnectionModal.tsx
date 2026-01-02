@@ -92,11 +92,15 @@ export function ConnectionModal({ type, isOpen, onClose, onSuccess, baseUrl, isS
     if (!form.url || !form.apiKey) return;
     
     setIsFetchingOptions(true);
+    // Use setup endpoint during onboarding (doesn't require auth)
+    const endpoint = isSetupMode 
+      ? '/api/connections/setup/test-lidarr' 
+      : '/api/connections/test-lidarr';
     const { data } = await api.post<{ 
       success: boolean;
       qualityProfiles?: Array<{ id: number; name: string }>;
       rootFolders?: Array<{ id: number; path: string }>;
-    }>('/api/connections/test-lidarr', { url: form.url, apiKey: form.apiKey });
+    }>(endpoint, { url: form.url, apiKey: form.apiKey });
     
     if (data?.success) {
       setLidarrOptions({
