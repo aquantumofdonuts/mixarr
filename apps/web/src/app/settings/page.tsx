@@ -111,7 +111,6 @@ export default function SettingsPage() {
   };
 
   const fetchGlobalSettings = async () => {
-    if (!isAdmin) return;
     const { data } = await api.get<{ settings: Record<string, any> }>('/api/settings/global');
     if (data) {
       setGlobalSettings(data.settings);
@@ -120,7 +119,9 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchSettings();
-    fetchGlobalSettings();
+    if (isAdmin) {
+      fetchGlobalSettings();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
