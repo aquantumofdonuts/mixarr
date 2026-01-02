@@ -31,14 +31,34 @@ authRouter.get('/setup-required', async (_req, res) => {
 });
 
 // Mark setup as complete (called after URL configuration step)
-authRouter.post('/complete-setup', async (req, res) => {
-  // Only allow if the user is authenticated (admin just created and logged in)
-  if (!req.isAuthenticated() || !req.user) {
-    res.status(401).json({ error: 'Authentication required' });
-    return;
-  }
-  
+// Public endpoint but with safety checks - only works during legitimate setup
+authRouter.post('/complete-setup', async (_req, res) => {
   try {
+    // Safety check 1: Can only complete setup once
+    const setupCompleted = await prisma.globalSetting.findUnique({
+      where: { key: 'setupCompleted' },
+    });
+    if (setupCompleted?.value === true) {
+      res.status(400).json({ error: 'Setup already completed' });
+      return;
+    }
+    
+    // Safety check 2: Must have at least one admin user
+    const userCount = await prisma.user.count();
+    if (userCount === 0) {
+      res.status(400).json({ error: 'No admin user exists' });
+      return;
+    }
+    
+    // Safety check 3: Base URL must be configured
+    const baseUrl = await prisma.globalSetting.findUnique({
+      where: { key: 'baseUrl' },
+    });
+    if (!baseUrl?.value) {
+      res.status(400).json({ error: 'Base URL not configured' });
+      return;
+    }
+    
     await prisma.globalSetting.upsert({
       where: { key: 'setupCompleted' },
       create: { key: 'setupCompleted', value: true },
