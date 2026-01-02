@@ -13,13 +13,35 @@ import { PlexAuthService } from '../auth/strategies/plex.js';
 export const authRouter = Router();
 const ssoService = new SsoProviderService(prisma);
 
-// Check if setup is required (no users exist)
+// Check if setup is required (setup wizard not completed)
 authRouter.get('/setup-required', async (_req, res) => {
   try {
-    const userCount = await prisma.user.count();
-    res.json({ setupRequired: userCount === 0 });
+    const setupCompleted = await prisma.globalSetting.findUnique({
+      where: { key: 'setupCompleted' },
+    });
+    res.json({ setupRequired: !setupCompleted?.value });
   } catch (error) {
     res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// Mark setup as complete (called after URL configuration step)
+authRouter.post('/complete-setup', async (req, res) => {
+  // Only allow if the user is authenticated (admin just created and logged in)
+  if (!req.isAuthenticated() || !req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  
+  try {
+    await prisma.globalSetting.upsert({
+      where: { key: 'setupCompleted' },
+      create: { key: 'setupCompleted', value: true },
+      update: { value: true },
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to complete setup' });
   }
 });
 
@@ -304,13 +326,6 @@ authRouter.post('/setup', setupLimiter, async (req, res) => {
       },
     });
 
-    // Mark setup as completed
-    await prisma.globalSetting.upsert({
-      where: { key: 'setupCompleted' },
-      create: { key: 'setupCompleted', value: true },
-      update: { value: true },
-    });
-
     // Auto-login the new admin user so they can continue the setup wizard
     req.logIn(user, (loginErr) => {
       if (loginErr) {
@@ -375,9 +390,11 @@ authRouter.post('/logout', (req, res) => {
 
 // Get current user and setup status (no auth required - returns null user if not authenticated)
 authRouter.get('/me', async (req, res) => {
-  // Check if setup is required
-  const userCount = await prisma.user.count();
-  const setupRequired = userCount === 0;
+  // Check if setup wizard has been completed
+  const setupCompleted = await prisma.globalSetting.findUnique({
+    where: { key: 'setupCompleted' },
+  });
+  const setupRequired = !setupCompleted?.value;
   
   if (req.isAuthenticated() && req.user) {
     res.json({ user: req.user, setupRequired });

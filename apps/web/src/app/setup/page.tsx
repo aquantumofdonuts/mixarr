@@ -112,8 +112,21 @@ function SetupPageContent() {
     setStep('success');
   };
 
-  const handleGoToConnections = () => {
-    router.push('/connections');
+  const handleGoToConnections = async () => {
+    setIsLoading(true);
+    try {
+      // Mark setup as complete before redirecting
+      const res = await fetch('/api/auth/complete-setup', { method: 'POST' });
+      if (!res.ok) {
+        throw new Error('Failed to complete setup');
+      }
+      router.push('/connections');
+    } catch (error) {
+      console.error('Error completing setup:', error);
+      // Still redirect even if the flag fails to save
+      router.push('/connections');
+    }
+    setIsLoading(false);
   };
 
   return (
@@ -321,7 +334,7 @@ function SetupPageContent() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Button className="w-full" onClick={handleGoToConnections}>
+              <Button className="w-full" onClick={handleGoToConnections} isLoading={isLoading}>
                 Continue to Connections <ChevronRight className="ml-2 h-4 w-4" />
               </Button>
             </CardContent>
