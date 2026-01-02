@@ -186,13 +186,16 @@ connectionsRouter.post('/test', async (req, res) => {
   }
 });
 
-// Setup-only endpoint for testing Lidarr connection (public, only works during first-time setup)
+// Setup-only endpoint for testing Lidarr connection (public, works during onboarding)
+// Security: Only works if no Lidarr connection exists yet
 connectionsRouter.post('/setup/test-lidarr', async (req, res) => {
   try {
-    // Only allow during setup (no users exist)
-    const userCount = await prisma.user.count();
-    if (userCount > 0) {
-      res.status(403).json({ success: false, message: 'Setup already completed. Use authenticated endpoint.' });
+    // Only allow if no Lidarr connection exists yet (prevents abuse after setup)
+    const existingLidarr = await prisma.connection.findFirst({ 
+      where: { type: 'lidarr' } 
+    });
+    if (existingLidarr) {
+      res.status(403).json({ success: false, message: 'Lidarr already configured. Use authenticated endpoint.' });
       return;
     }
 
@@ -233,16 +236,10 @@ connectionsRouter.post('/setup/test-lidarr', async (req, res) => {
   }
 });
 
-// Setup-only endpoint for creating initial connections (public, only works during first-time setup)
+// Setup-only endpoint for creating initial connections (public, works during onboarding)
+// Security: Limited to specific types, Lidarr can only be created once, connections are global (no userId)
 connectionsRouter.post('/setup', async (req, res) => {
   try {
-    // Only allow during setup (no users exist)
-    const userCount = await prisma.user.count();
-    if (userCount > 0) {
-      res.status(403).json({ error: 'Setup already completed. Use authenticated endpoint.' });
-      return;
-    }
-
     const { type, name, config } = req.body;
     
     if (!type || !name || !config) {
@@ -265,6 +262,18 @@ connectionsRouter.post('/setup', async (req, res) => {
       
       if (existingLidarr) {
         res.status(403).json({ error: 'Lidarr connection already exists. Use settings page to modify.' });
+        return;
+      }
+    }
+
+    // For other types, check if this type already exists (prevent duplicates during setup)
+    if (type !== 'lidarr') {
+      const existingConnection = await prisma.connection.findFirst({ 
+        where: { type, userId: null } // Global connections only
+      });
+      
+      if (existingConnection) {
+        res.status(403).json({ error: `${type} connection already exists. Use settings page to modify.` });
         return;
       }
     }
@@ -298,16 +307,10 @@ connectionsRouter.post('/setup', async (req, res) => {
   }
 });
 
-// Setup-only Spotify OAuth (public, only works during first-time setup)
+// Setup-only Spotify OAuth (public, works during onboarding)
+// Security: Only works for the specific Spotify connection that was just created
 connectionsRouter.get('/setup/:id/spotify/auth', async (req, res) => {
   try {
-    // Only allow during setup (no users exist)
-    const userCount = await prisma.user.count();
-    if (userCount > 0) {
-      res.status(403).json({ error: 'Setup already completed. Use authenticated endpoint.' });
-      return;
-    }
-
     const connectionId = parseInt(req.params.id, 10);
     const connection = await prisma.connection.findUnique({
       where: { id: connectionId },
@@ -320,6 +323,12 @@ connectionsRouter.get('/setup/:id/spotify/auth', async (req, res) => {
 
     if (connection.type !== 'spotify') {
       res.status(400).json({ error: 'Connection is not a Spotify connection' });
+      return;
+    }
+
+    // Only allow for global connections (userId is null) - these are setup connections
+    if (connection.userId !== null) {
+      res.status(403).json({ error: 'Use authenticated endpoint for user-owned connections' });
       return;
     }
 
