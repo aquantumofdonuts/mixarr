@@ -33,12 +33,17 @@ function SetupPageContent() {
   const { refetchAuth } = useAuth();
 
   // Check if setup is already complete - redirect to login if so
+  // Also check if admin exists to resume at the right step
   useEffect(() => {
-    api.get<{ setupRequired: boolean }>('/api/auth/setup-required')
+    api.get<{ setupRequired: boolean; adminExists: boolean }>('/api/auth/setup-required')
       .then(({ data }) => {
         if (data && !data.setupRequired) {
           router.replace('/login');
         } else {
+          // If admin already exists but setup not complete, skip to URL step
+          if (data?.adminExists) {
+            setStep('url');
+          }
           setCheckingSetup(false);
         }
       })
