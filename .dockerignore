@@ -1,0 +1,50 @@
+# Dependencies - will be installed fresh in container
+node_modules
+**/node_modules
+
+# Build outputs - will be built in container
+dist
+**/dist
+.next
+**/.next
+.turbo
+**/.turbo
+
+# Git
+.git
+.gitignore
+
+# Documentation
+docs
+*.md
+!README.md
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment files (secrets)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test files
+coverage
+**/*.test.ts
+**/*.spec.ts
+tests
+**/tests
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Misc
+*.tgz
+*.tar.gz

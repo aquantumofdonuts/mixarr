@@ -1,20 +1,25 @@
+# syntax=docker/dockerfile:1.4
 FROM node:20-alpine AS base
 WORKDIR /app
 
-# Development stage
-FROM base AS development
+# Dependencies stage - cached separately
+FROM base AS deps
 COPY package*.json ./
 COPY turbo.json ./
 COPY tsconfig.base.json ./
 COPY apps/web/package*.json ./apps/web/
 COPY packages/shared-types/package*.json ./packages/shared-types/
 COPY packages/config/package*.json ./packages/config/
-RUN npm install
+# Use BuildKit cache mount for npm
+RUN --mount=type=cache,target=/root/.npm \
+    npm install
+
+# Development stage
+FROM deps AS development
 COPY . .
 
 # Build stage - Build at runtime to allow env vars
-FROM base AS builder
-COPY --from=development /app .
+FROM development AS builder
 
 # Build args for API URL
 ARG API_URL=http://localhost:3010
