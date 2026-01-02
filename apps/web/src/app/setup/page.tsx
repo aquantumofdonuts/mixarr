@@ -1,15 +1,14 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { ChevronRight, Plug, User, Check, Globe, Sparkles, Loader2, Music2, Search } from 'lucide-react';
-import { ConnectionModal } from '@/components/setup/ConnectionModal';
+import { ChevronRight, User, Check, Globe, Sparkles, Loader2, Music2, Search, Plug } from 'lucide-react';
 
-type Step = 'welcome' | 'admin' | 'url' | 'connections' | 'complete';
-const steps: Step[] = ['welcome', 'admin', 'url', 'connections', 'complete'];
+type Step = 'welcome' | 'admin' | 'url' | 'success';
+const steps: Step[] = ['welcome', 'admin', 'url', 'success'];
 
 interface AdminForm {
   username: string;
@@ -27,14 +26,9 @@ function SetupPageContent() {
     displayName: '',
   });
   const [baseUrl, setBaseUrl] = useState('');
-  const [activeModal, setActiveModal] = useState<'lidarr' | 'spotify' | 'lastfm' | null>(null);
-  const [connectedServices, setConnectedServices] = useState<Set<string>>(new Set());
-  const [isLoadingConnections, setIsLoadingConnections] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [spotifyAuthorized, setSpotifyAuthorized] = useState(false);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { refetchAuth } = useAuth();
 
   // Auto-detect base URL on mount
@@ -43,42 +37,6 @@ function SetupPageContent() {
       setBaseUrl(window.location.origin);
     }
   }, []);
-
-  // Handle return from Spotify OAuth
-  useEffect(() => {
-    const spotifyAuth = searchParams.get('spotify_authorized');
-    if (spotifyAuth) {
-      setSpotifyAuthorized(true);
-      setStep('connections');
-      refreshConnections();
-      // Clean up URL
-      router.replace('/setup', { scroll: false });
-    }
-  }, [searchParams, router]);
-
-  // Fetch existing connections when entering connections step
-  useEffect(() => {
-    if (step === 'connections') {
-      refreshConnections();
-    }
-  }, [step]);
-
-  const refreshConnections = async () => {
-    setIsLoadingConnections(true);
-    try {
-      const { data, status } = await api.get<{ connections: Array<{ type: string }> }>('/api/connections');
-      // Handle 401 gracefully - user may not be fully authenticated yet
-      if (status === 401) {
-        setConnectedServices(new Set());
-      } else if (data?.connections && Array.isArray(data.connections)) {
-        setConnectedServices(new Set(data.connections.map(c => c.type)));
-      }
-    } catch {
-      // Silently handle errors - connections step should still work
-      setConnectedServices(new Set());
-    }
-    setIsLoadingConnections(false);
-  };
 
   const handleAdminSubmit = async () => {
     setError('');
@@ -128,15 +86,11 @@ function SetupPageContent() {
     }
 
     setIsLoading(false);
-    setStep('connections');
+    setStep('success');
   };
 
-  const handleFinishSetup = () => {
-    setStep('complete');
-  };
-
-  const handleGoToDashboard = () => {
-    router.push('/');
+  const handleGoToConnections = () => {
+    router.push('/connections');
   };
 
   return (
@@ -332,157 +286,23 @@ function SetupPageContent() {
           </Card>
         )}
 
-        {step === 'connections' && (
-          <Card>
-            <CardHeader className="text-center">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                <Plug className="h-6 w-6 text-primary" />
-              </div>
-              <CardTitle>Configure Connections</CardTitle>
-              <CardDescription>
-                Set up your music services (you can do this later too)
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Spotify authorization success message */}
-              {spotifyAuthorized && (
-                <div className="rounded-lg bg-green-500/10 p-3 text-sm text-green-600 dark:text-green-400 flex items-center gap-2">
-                  <Check className="h-4 w-4 shrink-0" />
-                  Spotify authorized successfully!
-                </div>
-              )}
-              
-              {isLoadingConnections ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {/* Lidarr */}
-                  <div className="flex items-center justify-between rounded-lg border p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded bg-[#62BC50] flex items-center justify-center text-white font-bold">L</div>
-                      <div>
-                        <p className="font-medium flex items-center gap-2">
-                          Lidarr
-                          {connectedServices.has('lidarr') && <Check className="h-4 w-4 text-green-500" />}
-                        </p>
-                        <p className="text-sm text-muted-foreground">Required for adding artists</p>
-                      </div>
-                    </div>
-                    <Button
-                      variant={connectedServices.has('lidarr') ? 'ghost' : 'outline'}
-                      size="sm"
-                      onClick={() => setActiveModal('lidarr')}
-                    >
-                      {connectedServices.has('lidarr') ? 'Edit' : 'Configure'}
-                    </Button>
-                  </div>
-
-                  {/* Spotify */}
-                  <div className="flex items-center justify-between rounded-lg border p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded bg-[#1DB954] flex items-center justify-center text-white font-bold">S</div>
-                      <div>
-                        <p className="font-medium flex items-center gap-2">
-                          Spotify
-                          {connectedServices.has('spotify') && <Check className="h-4 w-4 text-green-500" />}
-                        </p>
-                        <p className="text-sm text-muted-foreground">For library imports</p>
-                      </div>
-                    </div>
-                    <Button
-                      variant={connectedServices.has('spotify') ? 'ghost' : 'outline'}
-                      size="sm"
-                      onClick={() => setActiveModal('spotify')}
-                    >
-                      {connectedServices.has('spotify') ? 'Edit' : 'Configure'}
-                    </Button>
-                  </div>
-
-                  {/* Last.fm */}
-                  <div className="flex items-center justify-between rounded-lg border p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded bg-[#D51007] flex items-center justify-center text-white font-bold">L</div>
-                      <div>
-                        <p className="font-medium flex items-center gap-2">
-                          Last.fm
-                          {connectedServices.has('lastfm') && <Check className="h-4 w-4 text-green-500" />}
-                        </p>
-                        <p className="text-sm text-muted-foreground">For chart subscriptions</p>
-                      </div>
-                    </div>
-                    <Button
-                      variant={connectedServices.has('lastfm') ? 'ghost' : 'outline'}
-                      size="sm"
-                      onClick={() => setActiveModal('lastfm')}
-                    >
-                      {connectedServices.has('lastfm') ? 'Edit' : 'Configure'}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <Button variant="outline" className="flex-1" onClick={handleFinishSetup}>
-                  Skip for now
-                </Button>
-                <Button className="flex-1" onClick={handleFinishSetup}>
-                  Continue to Dashboard <ChevronRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {step === 'complete' && (
+        {step === 'success' && (
           <Card>
             <CardHeader className="text-center">
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10">
                 <Check className="h-8 w-8 text-green-500" />
               </div>
-              <CardTitle className="text-2xl">You&apos;re All Set!</CardTitle>
+              <CardTitle className="text-2xl">Account Created!</CardTitle>
               <CardDescription>
-                Mixarr is ready to discover amazing music
+                Next, connect your services to get started
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Summary of what was configured */}
-              <div className="rounded-lg bg-muted p-4 space-y-3">
-                <p className="font-medium text-sm">What you can do now:</p>
-                <ul className="space-y-2 text-sm text-muted-foreground">
-                  <li className="flex items-center gap-2">
-                    <Music2 className="h-4 w-4 text-primary shrink-0" />
-                    <span>Import artists from your connected services</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-primary shrink-0" />
-                    <span>Create subscriptions for automatic discovery</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Search className="h-4 w-4 text-primary shrink-0" />
-                    <span>Search for artists across multiple sources</span>
-                  </li>
-                </ul>
-              </div>
-              
-              <Button className="w-full" onClick={handleGoToDashboard}>
-                Go to Dashboard <ChevronRight className="ml-2 h-4 w-4" />
+            <CardContent className="space-y-4">
+              <Button className="w-full" onClick={handleGoToConnections}>
+                Continue to Connections <ChevronRight className="ml-2 h-4 w-4" />
               </Button>
             </CardContent>
           </Card>
-        )}
-
-        {/* Connection Modals */}
-        {activeModal && (
-          <ConnectionModal
-            type={activeModal}
-            isOpen={true}
-            onClose={() => setActiveModal(null)}
-            onSuccess={refreshConnections}
-            baseUrl={baseUrl}
-            isSetupMode={true}
-          />
         )}
       </div>
     </div>
