@@ -16,7 +16,7 @@ interface ProtectedLayoutProps {
 const publicRoutes = ['/login', '/setup'];
 
 export function ProtectedLayout({ children }: ProtectedLayoutProps) {
-  const { isLoading, isAuthenticated, setupRequired } = useAuth();
+  const { isLoading, isAuthenticated, setupRequired, apiError } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -24,6 +24,9 @@ export function ProtectedLayout({ children }: ProtectedLayoutProps) {
 
   useEffect(() => {
     if (isLoading) return;
+    
+    // Don't redirect while API is unreachable - keep showing loading
+    if (apiError) return;
 
     if (!isAuthenticated && !isPublicRoute) {
       // Use cached setupRequired from auth context - no additional API call needed
@@ -38,11 +41,11 @@ export function ProtectedLayout({ children }: ProtectedLayoutProps) {
     if (isAuthenticated && pathname === '/login') {
       router.push('/');
     }
-  }, [isLoading, isAuthenticated, pathname, router, isPublicRoute, setupRequired]);
+  }, [isLoading, isAuthenticated, pathname, router, isPublicRoute, setupRequired, apiError]);
 
-  // Show loading state while checking auth
-  if (isLoading) {
-    return <LoadingPage text="Checking authentication..." />;
+  // Show loading state while checking auth or waiting for API
+  if (isLoading || apiError) {
+    return <LoadingPage text={apiError ? "Connecting to server..." : "Checking authentication..."} />;
   }
 
   // For public routes (login, setup), render just the children with no sidebar

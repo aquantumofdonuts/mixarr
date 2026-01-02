@@ -14,6 +14,7 @@ interface User {
 interface AuthResponse {
   user: User | null;
   setupRequired: boolean;
+  apiError?: boolean; // True when API is unreachable
 }
 
 interface AuthContextValue {
@@ -21,6 +22,7 @@ interface AuthContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   setupRequired: boolean;
+  apiError: boolean; // True when API is unreachable - don't redirect
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refetchAuth: () => void;
@@ -43,10 +45,9 @@ async function fetchAuthStatus(): Promise<AuthResponse> {
   });
   
   if (!res.ok) {
-    // On error (e.g., API not ready), assume setup required
-    // This ensures users land on /setup during first startup
-    // The setup page will redirect to /login if setup is already complete
-    return { user: null, setupRequired: true };
+    // On error (e.g., API not ready), signal that we don't know the state
+    // The UI should keep retrying rather than redirecting
+    return { user: null, setupRequired: false, apiError: true };
   }
   
   return res.json();
@@ -59,6 +60,7 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [shouldPoll, setShouldPoll] = React.useState(false);
 
   // Use React Query for auth state - cached for 5 minutes
   const { data, isLoading, refetch } = useQuery({
@@ -67,8 +69,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     staleTime: 5 * 60 * 1000, // Auth is fresh for 5 minutes
     gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
     refetchOnWindowFocus: true, // Do check auth on window focus
-    retry: false, // Don't retry auth failures
+    retry: 3, // Retry up to 3 times on failure
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000), // Exponential backoff
+    refetchInterval: shouldPoll ? 2000 : false, // Keep polling if API is down
   });
+
+  // Update polling state based on API error
+  React.useEffect(() => {
+    setShouldPoll(data?.apiError ?? false);
+  }, [data?.apiError]);
 
   // Login mutation
   const loginMutation = useMutation({
@@ -134,6 +143,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         isLoading,
         isAuthenticated: !!data?.user,
         setupRequired: data?.setupRequired ?? false,
+        apiError: data?.apiError ?? false,
         login,
         logout,
         refetchAuth,
