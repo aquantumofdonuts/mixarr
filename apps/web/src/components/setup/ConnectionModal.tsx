@@ -129,8 +129,8 @@ export function ConnectionModal({ type, isOpen, onClose, onSuccess, baseUrl, isS
       config: configData,
     };
 
-    // Use setup endpoint during onboarding (doesn't require auth for Lidarr)
-    const endpoint = isSetupMode && type === 'lidarr' 
+    // Use setup endpoint during onboarding (doesn't require auth)
+    const endpoint = isSetupMode 
       ? '/api/connections/setup' 
       : '/api/connections';
     
@@ -144,10 +144,10 @@ export function ConnectionModal({ type, isOpen, onClose, onSuccess, baseUrl, isS
 
     // For Spotify in setup mode, redirect to OAuth authorization
     if (type === 'spotify' && isSetupMode) {
-      // Get the auth URL with returnTo pointing back to setup page
+      // Get the auth URL with returnTo pointing back to setup page - use setup endpoint
       const returnTo = encodeURIComponent('/setup?spotify_authorized=true');
       const { data: authData, error: authError } = await api.get<{ authUrl: string }>(
-        `/api/connections/${data.connection.id}/spotify/auth?returnTo=${returnTo}`
+        `/api/connections/setup/${data.connection.id}/spotify/auth?returnTo=${returnTo}`
       );
       
       if (authData?.authUrl) {

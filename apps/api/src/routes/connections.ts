@@ -236,6 +236,13 @@ connectionsRouter.post('/setup/test-lidarr', async (req, res) => {
 // Setup-only endpoint for creating initial connections (public, only works during first-time setup)
 connectionsRouter.post('/setup', async (req, res) => {
   try {
+    // Only allow during setup (no users exist)
+    const userCount = await prisma.user.count();
+    if (userCount > 0) {
+      res.status(403).json({ error: 'Setup already completed. Use authenticated endpoint.' });
+      return;
+    }
+
     const { type, name, config } = req.body;
     
     if (!type || !name || !config) {
@@ -243,25 +250,28 @@ connectionsRouter.post('/setup', async (req, res) => {
       return;
     }
 
-    // Only allow lidarr connections through setup endpoint
-    if (type !== 'lidarr') {
-      res.status(400).json({ error: 'Only Lidarr connections can be created during setup' });
+    // Allow common connection types during setup
+    const allowedSetupTypes = ['lidarr', 'spotify', 'lastfm', 'listenbrainz', 'deezer', 'tidal'];
+    if (!allowedSetupTypes.includes(type)) {
+      res.status(400).json({ error: `Connection type '${type}' cannot be created during setup` });
       return;
     }
 
-    // Check if Lidarr connection already exists - only allow one through setup
-    const existingLidarr = await prisma.connection.findFirst({ 
-      where: { type: 'lidarr' } 
-    });
-    
-    if (existingLidarr) {
-      res.status(403).json({ error: 'Lidarr connection already exists. Use settings page to modify.' });
-      return;
+    // For Lidarr, only allow one global connection
+    if (type === 'lidarr') {
+      const existingLidarr = await prisma.connection.findFirst({ 
+        where: { type: 'lidarr' } 
+      });
+      
+      if (existingLidarr) {
+        res.status(403).json({ error: 'Lidarr connection already exists. Use settings page to modify.' });
+        return;
+      }
     }
 
     const connection = await prisma.connection.create({
       data: {
-        userId: undefined, // Global Lidarr connection
+        userId: undefined, // Global connection during setup (will be associated with first user)
         type,
         name,
         config,
@@ -285,6 +295,130 @@ connectionsRouter.post('/setup', async (req, res) => {
       return;
     }
     res.status(500).json({ error: 'Failed to create connection' });
+  }
+});
+
+// Setup-only Spotify OAuth (public, only works during first-time setup)
+connectionsRouter.get('/setup/:id/spotify/auth', async (req, res) => {
+  try {
+    // Only allow during setup (no users exist)
+    const userCount = await prisma.user.count();
+    if (userCount > 0) {
+      res.status(403).json({ error: 'Setup already completed. Use authenticated endpoint.' });
+      return;
+    }
+
+    const connectionId = parseInt(req.params.id, 10);
+    const connection = await prisma.connection.findUnique({
+      where: { id: connectionId },
+    });
+
+    if (!connection) {
+      res.status(404).json({ error: 'Connection not found' });
+      return;
+    }
+
+    if (connection.type !== 'spotify') {
+      res.status(400).json({ error: 'Connection is not a Spotify connection' });
+      return;
+    }
+
+    const config = connection.config as { clientId?: string; clientSecret?: string };
+    if (!config.clientId || !config.clientSecret) {
+      res.status(400).json({ error: 'Spotify client ID and secret are required' });
+      return;
+    }
+
+    const service = new SpotifyService({ clientId: config.clientId, clientSecret: config.clientSecret });
+    
+    // Build redirect URI - use the setup callback endpoint
+    const baseUrl = await getBaseUrl();
+    const redirectUri = `${baseUrl}/api/connections/setup/${connection.id}/spotify/callback`;
+    
+    // Create HMAC-signed state for security
+    const returnTo = req.query.returnTo as string | undefined;
+    const state = createSignedState({ 
+      connectionId: connection.id,
+      setupMode: true,
+      returnTo: returnTo || '/setup',
+    });
+    
+    const authUrl = service.getAuthUrl(redirectUri, state);
+    
+    res.json({ authUrl, redirectUri });
+  } catch (error) {
+    console.error('Error getting setup Spotify auth URL:', error);
+    res.status(500).json({ error: 'Failed to get authorization URL' });
+  }
+});
+
+// Setup-only Spotify OAuth callback (public, only works during first-time setup)
+connectionsRouter.get('/setup/:id/spotify/callback', async (req, res) => {
+  try {
+    const connectionId = parseInt(req.params.id, 10);
+    const { code, state, error: oauthError } = req.query;
+
+    // Handle OAuth errors (user denied, etc.)
+    if (oauthError) {
+      const returnTo = '/setup?spotify_error=' + encodeURIComponent(String(oauthError));
+      res.redirect(returnTo);
+      return;
+    }
+
+    if (!code || !state) {
+      res.redirect('/setup?spotify_error=missing_params');
+      return;
+    }
+
+    // Verify state signature
+    const stateData = verifySignedState(state as string);
+    if (!stateData || stateData.connectionId !== connectionId || !stateData.setupMode) {
+      res.redirect('/setup?spotify_error=invalid_state');
+      return;
+    }
+
+    const connection = await prisma.connection.findUnique({
+      where: { id: connectionId },
+    });
+
+    if (!connection || connection.type !== 'spotify') {
+      res.redirect('/setup?spotify_error=connection_not_found');
+      return;
+    }
+
+    const config = connection.config as { clientId?: string; clientSecret?: string };
+    if (!config.clientId || !config.clientSecret) {
+      res.redirect('/setup?spotify_error=missing_credentials');
+      return;
+    }
+
+    const service = new SpotifyService({ clientId: config.clientId, clientSecret: config.clientSecret });
+    
+    const baseUrl = await getBaseUrl();
+    const redirectUri = `${baseUrl}/api/connections/setup/${connection.id}/spotify/callback`;
+    
+    const tokens = await service.exchangeCodeForTokens(code as string, redirectUri);
+
+    // Update connection with tokens
+    await prisma.connection.update({
+      where: { id: connectionId },
+      data: {
+        config: {
+          ...config,
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          tokenExpiry: tokens.expiresAt.toISOString(),
+        },
+        isActive: true,
+      },
+    });
+
+    // Redirect back to setup page
+    const returnTo = stateData.returnTo || '/setup';
+    res.redirect(returnTo + (returnTo.includes('?') ? '&' : '?') + 'spotify_authorized=true');
+  } catch (error) {
+    console.error('Setup Spotify OAuth callback error:', error);
+    res.redirect('/setup?spotify_error=callback_failed');
   }
 });
 
