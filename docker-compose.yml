@@ -16,8 +16,8 @@ services:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
       interval: 10s
       timeout: 5s
-      retries: 15
-      start_period: 120s
+      retries: 30
+      start_period: 300s
 
   # Redis for sessions and job queue
   redis:
