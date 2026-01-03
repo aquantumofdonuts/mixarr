@@ -21,9 +21,11 @@ export const sessionMiddleware: RequestHandler = session({
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
+  proxy: true, // Trust the reverse proxy (Caddy/Next.js) for secure cookies
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
+    sameSite: 'lax', // Protect against CSRF while allowing normal navigation
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
   },
 });

@@ -38,6 +38,11 @@ if (process.env.NODE_ENV === 'production' && (!sessionSecret || sessionSecret ==
 }
 
 const app = express();
+
+// Trust proxy - required for secure cookies behind reverse proxies (Caddy/Next.js)
+// This tells Express to trust X-Forwarded-* headers from the first proxy
+app.set('trust proxy', 1);
+
 const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
   cors: {
