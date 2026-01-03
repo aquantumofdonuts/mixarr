@@ -7,7 +7,7 @@ import { ArtistCard } from '@/components/ArtistCard';
 import { AlbumCard } from '@/components/AlbumCard';
 import { ExternalLinks } from '@/components/ExternalLinks';
 import { api } from '@/lib/api';
-import { Search as SearchIcon, Plus, Music, ChevronLeft, ChevronRight, CheckSquare, Square, X, Loader2 } from 'lucide-react';
+import { Search as SearchIcon, Plus, Music, ChevronLeft, ChevronRight, CheckSquare, Square, X, Loader2, Sparkles } from 'lucide-react';
 
 type SearchType = 'artist' | 'album' | 'label' | 'year' | 'ai';
 type SearchSource = 'spotify' | 'deezer' | 'tidal' | 'bandcamp';
@@ -479,7 +479,7 @@ export default function SearchPage() {
                 <option value="label">Label</option>
                 <option value="year">Year</option>
                 <option value="ai" disabled={aiAvailable === false}>
-                  ✨ AI Search
+                  AI Search
                 </option>
               </select>
               
@@ -572,7 +572,7 @@ export default function SearchPage() {
             {searchType === 'ai' && results.length > 0 && (
               <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-lg p-4 mb-4">
                 <div className="flex items-center gap-2">
-                  <span className="text-purple-400 text-lg">✨</span>
+                  <Sparkles className="h-5 w-5 text-purple-400" />
                   <span className="text-purple-400 font-medium">AI Recommendations for:</span>
                   <span className="text-zinc-300">"{aiPrompt}"</span>
                 </div>

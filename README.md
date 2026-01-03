@@ -97,11 +97,11 @@ LLM-powered artist discovery using OpenAI, Anthropic, or Ollama.
 - **On Repeat**: Your most played tracks
 
 ### Deezer (8)
-- **Favorites**: ⚠️ Requires OAuth (unavailable)
-- **Listening History**: ⚠️ Requires OAuth (unavailable)
-- **Flow Recommendations**: ⚠️ Requires OAuth (unavailable)
-- **Playlist**: ⚠️ Requires OAuth (unavailable)
-- **All Playlists**: ⚠️ Requires OAuth (unavailable)
+- **Favorites**: Requires OAuth (unavailable)
+- **Listening History**: Requires OAuth (unavailable)
+- **Flow Recommendations**: Requires OAuth (unavailable)
+- **Playlist**: Requires OAuth (unavailable)
+- **All Playlists**: Requires OAuth (unavailable)
 - **Chart Artists**: Top chart artists (public API)
 - **Genre Artists**: Artists by genre (public API)
 - **Search Artists**: Artists by search query (public API)
@@ -266,9 +266,9 @@ Artists will be added to your **Review Queue** for approval before being sent to
 ### Quick Verification
 
 After setup, verify everything works:
-1. ✅ Dashboard shows your Lidarr library stats
-2. ✅ Search finds artists across connected services
-3. ✅ Test subscription runs successfully
+1. Dashboard shows your Lidarr library stats
+2. Search finds artists across connected services
+3. Test subscription runs successfully
 
 ## Production Deployment
 

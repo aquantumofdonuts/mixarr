@@ -175,7 +175,7 @@ export class NotificationService {
     switch (event) {
       case 'subscription.completed':
         return {
-          title: '✅ Subscription Complete',
+          title: 'Subscription Complete',
           description: `**${payload.subscriptionName}** finished`,
           fields: [
             { name: 'Artists Found', value: String(payload.artistCount || 0), inline: true },
@@ -187,7 +187,7 @@ export class NotificationService {
 
       case 'subscription.failed':
         return {
-          title: '❌ Subscription Failed',
+          title: 'Subscription Failed',
           description: `**${payload.subscriptionName}** encountered an error`,
           fields: [
             { name: 'Error', value: payload.error || 'Unknown error' },
@@ -198,7 +198,7 @@ export class NotificationService {
 
       case 'review.pending':
         return {
-          title: '📋 Review Queue',
+          title: 'Review Queue',
           description: `${payload.count} artists pending review`,
           fields: payload.sources?.length
             ? [{ name: 'Sources', value: payload.sources.join(', ') }]
@@ -209,7 +209,7 @@ export class NotificationService {
 
       case 'artist.added':
         return {
-          title: '🎵 Artist Added',
+          title: 'Artist Added',
           description: `**${payload.artistName}** added to Lidarr`,
           color: 0x00aaff, // Blue
           thumbnail: payload.imageUrl ? { url: payload.imageUrl } : undefined,
@@ -218,7 +218,7 @@ export class NotificationService {
 
       case 'artist.failed':
         return {
-          title: '❌ Artist Add Failed',
+          title: 'Artist Add Failed',
           description: `Failed to add **${payload.artistName}**`,
           fields: [
             { name: 'Error', value: payload.error || 'Unknown error' },
@@ -229,7 +229,7 @@ export class NotificationService {
 
       case 'enrichment.completed':
         return {
-          title: '✨ Enrichment Complete',
+          title: 'Enrichment Complete',
           description: `Metadata enriched for ${payload.artistCount} artists`,
           color: 0x9b59b6, // Purple
           timestamp,

@@ -71,8 +71,22 @@ export default function ConnectionsPage() {
   const [tidalAuthStatus, setTidalAuthStatus] = useState<Record<number, SpotifyAuthStatus>>({});
   const [authorizingId, setAuthorizingId] = useState<number | null>(null);
   const [baseUrl, setBaseUrl] = useState<string>('');
+  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   const { addToast } = useToast();
   
+  // Load welcome banner dismissed state from localStorage
+  useEffect(() => {
+    const dismissed = localStorage.getItem('mixarr_welcome_dismissed');
+    if (dismissed === 'true') {
+      setWelcomeDismissed(true);
+    }
+  }, []);
+  
+  const handleDismissWelcome = () => {
+    setWelcomeDismissed(true);
+    localStorage.setItem('mixarr_welcome_dismissed', 'true');
+  };
+
   // Lidarr maintenance state
   const [lidarrStats, setLidarrStats] = useState<Record<number, { 
     total: number; 
@@ -610,8 +624,8 @@ export default function ConnectionsPage() {
 
   const typeConfig = connectionTypes.find(t => t.value === form.type);
 
-  // Check if this is a fresh setup (no connections yet)
-  const isFirstTimeSetup = connections.length === 0;
+  // Check if this is a fresh setup (no connections yet) and not dismissed
+  const showWelcomeBanner = connections.length === 0 && !welcomeDismissed;
 
   return (
     <>
@@ -625,14 +639,14 @@ export default function ConnectionsPage() {
       </PageHeader>
 
       {/* First-time setup welcome banner */}
-      {isFirstTimeSetup && (
+      {showWelcomeBanner && (
         <Card className="mb-6 border-primary/20 bg-primary/5">
           <CardContent className="pt-6">
             <div className="flex items-start gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10">
                 <Check className="h-6 w-6 text-primary" />
               </div>
-              <div className="space-y-2">
+              <div className="flex-1 space-y-2">
                 <h3 className="font-semibold text-lg">Welcome to Mixarr!</h3>
                 <p className="text-muted-foreground">
                   Your account is ready. To get started, you'll need to connect at least:
@@ -645,6 +659,13 @@ export default function ConnectionsPage() {
                   Click "Configure" on any service below to add your first connection.
                 </p>
               </div>
+              <button
+                onClick={handleDismissWelcome}
+                className="shrink-0 rounded-md p-1 hover:bg-primary/10 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Dismiss welcome message"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
           </CardContent>
         </Card>

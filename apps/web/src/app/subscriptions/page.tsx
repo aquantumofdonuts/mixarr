@@ -7,7 +7,7 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useSubscriptions, usePresets, useRunSubscription, useDeleteSubscription, useToggleSubscription, queryKeys } from '@/lib/hooks';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Play, Pause, Trash2, Edit, Clock, TrendingUp, Music2, Globe, Tag, Eye, Sparkles, ChevronRight, Brain, Headphones, Disc, ShoppingBag } from 'lucide-react';
+import { Plus, Play, Pause, Trash2, Edit, Clock, TrendingUp, Music2, Globe, Tag, Eye, Sparkles, ChevronRight, Brain, Headphones, Disc, ShoppingBag, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 
 interface Subscription {
@@ -580,7 +580,7 @@ export default function SubscriptionsPage() {
               <Select
                 value={form.type}
                 onChange={(e) => setForm({ ...form, type: e.target.value })}
-                options={subscriptionTypes.map(t => ({ value: t.value, label: `${t.label}${t.warning ? ' ⚠️' : ''}`, sublabel: t.description }))}
+                options={subscriptionTypes.map(t => ({ value: t.value, label: `${t.label}${t.warning ? ' (!)' : ''}`, sublabel: t.description }))}
                 disabled={!!editingId}
               />
               {typeConfig && (
@@ -588,7 +588,7 @@ export default function SubscriptionsPage() {
               )}
               {typeConfig?.warning && (
                 <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
-                  <span>⚠️</span> {typeConfig.warning}
+                  <AlertTriangle className="h-3 w-3" /> {typeConfig.warning}
                 </p>
               )}
             </div>
