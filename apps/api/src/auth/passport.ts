@@ -2,7 +2,7 @@ import type { Express, RequestHandler } from 'express';
 import passport from 'passport';
 import { Strategy as LocalStrategy } from 'passport-local';
 import bcrypt from 'bcryptjs';
-import session from 'express-session';
+import session, { MemoryStore } from 'express-session';
 import prisma from '../lib/db.js';
 
 declare global {
@@ -17,10 +17,13 @@ declare global {
 }
 
 // Create session middleware - exported for Socket.IO authentication
+// Using explicit MemoryStore to suppress the production warning.
+// Sessions are lost on container restart, which is acceptable for this app.
 export const sessionMiddleware: RequestHandler = session({
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
+  store: new MemoryStore(),
   proxy: true, // Trust the reverse proxy (Caddy/Next.js) for secure cookies
   cookie: {
     secure: process.env.NODE_ENV === 'production',
