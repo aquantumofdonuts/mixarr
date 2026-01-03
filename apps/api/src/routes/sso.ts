@@ -143,7 +143,10 @@ ssoRouter.post('/providers/:type/test', async (req, res) => {
     }
     const type = req.params.type;
     
-    const provider = await ssoService.getByType(type);
+    // Use prisma directly to get unmasked secrets for testing
+    const provider = await prisma.ssoProvider.findUnique({
+      where: { type },
+    });
     if (!provider) {
       res.status(404).json({ success: false, message: 'Provider not configured. Save configuration first.' });
       return;
