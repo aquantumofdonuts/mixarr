@@ -137,6 +137,7 @@ export default function SearchPage() {
         results: ArtistResult[];
         aiProviders: string[];
         message?: string;
+        errors?: string[];
       }>('/api/search/ai', { prompt: query.trim() });
 
       if (error) {
@@ -148,7 +149,13 @@ export default function SearchPage() {
         setTotalCount(data.results.length);
         
         if (data.results.length === 0) {
-          addToast({ type: 'info', title: data.message || 'No results found' });
+          // Show error toast if there were provider errors, info toast otherwise
+          const hasErrors = data.errors && data.errors.length > 0;
+          addToast({ 
+            type: hasErrors ? 'error' : 'info', 
+            title: hasErrors ? 'AI Search Error' : 'No results found',
+            message: data.message || 'No recommendations found'
+          });
         }
       }
       setIsSearching(false);

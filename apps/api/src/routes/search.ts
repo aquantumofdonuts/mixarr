@@ -187,17 +187,25 @@ searchRouter.post('/ai', async (req, res) => {
       return;
     }
 
-    // Get AI recommendations
+    // Get AI recommendations (limit to 10 to keep response time reasonable)
     const truncated = prompt.length > 50 ? `${prompt.substring(0, 50)}...` : prompt;
     log.debug(`Processing prompt: "${truncated}"`);
-    const { artists: artistNames, providers } = await aiService.searchByPrompt(prompt.trim(), limit);
+    const effectiveLimit = Math.min(limit, 10); // Cap at 10 to avoid timeouts
+    const { artists: artistNames, providers, errors: aiErrors } = await aiService.searchByPrompt(prompt.trim(), effectiveLimit);
 
     if (artistNames.length === 0) {
+      // If we have errors but no results, indicate the failure
+      const hasProviderErrors = aiErrors && aiErrors.length > 0;
+      const message = hasProviderErrors
+        ? `AI providers encountered errors: ${aiErrors.join('; ')}. Please try again.`
+        : 'No recommendations found. Try rephrasing your query.';
+      
       res.json({
         prompt: prompt.trim(),
         results: [],
         aiProviders: providers,
-        message: 'No recommendations found. Try rephrasing your query.',
+        message,
+        errors: aiErrors,
       });
       return;
     }
@@ -211,8 +219,8 @@ searchRouter.post('/ai', async (req, res) => {
       // Continue without cache - inLibrary will be false for all
     }
 
-    // Resolve artists sequentially to avoid overwhelming Lidarr API
-    // (parallel requests can trigger rate limiting on MusicBrainz)
+    // Resolve artists with limited parallelism (5 at a time to stay within timeout)
+    const BATCH_SIZE = 5;
     const enrichedResults: ({
       foreignArtistId: string;
       artistName: string;
@@ -221,29 +229,34 @@ searchRouter.post('/ai', async (req, res) => {
       inLibrary: boolean;
     } | null)[] = [];
 
-    for (const name of artistNames) {
-      try {
-        const searchResults = await lidarr.searchArtist(name);
-        if (searchResults.length === 0) {
-          log.debug(`No Lidarr results for: ${name}`);
-          enrichedResults.push(null);
-          continue;
-        }
+    for (let i = 0; i < artistNames.length; i += BATCH_SIZE) {
+      const batch = artistNames.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(async (name) => {
+          try {
+            const searchResults = await lidarr.searchArtist(name);
+            if (searchResults.length === 0) {
+              log.debug(`No Lidarr results for: ${name}`);
+              return null;
+            }
 
-        const artist = searchResults[0];
-        const inLibrary = await cache.exists({ mbid: artist.foreignArtistId });
+            const artist = searchResults[0];
+            const inLibrary = await cache.exists({ mbid: artist.foreignArtistId });
 
-        enrichedResults.push({
-          foreignArtistId: artist.foreignArtistId,
-          artistName: artist.artistName,
-          overview: artist.overview,
-          imageUrl: null, // Will be enriched below
-          inLibrary,
-        });
-      } catch (error) {
-        log.error(`Error resolving artist "${name}":`, error);
-        enrichedResults.push(null);
-      }
+            return {
+              foreignArtistId: artist.foreignArtistId,
+              artistName: artist.artistName,
+              overview: artist.overview,
+              imageUrl: null as null, // Will be enriched below
+              inLibrary,
+            };
+          } catch (error) {
+            log.error(`Error resolving artist "${name}":`, error instanceof Error ? error.message : error);
+            return null;
+          }
+        })
+      );
+      enrichedResults.push(...batchResults);
     }
 
     // Filter out nulls (artists that couldn't be resolved)

@@ -248,7 +248,7 @@ Return at least 5 unique artists total, maximum 10.`;
   async searchByPrompt(
     prompt: string,
     limit: number = 20
-  ): Promise<{ artists: string[]; providers: ('openai' | 'anthropic')[] }> {
+  ): Promise<{ artists: string[]; providers: ('openai' | 'anthropic')[]; errors?: string[] }> {
     // Input validation: check for empty/whitespace-only prompts
     if (!prompt || !prompt.trim()) {
       return { artists: [], providers: [] };
@@ -267,6 +267,7 @@ Return at least 5 unique artists total, maximum 10.`;
 
     const allArtists: string[] = [];
     const usedProviders: ('openai' | 'anthropic')[] = [];
+    const errors: string[] = [];
 
     // Build the prompt for natural language search
     const searchPrompt = `Based on this request: "${trimmedPrompt}"
@@ -296,8 +297,12 @@ Return ONLY a JSON array of artist names, nothing else. Format:
         const artists = this.parseArtistList(content);
         allArtists.push(...artists);
         usedProviders.push('openai');
-      } catch (error) {
+      } catch (error: any) {
+        const errorMsg = error?.code === 'EAI_AGAIN' || error?.cause?.code === 'EAI_AGAIN'
+          ? 'OpenAI: DNS resolution failed (network issue)'
+          : `OpenAI: ${error?.message || 'Unknown error'}`;
         console.error('[AI Search] OpenAI error:', error);
+        errors.push(errorMsg);
       }
     }
 
@@ -316,8 +321,12 @@ Return ONLY a JSON array of artist names, nothing else. Format:
         const artists = this.parseArtistList(content);
         allArtists.push(...artists);
         usedProviders.push('anthropic');
-      } catch (error) {
+      } catch (error: any) {
+        const errorMsg = error?.code === 'EAI_AGAIN' || error?.cause?.code === 'EAI_AGAIN'
+          ? 'Anthropic: DNS resolution failed (network issue)'
+          : `Anthropic: ${error?.message || 'Unknown error'}`;
         console.error('[AI Search] Anthropic error:', error);
+        errors.push(errorMsg);
       }
     }
 
@@ -333,6 +342,7 @@ Return ONLY a JSON array of artist names, nothing else. Format:
     return {
       artists: uniqueArtists.slice(0, limit),
       providers: usedProviders,
+      errors: errors.length > 0 ? errors : undefined,
     };
   }
 
