@@ -2,6 +2,30 @@
 
 A complete toolset for discovering new and related music for your Lidarr collection using Spotify, TIDAL, Deezer, Last.fm, MusicBrainz, Plex/Tautulli, and AI recommendations.
 
+## Quick Start (Docker)
+
+```bash
+# Clone the repository
+git clone https://github.com/aquantumofdonuts/mixarr.git
+cd mixarr
+
+# Copy environment template and configure
+cp .env.example .env
+# Edit .env with your settings (SESSION_SECRET, etc.)
+
+# Build and start the production stack
+docker compose up -d --build
+
+# View logs
+docker compose logs -f
+```
+
+Access:
+- **HTTPS**: https://your-ip:3443 (recommended, via Caddy reverse proxy)
+- **HTTP**: http://your-ip:3010 (direct API access)
+
+On first login, create an admin account. Then connect your Lidarr instance and music services.
+
 ## Features
 
 - **Modern Stack**: Next.js 14 + Express.js + TypeScript
@@ -151,25 +175,25 @@ LLM-powered artist discovery using OpenAI, Anthropic, or Ollama.
 └── turbo.json         # Monorepo build orchestration
 ```
 
-## Quick Start
+## Development Setup
 
 ### Prerequisites
 - Node.js 20+
 - Docker & Docker Compose
 - npm 10+
 
-### Development Setup
+### Local Development
 
 ```bash
 # Clone and enter project
-git clone <repo-url>
+git clone https://github.com/chris-kc-cheng/mixarr.git
 cd mixarr
 
 # Install dependencies
 npm install
 
 # Start infrastructure (MySQL, Redis)
-docker compose up -d db redis
+docker compose -f docker-compose.dev.yml up -d db redis
 
 # Generate Prisma client
 npm run db:generate
@@ -186,14 +210,15 @@ Access:
 - API: http://localhost:3010
 - API Health: http://localhost:3010/api/health
 
-### Docker Compose (Full Stack)
+### Docker Development Stack
 
 ```bash
-docker compose up -d
+# Full containerized development environment
+./start-dev.sh
 ```
 
 Access:
-- **HTTPS (recommended)**: https://your-ip:3443 (via Caddy reverse proxy)
+- **HTTPS**: https://localhost:3443 (via Caddy reverse proxy)
 - **HTTP**: http://your-ip:3010 (direct access, no SSL)
 
 ## Onboarding Steps
