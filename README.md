@@ -9,8 +9,8 @@ A complete toolset for discovering new and related music for your Lidarr collect
 git clone https://github.com/aquantumofdonuts/mixarr.git
 cd mixarr
 
-# Switch to the prod branch
-git checkout prod
+# Checkout the latest release
+git checkout v1.0.0
 
 # Copy environment template and configure
 cp .env.example .env
@@ -28,6 +28,8 @@ Access:
 - **HTTP**: http://your-ip:3010 (direct API access)
 
 On first login, create an admin account. Then connect your Lidarr instance and music services.
+
+> **Updating**: To update to a new release, run `git fetch --tags && git checkout v1.x.x` then `docker compose up -d --build`
 
 ## Features
 
