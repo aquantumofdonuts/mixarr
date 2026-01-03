@@ -9,6 +9,9 @@ A complete toolset for discovering new and related music for your Lidarr collect
 git clone https://github.com/aquantumofdonuts/mixarr.git
 cd mixarr
 
+# Switch to the prod branch
+git checkout prod
+
 # Copy environment template and configure
 cp .env.example .env
 # Edit .env with your settings (SESSION_SECRET, etc.)
