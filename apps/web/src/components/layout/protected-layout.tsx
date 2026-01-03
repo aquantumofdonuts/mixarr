@@ -3,7 +3,6 @@
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { Sidebar } from './sidebar';
-import { MobileNav } from './mobile-nav';
 import { LoadingPage } from '@/components/ui';
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -64,12 +63,11 @@ export function ProtectedLayout({ children }: ProtectedLayoutProps) {
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <main className="flex-1 overflow-auto lg:pl-0 pl-0 pt-16 lg:pt-0 pb-20 md:pb-0">
+      <main className="flex-1 overflow-auto lg:pl-0 pl-0 pt-16 lg:pt-0">
         <div className="container mx-auto px-4 py-6 lg:px-8 lg:py-8">
           {children}
         </div>
       </main>
-      <MobileNav />
     </div>
   );
 }

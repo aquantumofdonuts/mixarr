@@ -223,6 +223,8 @@ Mixarr needs a Lidarr connection to function. Go to **Connections → Add Lidarr
 
 Click **Test Connection** to verify, then save.
 
+> **Recommended Lidarr Setting:** In Lidarr, go to **Settings → Media Management** and set **"Rescan Artist Folder after Refresh"** to **Never**. This prevents Mixarr's Library Health refresh features from triggering full library scans. New artists added from Mixarr will still have their folders scanned automatically.
+
 ### 4. Add Last.fm Connection (Recommended)
 
 Last.fm provides artist metadata enrichment and music discovery features. Go to **Connections → Add Last.fm**:
@@ -410,6 +412,20 @@ Enterprise single sign-on options:
 - **LDAP/Active Directory**: Enterprise directory integration
 - **SAML 2.0**: Enterprise identity provider support
 - **Plex**: Sign in with your Plex account
+
+#### Google OAuth Setup
+1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+2. Create a new OAuth 2.0 Client ID (Web application)
+3. Add this **Authorized redirect URI**:
+   ```
+   https://your-domain:3443/api/auth/sso/google/callback
+   ```
+4. Copy the Client ID and Client Secret to Mixarr's SSO settings
+
+#### SAML 2.0 Setup
+Configure your Identity Provider with:
+- **ACS URL**: `https://your-domain:3443/api/auth/sso/saml/callback`
+- **Entity ID**: `https://your-domain:3443`
 
 ### Notifications
 Receive alerts via Discord webhooks or generic webhooks:

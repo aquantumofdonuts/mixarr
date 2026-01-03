@@ -91,22 +91,31 @@ export function SSOSettings() {
   const [isLoading, setIsLoading] = useState(true);
   const [savingProvider, setSavingProvider] = useState<SSOProviderType | null>(null);
   const [testingProvider, setTestingProvider] = useState<SSOProviderType | null>(null);
+  const [baseUrl, setBaseUrl] = useState<string>('');
   const { addToast } = useToast();
 
   const fetchProviders = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await api.get<{ providers: SSOProvider[] }>('/api/sso/providers');
-      if (error) {
-        addToast({ type: 'error', title: 'Failed to load SSO providers', message: error });
-      } else if (data) {
-        setProviders(data.providers);
+      const [providersRes, baseUrlRes] = await Promise.all([
+        api.get<{ providers: SSOProvider[] }>('/api/sso/providers'),
+        api.get<{ baseUrl: string }>('/api/settings/base-url'),
+      ]);
+      
+      if (providersRes.error) {
+        addToast({ type: 'error', title: 'Failed to load SSO providers', message: providersRes.error });
+      } else if (providersRes.data) {
+        setProviders(providersRes.data.providers);
         // Initialize form data from fetched providers
         const newFormData = { ...formData };
-        data.providers.forEach((provider) => {
+        providersRes.data.providers.forEach((provider) => {
           newFormData[provider.type] = { ...provider.config };
         });
         setFormData(newFormData);
+      }
+      
+      if (baseUrlRes.data?.baseUrl) {
+        setBaseUrl(baseUrlRes.data.baseUrl);
       }
     } catch {
       addToast({ type: 'error', title: 'Failed to load SSO providers' });
@@ -362,6 +371,40 @@ export function SSOSettings() {
                       )}
                     </div>
                   ))}
+
+                  {/* Google OAuth Callback URL Info */}
+                  {config.type === 'google' && (
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-950/50 p-3 text-sm">
+                      <p className="font-medium text-amber-900 dark:text-amber-100">OAuth Redirect URI</p>
+                      <p className="mt-1 text-amber-800 dark:text-amber-200">
+                        Add this redirect URI in your{' '}
+                        <a 
+                          href="https://console.cloud.google.com/apis/credentials" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="underline hover:no-underline"
+                        >
+                          Google Cloud Console
+                        </a>:
+                      </p>
+                      <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
+                        {baseUrl ? `${baseUrl}/api/auth/sso/google/callback` : 'Configure Base URL in Global Settings first'}
+                      </code>
+                    </div>
+                  )}
+
+                  {/* SAML Callback URL Info */}
+                  {config.type === 'saml' && (
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-950/50 p-3 text-sm">
+                      <p className="font-medium text-amber-900 dark:text-amber-100">SAML Assertion Consumer Service URL</p>
+                      <p className="mt-1 text-amber-800 dark:text-amber-200">
+                        Configure this ACS URL in your Identity Provider:
+                      </p>
+                      <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
+                        {baseUrl ? `${baseUrl}/api/auth/sso/saml/callback` : 'Configure Base URL in Global Settings first'}
+                      </code>
+                    </div>
+                  )}
 
                   {/* Action Buttons */}
                   <div className="flex gap-2 pt-2">
