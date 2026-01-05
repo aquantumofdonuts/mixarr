@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button, Card, CardContent, Input, Modal, ModalFooter, useToast, Badge, Select } from '@/components/ui';
 import { PageHeader } from '@/components/layout/page-header';
 import { api } from '@/lib/api';
@@ -110,6 +110,21 @@ const scheduleOptions = [
   { value: '0 */12 * * *', label: 'Every 12 hours' },
 ];
 
+const REQUIRED_FIELDS: Record<string, { field: string; label: string }[]> = {
+  listenbrainz_radio: [{ field: 'listenbrainzSeedMbid', label: 'Seed Artist MBID' }],
+  listenbrainz_playlist: [{ field: 'listenbrainzPlaylistId', label: 'Playlist ID' }],
+  spotify_playlist: [{ field: 'playlistId', label: 'Playlist ID' }],
+  spotify_public_playlist: [{ field: 'publicPlaylistUrl', label: 'Playlist URL' }],
+  spotify_category: [{ field: 'tag', label: 'Category' }],
+  lastfm_tag: [{ field: 'tag', label: 'Tag' }],
+  discogs_label: [{ field: 'labelId', label: 'Label ID' }],
+  discogs_style: [{ field: 'discogsStyle', label: 'Style' }],
+  bandcamp_tag: [{ field: 'bandcampTag', label: 'Tag' }],
+  bandcamp_new: [{ field: 'bandcampTag', label: 'Tag' }],
+  tidal_playlist: [{ field: 'playlistId', label: 'Playlist ID' }],
+  deezer_playlist: [{ field: 'playlistId', label: 'Playlist ID' }],
+};
+
 const resultHandlingOptions = [
   { value: 'preview', label: 'Preview only (store results, no action)' },
   { value: 'queue', label: 'Add to review queue' },
@@ -132,7 +147,15 @@ export default function SubscriptionsPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [runningId, setRunningId] = useState<number | null>(null);
+  const [selectedFromPreset, setSelectedFromPreset] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const { addToast } = useToast();
+
+  // Artist search autocomplete state
+  const [artistSearch, setArtistSearch] = useState('');
+  const [artistResults, setArtistResults] = useState<Array<{ id: string; name: string; disambiguation?: string }>>([]);
+  const [isSearchingArtist, setIsSearchingArtist] = useState(false);
+  const [showArtistDropdown, setShowArtistDropdown] = useState(false);
 
   const [form, setForm] = useState({
     type: 'lastfm_chart',
@@ -165,12 +188,60 @@ export default function SubscriptionsPage() {
     discoverAlbums: false,
   });
 
+  // Search artists with debounce
+  useEffect(() => {
+    if (!artistSearch || artistSearch.length < 2) {
+      setArtistResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingArtist(true);
+      try {
+        const { data } = await api.get<{ results: Array<{ id: string; name: string; disambiguation?: string }> }>(
+          `/api/search/musicbrainz/artist?q=${encodeURIComponent(artistSearch)}`
+        );
+        setArtistResults(data?.results || []);
+        setShowArtistDropdown(true);
+      } catch (error) {
+        console.error('Artist search failed:', error);
+        setArtistResults([]);
+      } finally {
+        setIsSearchingArtist(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [artistSearch]);
+
   // Invalidate queries to trigger refetch
   const refetchSubscriptions = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions });
   };
 
+  const validateForm = (): Record<string, string> => {
+    const errors: Record<string, string> = {};
+    const requiredFields = REQUIRED_FIELDS[form.type] || [];
+    
+    for (const { field, label } of requiredFields) {
+      const value = form[field as keyof typeof form];
+      if (!value || (typeof value === 'string' && value.trim() === '')) {
+        errors[field] = `${label} is required`;
+      }
+    }
+    
+    return errors;
+  };
+
   const handleSave = async () => {
+    const errors = validateForm();
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      addToast({ type: 'error', title: 'Please fill in all required fields' });
+      return;
+    }
+    setValidationErrors({});
+
     const config: Record<string, any> = { limit: parseInt(form.limit, 10) };
     
     if (form.type === 'lastfm_chart' || form.type === 'lastfm_geo') {
@@ -342,6 +413,11 @@ export default function SubscriptionsPage() {
     setEditingId(null);
     setModalStep('presets');
     setSelectedCategory(null);
+    setSelectedFromPreset(false);
+    setValidationErrors({});
+    setArtistSearch('');
+    setArtistResults([]);
+    setShowArtistDropdown(false);
   };
 
   const selectPreset = (preset: Preset) => {
@@ -371,6 +447,7 @@ export default function SubscriptionsPage() {
       includeAllArtists: preset.config.includeAllArtists || false,
       discoverAlbums: preset.config.discoverAlbums || false,
     });
+    setSelectedFromPreset(true);
     setModalStep('form');
   };
 
@@ -559,7 +636,7 @@ export default function SubscriptionsPage() {
             </div>
 
             <div className="border-t pt-4">
-              <Button variant="outline" className="w-full" onClick={() => setModalStep('form')}>
+              <Button variant="outline" className="w-full" onClick={() => { setSelectedFromPreset(false); setModalStep('form'); }}>
                 <Plus className="h-4 w-4 mr-2" /> Create Custom Subscription
               </Button>
             </div>
@@ -570,7 +647,7 @@ export default function SubscriptionsPage() {
         {(editingId || modalStep === 'form') && (
           <div className="space-y-4">
             {!editingId && (
-              <Button variant="ghost" size="sm" onClick={() => setModalStep('presets')} className="mb-2">
+              <Button variant="ghost" size="sm" onClick={() => { setSelectedFromPreset(false); setModalStep('presets'); }} className="mb-2">
                 ← Back to Presets
               </Button>
             )}
@@ -579,9 +656,14 @@ export default function SubscriptionsPage() {
               <label className="text-sm font-medium">Type</label>
               <Select
                 value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value })}
+                onChange={(e) => {
+                  setForm({ ...form, type: e.target.value });
+                  setValidationErrors({});
+                  setArtistSearch('');
+                  setArtistResults([]);
+                }}
                 options={subscriptionTypes.map(t => ({ value: t.value, label: `${t.label}${t.warning ? ' (!)' : ''}`, sublabel: t.description }))}
-                disabled={!!editingId}
+                disabled={!!editingId || selectedFromPreset}
               />
               {typeConfig && (
                 <p className="text-xs text-muted-foreground mt-1">{typeConfig.description}</p>
@@ -650,30 +732,42 @@ export default function SubscriptionsPage() {
 
             {form.type === 'lastfm_tag' && (
               <div>
-                <label className="text-sm font-medium">Tag</label>
+                <label className="text-sm font-medium">
+                  Tag{REQUIRED_FIELDS[form.type]?.some(r => r.field === 'tag') && <span className="text-red-500 ml-1">*</span>}
+                </label>
                 <Input
                   value={form.tag}
                   onChange={(e) => setForm({ ...form, tag: e.target.value })}
                   placeholder="e.g., rock, metal, jazz"
                 />
+                {validationErrors.tag && (
+                  <p className="text-xs text-red-600 mt-1">{validationErrors.tag}</p>
+                )}
               </div>
             )}
 
             {form.type === 'spotify_playlist' && (
               <div>
-                <label className="text-sm font-medium">Playlist ID</label>
+                <label className="text-sm font-medium">
+                  Playlist ID{REQUIRED_FIELDS[form.type]?.some(r => r.field === 'playlistId') && <span className="text-red-500 ml-1">*</span>}
+                </label>
                 <Input
                   value={form.playlistId}
                   onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                   placeholder="Spotify playlist ID"
                 />
+                {validationErrors.playlistId && (
+                  <p className="text-xs text-red-600 mt-1">{validationErrors.playlistId}</p>
+                )}
               </div>
             )}
 
             {form.type === 'spotify_public_playlist' && (
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium">Playlist URL</label>
+                  <label className="text-sm font-medium">
+                    Playlist URL{REQUIRED_FIELDS[form.type]?.some(r => r.field === 'publicPlaylistUrl') && <span className="text-red-500 ml-1">*</span>}
+                  </label>
                   <Input
                     value={form.publicPlaylistUrl}
                     onChange={(e) => setForm({ ...form, publicPlaylistUrl: e.target.value })}
@@ -682,6 +776,9 @@ export default function SubscriptionsPage() {
                   <p className="text-xs text-muted-foreground mt-1">
                     Paste any public Spotify playlist URL (no login required)
                   </p>
+                  {validationErrors.publicPlaylistUrl && (
+                    <p className="text-xs text-red-600 mt-1">{validationErrors.publicPlaylistUrl}</p>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
                   <input
@@ -720,23 +817,33 @@ export default function SubscriptionsPage() {
 
             {form.type === 'deezer_playlist' && (
               <div>
-                <label className="text-sm font-medium">Playlist ID</label>
+                <label className="text-sm font-medium">
+                  Playlist ID{REQUIRED_FIELDS[form.type]?.some(r => r.field === 'playlistId') && <span className="text-red-500 ml-1">*</span>}
+                </label>
                 <Input
                   value={form.playlistId}
                   onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                   placeholder="Deezer playlist ID"
                 />
+                {validationErrors.playlistId && (
+                  <p className="text-xs text-red-600 mt-1">{validationErrors.playlistId}</p>
+                )}
               </div>
             )}
 
             {form.type === 'tidal_playlist' && (
               <div>
-                <label className="text-sm font-medium">Playlist ID</label>
+                <label className="text-sm font-medium">
+                  Playlist ID{REQUIRED_FIELDS[form.type]?.some(r => r.field === 'playlistId') && <span className="text-red-500 ml-1">*</span>}
+                </label>
                 <Input
                   value={form.playlistId}
                   onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                   placeholder="TIDAL playlist UUID"
                 />
+                {validationErrors.playlistId && (
+                  <p className="text-xs text-red-600 mt-1">{validationErrors.playlistId}</p>
+                )}
               </div>
             )}
 
@@ -794,7 +901,9 @@ export default function SubscriptionsPage() {
 
             {form.type === 'listenbrainz_playlist' && (
               <div>
-                <label className="text-sm font-medium">Playlist ID</label>
+                <label className="text-sm font-medium">
+                  Playlist ID{REQUIRED_FIELDS[form.type]?.some(r => r.field === 'listenbrainzPlaylistId') && <span className="text-red-500 ml-1">*</span>}
+                </label>
                 <Input
                   value={form.listenbrainzPlaylistId}
                   onChange={(e) => setForm({ ...form, listenbrainzPlaylistId: e.target.value })}
@@ -803,22 +912,99 @@ export default function SubscriptionsPage() {
                 <p className="text-xs text-muted-foreground mt-1">
                   The playlist MBID from the ListenBrainz playlist URL.
                 </p>
+                {validationErrors.listenbrainzPlaylistId && (
+                  <p className="text-xs text-red-600 mt-1">{validationErrors.listenbrainzPlaylistId}</p>
+                )}
               </div>
             )}
 
             {form.type === 'listenbrainz_radio' && (
               <>
-                <div>
-                  <label className="text-sm font-medium">Seed Artist MBID</label>
-                  <Input
-                    value={form.listenbrainzSeedMbid}
-                    onChange={(e) => setForm({ ...form, listenbrainzSeedMbid: e.target.value })}
-                    placeholder="e.g., 8bfac288-ccc5-448d-9573-c33ea2aa5c30"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    The MusicBrainz ID of the artist to generate radio from.
-                  </p>
+                <div className="relative">
+                  <label className="text-sm font-medium">
+                    Seed Artist {REQUIRED_FIELDS[form.type]?.some(r => r.field === 'listenbrainzSeedMbid') && <span className="text-red-500">*</span>}
+                  </label>
+                  <div className="relative">
+                    <Input
+                      value={artistSearch}
+                      onChange={(e) => {
+                        setArtistSearch(e.target.value);
+                        // Clear the MBID if user is typing a new search
+                        if (form.listenbrainzSeedMbid) {
+                          setForm({ ...form, listenbrainzSeedMbid: '' });
+                        }
+                      }}
+                      onFocus={() => artistResults.length > 0 && setShowArtistDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowArtistDropdown(false), 200)}
+                      placeholder="Search for an artist..."
+                    />
+                    {isSearchingArtist && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Dropdown results */}
+                  {showArtistDropdown && artistResults.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-60 overflow-auto">
+                      {artistResults.map((artist) => (
+                        <button
+                          key={artist.id}
+                          type="button"
+                          className="w-full px-3 py-2 text-left hover:bg-accent flex flex-col"
+                          onClick={() => {
+                            setForm({ ...form, listenbrainzSeedMbid: artist.id });
+                            setArtistSearch(artist.name);
+                            setShowArtistDropdown(false);
+                          }}
+                        >
+                          <span className="font-medium">{artist.name}</span>
+                          {artist.disambiguation && (
+                            <span className="text-xs text-muted-foreground">{artist.disambiguation}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Show selected MBID */}
+                  {form.listenbrainzSeedMbid && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Selected MBID: <code className="bg-muted px-1 rounded">{form.listenbrainzSeedMbid}</code>
+                    </p>
+                  )}
+                  
+                  {!form.listenbrainzSeedMbid && artistSearch.length >= 2 && !isSearchingArtist && artistResults.length === 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">No artists found. Try a different search.</p>
+                  )}
+                  
+                  {validationErrors.listenbrainzSeedMbid && (
+                    <p className="text-xs text-red-600 mt-1">{validationErrors.listenbrainzSeedMbid}</p>
+                  )}
                 </div>
+                
+                {/* Keep advanced MBID input as fallback */}
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    Advanced: Enter MBID directly
+                  </summary>
+                  <div className="mt-2">
+                    <Input
+                      value={form.listenbrainzSeedMbid}
+                      onChange={(e) => {
+                        setForm({ ...form, listenbrainzSeedMbid: e.target.value });
+                        // Clear search when manually entering MBID
+                        if (artistSearch) setArtistSearch('');
+                      }}
+                      placeholder="e.g., 8bfac288-ccc5-448d-9573-c33ea2aa5c30"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Find the MBID from the MusicBrainz artist URL.
+                    </p>
+                  </div>
+                </details>
+                
                 <div>
                   <label className="text-sm font-medium">Radio Mode</label>
                   <Select
@@ -837,7 +1023,9 @@ export default function SubscriptionsPage() {
             {form.type === 'discogs_label' && (
               <>
                 <div>
-                  <label className="text-sm font-medium">Label ID</label>
+                  <label className="text-sm font-medium">
+                    Label ID{REQUIRED_FIELDS[form.type]?.some(r => r.field === 'labelId') && <span className="text-red-500 ml-1">*</span>}
+                  </label>
                   <Input
                     value={form.labelId}
                     onChange={(e) => setForm({ ...form, labelId: e.target.value })}
@@ -846,6 +1034,9 @@ export default function SubscriptionsPage() {
                   <p className="text-xs text-muted-foreground mt-1">
                     Find the label ID from the Discogs URL: discogs.com/label/<strong>1234</strong>-Label-Name
                   </p>
+                  {validationErrors.labelId && (
+                    <p className="text-xs text-red-600 mt-1">{validationErrors.labelId}</p>
+                  )}
                 </div>
                 <div>
                   <label className="text-sm font-medium">Label Name (for display)</label>
@@ -860,7 +1051,9 @@ export default function SubscriptionsPage() {
 
             {form.type === 'discogs_style' && (
               <div>
-                <label className="text-sm font-medium">Style/Genre</label>
+                <label className="text-sm font-medium">
+                  Style/Genre{REQUIRED_FIELDS[form.type]?.some(r => r.field === 'discogsStyle') && <span className="text-red-500 ml-1">*</span>}
+                </label>
                 <Select
                   value={form.discogsStyle}
                   onChange={(e) => setForm({ ...form, discogsStyle: e.target.value })}
@@ -883,13 +1076,18 @@ export default function SubscriptionsPage() {
                     { value: "Children's", label: "Children's" },
                   ]}
                 />
+                {validationErrors.discogsStyle && (
+                  <p className="text-xs text-red-600 mt-1">{validationErrors.discogsStyle}</p>
+                )}
               </div>
             )}
 
             {(form.type === 'bandcamp_tag' || form.type === 'bandcamp_new') && (
               <>
                 <div>
-                  <label className="text-sm font-medium">Tag</label>
+                  <label className="text-sm font-medium">
+                    Tag{REQUIRED_FIELDS[form.type]?.some(r => r.field === 'bandcampTag') && <span className="text-red-500 ml-1">*</span>}
+                  </label>
                   <Input
                     value={form.bandcampTag}
                     onChange={(e) => setForm({ ...form, bandcampTag: e.target.value })}
@@ -898,6 +1096,9 @@ export default function SubscriptionsPage() {
                   <p className="text-xs text-muted-foreground mt-1">
                     Browse tags at bandcamp.com/tags
                   </p>
+                  {validationErrors.bandcampTag && (
+                    <p className="text-xs text-red-600 mt-1">{validationErrors.bandcampTag}</p>
+                  )}
                 </div>
                 {form.type === 'bandcamp_tag' && (
                   <div>
