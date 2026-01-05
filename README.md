@@ -39,7 +39,7 @@ git clone https://github.com/aquantumofdonuts/mixarr.git
 cd mixarr
 
 # Checkout the latest release
-git checkout v1.0.0
+git checkout v1.1.0
 
 # Copy environment template and configure
 cp .env.example .env
