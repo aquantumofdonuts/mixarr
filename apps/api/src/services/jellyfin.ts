@@ -98,11 +98,15 @@ export class JellyfinService {
     const limit = options.limit || 25;
     const minDate = this.periodToDate(options.period);
 
+    // Jellyfin tracks play counts on Audio items (songs), not on Artists directly.
+    // We need to query played Audio items and aggregate by artist name.
     interface JellyfinItemsResponse {
       Items: Array<{
         Id: string;
         Name: string;
-        UserData?: { PlayCount?: number; LastPlayedDate?: string };
+        AlbumArtist?: string;
+        Artists?: string[];
+        UserData?: { PlayCount?: number; LastPlayedDate?: string; Played?: boolean };
         ImageTags?: { Primary?: string };
       }>;
       TotalRecordCount: number;
@@ -110,11 +114,13 @@ export class JellyfinService {
 
     const params: Record<string, string> = {
       userId: config.jellyfinUserId,
-      IncludeItemTypes: 'MusicArtist',
-      SortBy: 'PlayCount',
+      IncludeItemTypes: 'Audio',
+      SortBy: 'DatePlayed',
       SortOrder: 'Descending',
       Recursive: 'true',
-      Limit: limit.toString(),
+      IsPlayed: 'true',  // Only items that have been played
+      Limit: '500',  // Get more tracks to aggregate artists from
+      Fields: 'UserData',
     };
 
     if (config.jellyfinLibraryId) {
@@ -131,18 +137,40 @@ export class JellyfinService {
       params
     );
 
-    return response.Items
-      .filter(item => (item.UserData?.PlayCount || 0) > 0)
-      .map(item => ({
-        name: item.Name,
-        playCount: item.UserData?.PlayCount || 0,
-        lastPlayed: item.UserData?.LastPlayedDate 
-          ? new Date(item.UserData.LastPlayedDate) 
-          : undefined,
-        thumb: item.ImageTags?.Primary 
-          ? `${config.jellyfinUrl}/Items/${item.Id}/Images/Primary`
-          : undefined,
-      }));
+    // Aggregate play counts by artist
+    const artistPlayCounts = new Map<string, { playCount: number; lastPlayed?: Date }>();
+    
+    for (const item of response.Items) {
+      // Get artist name - prefer AlbumArtist, fall back to first artist
+      const artistName = item.AlbumArtist || item.Artists?.[0];
+      if (!artistName) continue;
+
+      const playCount = item.UserData?.PlayCount || 1;
+      const lastPlayed = item.UserData?.LastPlayedDate 
+        ? new Date(item.UserData.LastPlayedDate) 
+        : undefined;
+
+      const existing = artistPlayCounts.get(artistName);
+      if (existing) {
+        existing.playCount += playCount;
+        // Keep the most recent play date
+        if (lastPlayed && (!existing.lastPlayed || lastPlayed > existing.lastPlayed)) {
+          existing.lastPlayed = lastPlayed;
+        }
+      } else {
+        artistPlayCounts.set(artistName, { playCount, lastPlayed });
+      }
+    }
+
+    // Sort by play count and return top artists
+    return Array.from(artistPlayCounts.entries())
+      .map(([name, data]) => ({
+        name,
+        playCount: data.playCount,
+        lastPlayed: data.lastPlayed,
+      }))
+      .sort((a, b) => b.playCount - a.playCount)
+      .slice(0, limit);
   }
 
   private periodToDate(period: string): Date | null {
