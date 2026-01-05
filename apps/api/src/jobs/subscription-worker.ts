@@ -1199,8 +1199,8 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         break;
       }
 
-      case 'listenbrainz_explore': {
-        // Fresh releases - discover albums, not artists
+      case 'listenbrainz_fresh_releases': {
+        // Fresh releases - discover albums, not artists (global, not personalized)
         const lbConfig = listenbrainzConn?.config as any;
         const listenbrainz = new ListenBrainzService(lbConfig?.username || 'anonymous');
         const limit = config.limit || 50;
@@ -1216,8 +1216,86 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
           releaseDate: release.release_date,
           releaseYear: release.release_date ? parseInt(release.release_date.split('-')[0]) : undefined,
           releaseType: 'album',
-          source: 'listenbrainz-explore',
+          source: 'listenbrainz-fresh-releases',
         }));
+        break;
+      }
+
+      case 'listenbrainz_weekly_jams': {
+        // Weekly Jams - personalized playlist of familiar tracks
+        if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
+        const lbConfig = listenbrainzConn.config as any;
+        const username = config.username || lbConfig.username;
+        if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
+        
+        const listenbrainz = new ListenBrainzService(username, lbConfig.token);
+        const limit = config.limit || 50;
+        
+        const result = await listenbrainz.getLatestCreatedForYouPlaylist('weekly-jams');
+        
+        if (!result) {
+          console.warn(`No Weekly Jams playlist found for ${username}. Make sure you have enough listening history.`);
+          break;
+        }
+
+        // Extract unique artists from playlist tracks
+        const artistMap = new Map<string, { name: string; mbid?: string }>();
+        for (const track of result.tracks) {
+          const key = track.artist_name.toLowerCase();
+          if (!artistMap.has(key)) {
+            artistMap.set(key, {
+              name: track.artist_name,
+              mbid: track.artist_mbid,
+            });
+          }
+        }
+        
+        artists = Array.from(artistMap.values())
+          .slice(0, limit)
+          .map(a => ({
+            name: a.name,
+            mbid: a.mbid,
+            source: 'listenbrainz-weekly-jams',
+          }));
+        break;
+      }
+
+      case 'listenbrainz_weekly_exploration': {
+        // Weekly Exploration - personalized playlist of new discoveries
+        if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
+        const lbConfig = listenbrainzConn.config as any;
+        const username = config.username || lbConfig.username;
+        if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
+        
+        const listenbrainz = new ListenBrainzService(username, lbConfig.token);
+        const limit = config.limit || 50;
+        
+        const result = await listenbrainz.getLatestCreatedForYouPlaylist('weekly-exploration');
+        
+        if (!result) {
+          console.warn(`No Weekly Exploration playlist found for ${username}. Make sure you have enough listening history.`);
+          break;
+        }
+
+        // Extract unique artists from playlist tracks
+        const artistMap = new Map<string, { name: string; mbid?: string }>();
+        for (const track of result.tracks) {
+          const key = track.artist_name.toLowerCase();
+          if (!artistMap.has(key)) {
+            artistMap.set(key, {
+              name: track.artist_name,
+              mbid: track.artist_mbid,
+            });
+          }
+        }
+        
+        artists = Array.from(artistMap.values())
+          .slice(0, limit)
+          .map(a => ({
+            name: a.name,
+            mbid: a.mbid,
+            source: 'listenbrainz-weekly-exploration',
+          }));
         break;
       }
 

@@ -72,4 +72,4 @@ export const themes: ThemeConfig[] = [
   },
 ];
 
-export const DEFAULT_THEME = 'soft-gradient';
+export const DEFAULT_THEME = 'midnight-modern';

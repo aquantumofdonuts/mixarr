@@ -99,7 +99,7 @@ export default function RootLayout({
       <body className={`${inter.variable} ${playfair.variable} ${ibmPlexSans.variable} ${ibmPlexSerif.variable} ${spaceMono.variable} ${spaceGrotesk.variable} ${dmSans.variable} ${outfit.variable} font-sans`}>
         <ThemeProvider
           attribute="data-theme"
-          defaultTheme="soft-gradient"
+          defaultTheme="midnight-modern"
           themes={['dark-luxe', 'editorial-clean', 'neo-brutalist', 'soft-gradient', 'vinyl-retro', 'midnight-modern']}
           enableSystem={false}
           disableTransitionOnChange={false}

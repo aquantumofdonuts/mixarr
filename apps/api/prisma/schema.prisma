@@ -212,7 +212,9 @@ enum SubscriptionType {
   listenbrainz_top
   listenbrainz_similar
   listenbrainz_recommendations
-  listenbrainz_explore
+  listenbrainz_fresh_releases
+  listenbrainz_weekly_jams
+  listenbrainz_weekly_exploration
   listenbrainz_year
   listenbrainz_playlist
   listenbrainz_radio
