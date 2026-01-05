@@ -22,7 +22,7 @@ import { BandcampService } from '../services/bandcamp.js';
 import { fetchPublicPlaylist, parseSpotifyPlaylistUrl, extractArtistsFromPlaylist } from '../services/public-playlist.js';
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
-import { isSpotifyConfig, isLastFMConfig } from '../types/connections.js';
+import { isSpotifyConfig, isLastFMConfig, isDeezerConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 
@@ -856,7 +856,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'deezer_favorites': {
         if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        const deezerConfig = deezerConn.config as any;
+        if (!isDeezerConfig(deezerConn.config)) {
+          throw new Error('Invalid Deezer connection config');
+        }
+        const deezerConfig = deezerConn.config;
         const deezer = new DeezerOAuthService({
           appId: deezerConfig.appId,
           appSecret: deezerConfig.appSecret,
@@ -879,7 +882,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'deezer_history': {
         if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        const deezerConfig = deezerConn.config as any;
+        if (!isDeezerConfig(deezerConn.config)) {
+          throw new Error('Invalid Deezer connection config');
+        }
+        const deezerConfig = deezerConn.config;
         const deezer = new DeezerOAuthService({
           appId: deezerConfig.appId,
           appSecret: deezerConfig.appSecret,
@@ -902,7 +908,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'deezer_flow': {
         if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        const deezerConfig = deezerConn.config as any;
+        if (!isDeezerConfig(deezerConn.config)) {
+          throw new Error('Invalid Deezer connection config');
+        }
+        const deezerConfig = deezerConn.config;
         const deezer = new DeezerOAuthService({
           appId: deezerConfig.appId,
           appSecret: deezerConfig.appSecret,
@@ -925,7 +934,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'deezer_playlist': {
         if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        const deezerConfig = deezerConn.config as any;
+        if (!isDeezerConfig(deezerConn.config)) {
+          throw new Error('Invalid Deezer connection config');
+        }
+        const deezerConfig = deezerConn.config;
         const deezer = new DeezerOAuthService({
           appId: deezerConfig.appId,
           appSecret: deezerConfig.appSecret,
@@ -949,7 +961,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'deezer_playlists': {
         // All artists from all user's playlists
         if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        const deezerConfig = deezerConn.config as any;
+        if (!isDeezerConfig(deezerConn.config)) {
+          throw new Error('Invalid Deezer connection config');
+        }
+        const deezerConfig = deezerConn.config;
         const deezer = new DeezerOAuthService({
           appId: deezerConfig.appId,
           appSecret: deezerConfig.appSecret,
