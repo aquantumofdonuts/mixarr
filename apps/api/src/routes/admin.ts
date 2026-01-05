@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { createUserSchema, updateUserSchema } from '../schemas/user.js';
 import { parseIntParam } from '../utils/params.js';
 import bcrypt from 'bcryptjs';
 
@@ -85,7 +87,7 @@ adminRouter.get('/users/:id', async (req, res) => {
 });
 
 // Create new user
-adminRouter.post('/users', async (req, res) => {
+adminRouter.post('/users', validateBody(createUserSchema), async (req, res) => {
   try {
     const { username, password, displayName, email, role } = req.body;
 
@@ -135,7 +137,7 @@ adminRouter.post('/users', async (req, res) => {
 });
 
 // Update user
-adminRouter.put('/users/:id', async (req, res) => {
+adminRouter.put('/users/:id', validateBody(updateUserSchema), async (req, res) => {
   try {
     const id = parseIntParam(req.params.id);
     if (id === null) {
