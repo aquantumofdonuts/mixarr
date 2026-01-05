@@ -1,128 +1,87 @@
-/**
- * Health API Tests
- * 
- * Tests:
- * - Health check endpoint
- * - Readiness check endpoint
- */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import express from 'express';
+import request from 'supertest';
 
-import { describe, it, expect } from 'vitest';
+// Mock prisma before imports
+vi.mock('../../src/lib/db.js', () => ({
+  default: {
+    $queryRaw: vi.fn(),
+  },
+}));
 
-describe('Health API', () => {
-  describe('GET /api/health', () => {
-    it('should return healthy status', () => {
-      const response = {
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        version: '2.0.0',
-      };
+// Mock redis before imports
+vi.mock('../../src/lib/redis.js', () => ({
+  redis: {
+    ping: vi.fn(),
+  },
+}));
 
-      expect(response.status).toBe('healthy');
-      expect(response.version).toBeDefined();
-      expect(response.timestamp).toBeDefined();
-    });
-
-    it('should include version number', () => {
-      const version = process.env.npm_package_version || '2.0.0';
-      expect(version).toMatch(/^\d+\.\d+\.\d+$/);
-    });
-
-    it('should include ISO 8601 timestamp', () => {
-      const timestamp = new Date().toISOString();
-      const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/;
-      expect(timestamp).toMatch(isoRegex);
-    });
-
-    it('should be accessible without authentication', () => {
-      // Health endpoint should not require auth
-      const requiresAuth = false;
-      expect(requiresAuth).toBe(false);
-    });
+describe('Health Routes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
   });
 
-  describe('GET /api/health/ready', () => {
-    it('should return ready status when all services connected', () => {
-      const response = {
-        status: 'ready',
-        services: {
-          database: 'connected',
-          redis: 'connected',
-        },
-      };
-
-      expect(response.status).toBe('ready');
-      expect(response.services.database).toBe('connected');
-      expect(response.services.redis).toBe('connected');
-    });
-
-    it('should return not ready when database disconnected', () => {
-      const response = {
-        status: 'not_ready',
-        services: {
-          database: 'disconnected',
-          redis: 'connected',
-        },
-      };
-
-      const isReady = response.services.database === 'connected' && 
-                      response.services.redis === 'connected';
-      expect(isReady).toBe(false);
-    });
-
-    it('should return not ready when redis disconnected', () => {
-      const response = {
-        status: 'not_ready',
-        services: {
-          database: 'connected',
-          redis: 'disconnected',
-        },
-      };
-
-      const isReady = response.services.database === 'connected' && 
-                      response.services.redis === 'connected';
-      expect(isReady).toBe(false);
-    });
-
-    it('should be accessible without authentication', () => {
-      const requiresAuth = false;
-      expect(requiresAuth).toBe(false);
-    });
-  });
-
-  describe('Health Check Response Time', () => {
-    it('should respond quickly (under 100ms baseline)', async () => {
-      const startTime = Date.now();
+  describe('GET /ready', () => {
+    it('returns 200 when database and redis are healthy', async () => {
+      const prisma = await import('../../src/lib/db.js');
+      const { redis } = await import('../../src/lib/redis.js');
       
-      // Simulate health check response
-      const response = {
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-      };
-      
-      const endTime = Date.now();
-      const responseTime = endTime - startTime;
-      
-      // Baseline check - actual threshold should be higher in real tests
-      expect(responseTime).toBeLessThan(100);
-      expect(response.status).toBe('healthy');
-    });
-  });
+      vi.mocked(prisma.default.$queryRaw).mockResolvedValue([{ 1: 1 }]);
+      vi.mocked(redis.ping).mockResolvedValue('PONG');
 
-  describe('Service Status Values', () => {
-    it('should use consistent status values', () => {
-      const validStatuses = ['connected', 'disconnected', 'error', 'unknown'];
+      const { healthRouter } = await import('../../src/routes/health.js');
       
-      validStatuses.forEach(status => {
-        expect(typeof status).toBe('string');
-      });
+      const app = express();
+      app.use('/health', healthRouter);
+
+      const response = await request(app).get('/health/ready');
+      
+      expect(response.status).toBe(200);
+      expect(response.body.status).toBe('ready');
+      expect(response.body.services.database).toBe('connected');
+      expect(response.body.services.redis).toBe('connected');
     });
 
-    it('should recognize all service types', () => {
-      const services = ['database', 'redis'];
+    it('returns 503 when database is down', async () => {
+      const prisma = await import('../../src/lib/db.js');
+      const { redis } = await import('../../src/lib/redis.js');
       
-      services.forEach(service => {
-        expect(typeof service).toBe('string');
-      });
+      vi.mocked(prisma.default.$queryRaw).mockRejectedValue(new Error('Connection refused'));
+      vi.mocked(redis.ping).mockResolvedValue('PONG');
+
+      const { healthRouter } = await import('../../src/routes/health.js');
+      
+      const app = express();
+      app.use('/health', healthRouter);
+
+      const response = await request(app).get('/health/ready');
+      
+      expect(response.status).toBe(503);
+      expect(response.body.status).toBe('not ready');
+      expect(response.body.services.database).toBe('disconnected');
+      expect(response.body.services.redis).toBe('connected');
+    });
+
+    it('returns 503 when redis is down', async () => {
+      const prisma = await import('../../src/lib/db.js');
+      const { redis } = await import('../../src/lib/redis.js');
+      
+      vi.mocked(prisma.default.$queryRaw).mockResolvedValue([{ 1: 1 }]);
+      vi.mocked(redis.ping).mockRejectedValue(new Error('Connection refused'));
+
+      const { healthRouter } = await import('../../src/routes/health.js');
+      
+      const app = express();
+      app.use('/health', healthRouter);
+
+      const response = await request(app).get('/health/ready');
+      
+      expect(response.status).toBe(503);
+      expect(response.body.status).toBe('not ready');
+      expect(response.body.services.database).toBe('connected');
+      expect(response.body.services.redis).toBe('disconnected');
     });
   });
 });
+

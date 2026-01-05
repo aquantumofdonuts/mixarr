@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import prisma from '../lib/db.js';
+import { redis } from '../lib/redis.js';
 
 export const healthRouter = Router();
 
@@ -11,13 +13,31 @@ healthRouter.get('/', (_req, res) => {
 });
 
 healthRouter.get('/ready', async (_req, res) => {
-  // TODO: Check database connection
-  // TODO: Check Redis connection
-  res.json({
-    status: 'ready',
-    services: {
-      database: 'connected',
-      redis: 'connected',
-    },
+  const services: Record<string, 'connected' | 'disconnected'> = {
+    database: 'disconnected',
+    redis: 'disconnected',
+  };
+
+  try {
+    // Check database connection
+    await prisma.$queryRaw`SELECT 1`;
+    services.database = 'connected';
+  } catch (error) {
+    // Database is down
+  }
+
+  try {
+    // Check Redis connection
+    await redis.ping();
+    services.redis = 'connected';
+  } catch (error) {
+    // Redis is down
+  }
+
+  const allHealthy = services.database === 'connected' && services.redis === 'connected';
+
+  res.status(allHealthy ? 200 : 503).json({
+    status: allHealthy ? 'ready' : 'not ready',
+    services,
   });
 });
