@@ -22,7 +22,7 @@ import { BandcampService } from '../services/bandcamp.js';
 import { fetchPublicPlaylist, parseSpotifyPlaylistUrl, extractArtistsFromPlaylist } from '../services/public-playlist.js';
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
-import { isSpotifyConfig, isLastFMConfig, isDeezerConfig, isTidalConfig, isListenBrainzConfig } from '../types/connections.js';
+import { isSpotifyConfig, isLastFMConfig, isDeezerConfig, isTidalConfig, isListenBrainzConfig, isTautulliConfig, isJellyfinConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 
@@ -687,8 +687,11 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         if (!isLastFMConfig(lastfmConn.config)) {
           throw new Error('Invalid Last.fm connection config');
         }
+        if (!isTautulliConfig(tautulliConn.config)) {
+          throw new Error('Invalid Tautulli connection config');
+        }
         
-        const tautulliConfig = tautulliConn.config as any;
+        const tautulliConfig = tautulliConn.config;
         const lastfmConfigSim = lastfmConn.config;
         
         // Import TautulliService dynamically to avoid circular dependencies
@@ -773,8 +776,11 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         if (!isLastFMConfig(lastfmConn.config)) {
           throw new Error('Invalid Last.fm connection config');
         }
+        if (!isJellyfinConfig(jellyfinConn.config)) {
+          throw new Error('Invalid Jellyfin connection config');
+        }
         
-        const jellyfinConfig = jellyfinConn.config as any;
+        const jellyfinConfig = jellyfinConn.config;
         const lastfmConfigSim = lastfmConn.config;
         
         // Import JellyfinService dynamically to avoid circular dependencies
