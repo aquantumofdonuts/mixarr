@@ -626,6 +626,10 @@ export default function ConnectionsPage() {
         tautulliApiKey: '', // Don't pre-fill for security
         plexUserId: config.plexUserId?.toString() || '',
         plexLibraryId: config.plexLibraryId?.toString() || '',
+        jellyfinUrl: config.jellyfinUrl || '',
+        jellyfinApiKey: '', // Don't pre-fill for security
+        jellyfinUserId: config.jellyfinUserId || '',
+        jellyfinLibraryId: config.jellyfinLibraryId || '',
         listenbrainzUsername: config.username || '',
         listenbrainzToken: '', // Don't pre-fill for security
         discogsToken: '', // Don't pre-fill for security
@@ -663,6 +667,10 @@ export default function ConnectionsPage() {
         tautulliApiKey: '',
         plexUserId: '',
         plexLibraryId: '',
+        jellyfinUrl: '',
+        jellyfinApiKey: '',
+        jellyfinUserId: '',
+        jellyfinLibraryId: '',
         listenbrainzUsername: '',
         listenbrainzToken: '',
         discogsToken: '',
