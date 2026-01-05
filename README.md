@@ -10,7 +10,28 @@ A complete toolset for discovering new and related music for your Lidarr collect
 - **PWA Support**: Installable, offline-capable, push notifications
 - **Multi-User**: Authentication with admin/user roles
 
-## Quick Start (Docker)
+## Install from Docker Image
+
+**Docker Image:**
+```
+docker pull ghcr.io/aquantumofdonuts/mixarr:v1.1.0
+```
+
+**Docker Usage:**
+```
+docker run -d \
+  --name mixarr \
+  -p 3443:443 \
+  -v ~/mixarr-data:/data \
+  -e SESSION_SECRET="$(openssl rand -hex 32)" \
+  -e FRONTEND_URL="https://YOUR-SERVER-IP:3443" \
+  -e BASE_URL="https://YOUR-SERVER-IP:3443" \
+  ghcr.io/aquantumofdonuts/mixarr:v1.1.0
+```
+
+## Build Docker from Source
+
+**Docker Quick Start:**
 
 ```bash
 # Clone the repository
