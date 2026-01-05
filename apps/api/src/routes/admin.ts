@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { parseIntParam } from '../utils/params.js';
 import bcrypt from 'bcryptjs';
 
 export const adminRouter = Router();
@@ -44,7 +45,11 @@ adminRouter.get('/users', async (_req, res) => {
 // Get single user
 adminRouter.get('/users/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid user ID' });
+      return;
+    }
     const user = await prisma.user.findUnique({
       where: { id },
       select: {
@@ -132,7 +137,11 @@ adminRouter.post('/users', async (req, res) => {
 // Update user
 adminRouter.put('/users/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid user ID' });
+      return;
+    }
     const { displayName, email, role, isActive, password } = req.body;
 
     const existing = await prisma.user.findUnique({
@@ -191,7 +200,11 @@ adminRouter.put('/users/:id', async (req, res) => {
 // Delete user
 adminRouter.delete('/users/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid user ID' });
+      return;
+    }
 
     if (id === req.user!.id) {
       res.status(400).json({ error: 'Cannot delete your own account' });

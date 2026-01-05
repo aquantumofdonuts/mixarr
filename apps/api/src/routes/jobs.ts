@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { parseIntParam } from '../utils/params.js';
 import {
   scheduleSubscriptionJob,
   scheduleImportJob,
@@ -76,7 +77,11 @@ jobsRouter.get('/recent/:queue', async (req, res) => {
 // Run subscription now
 jobsRouter.post('/run/subscription/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
     const isAdmin = req.user!.role === 'admin';
     
     // Admins can run any subscription, users can only run their own
@@ -101,7 +106,11 @@ jobsRouter.post('/run/subscription/:id', async (req, res) => {
 // Run import now
 jobsRouter.post('/run/import/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid import ID' });
+      return;
+    }
     const { mode } = req.body;
     const isAdmin = req.user!.role === 'admin';
     
@@ -131,7 +140,11 @@ jobsRouter.post('/run/import/:id', async (req, res) => {
 // Get subscription run history
 jobsRouter.get('/history/subscription/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
     const limit = parseInt(req.query.limit as string, 10) || 20;
     
     const subscription = await prisma.subscription.findFirst({

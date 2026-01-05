@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { parseIntParam } from '../utils/params.js';
 import { addScheduledJob, removeScheduledJob } from '../jobs/scheduler.js';
 import { fetchDeezerArtistImages } from '../services/deezer.js';
 import { LidarrService } from '../services/lidarr.js';
@@ -39,7 +40,11 @@ subscriptionsRouter.get('/', async (req, res) => {
 // Get subscription by id
 subscriptionsRouter.get('/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
     
     const subscription = await prisma.subscription.findUnique({
       where: { id },
@@ -121,7 +126,11 @@ subscriptionsRouter.post('/', async (req, res) => {
 // Update subscription
 subscriptionsRouter.put('/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
     const { name, config, schedule, resultHandling, isActive } = req.body;
 
     const existing = await prisma.subscription.findUnique({
@@ -162,7 +171,11 @@ subscriptionsRouter.put('/:id', async (req, res) => {
 // Delete subscription
 subscriptionsRouter.delete('/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
 
     const existing = await prisma.subscription.findUnique({
       where: { id },
@@ -185,7 +198,11 @@ subscriptionsRouter.delete('/:id', async (req, res) => {
 // Get subscription run history
 subscriptionsRouter.get('/:id/runs', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = parseInt(req.query.offset as string) || 0;
 
@@ -217,8 +234,16 @@ subscriptionsRouter.get('/:id/runs', async (req, res) => {
 // Get run details with results
 subscriptionsRouter.get('/:id/runs/:runId', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    const runId = parseInt(req.params.runId, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
+    const runId = parseIntParam(req.params.runId);
+    if (runId === null) {
+      res.status(400).json({ error: 'Invalid run ID' });
+      return;
+    }
 
     const subscription = await prisma.subscription.findUnique({
       where: { id },
@@ -262,7 +287,11 @@ subscriptionsRouter.get('/:id/runs/:runId', async (req, res) => {
 // Get all results for a subscription (paginated)
 subscriptionsRouter.get('/:id/results', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
     const status = req.query.status as string;
@@ -326,8 +355,16 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
 // Approve a pending result (add to Lidarr)
 subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    const resultId = parseInt(req.params.resultId, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
+    const resultId = parseIntParam(req.params.resultId);
+    if (resultId === null) {
+      res.status(400).json({ error: 'Invalid result ID' });
+      return;
+    }
 
     const subscription = await prisma.subscription.findUnique({
       where: { id },
@@ -481,8 +518,16 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
 // Reject a pending result
 subscriptionsRouter.post('/:id/results/:resultId/reject', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    const resultId = parseInt(req.params.resultId, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid subscription ID' });
+      return;
+    }
+    const resultId = parseIntParam(req.params.resultId);
+    if (resultId === null) {
+      res.status(400).json({ error: 'Invalid result ID' });
+      return;
+    }
 
     const subscription = await prisma.subscription.findUnique({
       where: { id },
