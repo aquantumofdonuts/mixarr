@@ -558,6 +558,20 @@ export default function ConnectionsPage() {
       }
     } else if (form.type === 'discogs') {
       config.token = form.discogsToken;
+    } else if (form.type === 'jellyfin') {
+      if (!form.jellyfinUserId) {
+        addToast({ type: 'warning', title: 'Please select a Jellyfin user' });
+        return;
+      }
+      config.jellyfinUrl = form.jellyfinUrl;
+      config.jellyfinApiKey = form.jellyfinApiKey;
+      config.jellyfinUserId = form.jellyfinUserId;
+      config.jellyfinLibraryId = form.jellyfinLibraryId || null;
+      // Store friendly names for display
+      const selectedUser = jellyfinData?.users.find(u => u.userId === form.jellyfinUserId);
+      const selectedLibrary = jellyfinData?.libraries.find(l => l.libraryId === form.jellyfinLibraryId);
+      config.jellyfinUserName = selectedUser?.name;
+      config.jellyfinLibraryName = selectedLibrary?.name;
     }
 
     const payload = {
@@ -648,6 +662,16 @@ export default function ConnectionsPage() {
           libraries: [{ sectionId: config.plexLibraryId, sectionName: config.plexLibraryName || 'Library', sectionType: 'artist', count: 0 }],
         });
         setTautulliTested(true);
+      }
+      
+      // Set up Jellyfin data if editing a Jellyfin connection
+      if (connection.type === 'jellyfin' && config.jellyfinUserId) {
+        // Show existing selections
+        setJellyfinData({
+          users: [{ userId: config.jellyfinUserId, name: config.jellyfinUserName || 'User' }],
+          libraries: config.jellyfinLibraryId ? [{ libraryId: config.jellyfinLibraryId, name: config.jellyfinLibraryName || 'Library' }] : [],
+        });
+        setJellyfinTested(true);
       }
     } else {
       setEditingId(null);
