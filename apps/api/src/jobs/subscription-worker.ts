@@ -170,11 +170,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'spotify_playlist': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
         const spotifyConfig = spotifyConn.config as any;
-        console.log('Subscription config:', JSON.stringify(config));
-        console.log('Playlist ID:', config.playlistId);
-        console.log('Spotify connection config keys:', Object.keys(spotifyConfig));
-        console.log('Has access token:', !!spotifyConfig.accessToken);
-        console.log('Has refresh token:', !!spotifyConfig.refreshToken);
         const spotify = new SpotifyService(spotifyConfig);
         const tracks = await spotify.getAllPlaylistTracks(config.playlistId);
         
