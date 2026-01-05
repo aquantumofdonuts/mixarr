@@ -24,6 +24,7 @@ import { ssoRouter } from './routes/sso.js';
 import { setupPassport, sessionMiddleware } from './auth/passport.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requestLogger } from './middleware/request-logger.js';
+import { correlationMiddleware } from './middleware/correlation.js';
 import { initializeScheduler } from './jobs/scheduler.js';
 import { redis } from './lib/redis.js';
 // Import workers to start them
@@ -58,6 +59,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use(correlationMiddleware);
 app.use(requestLogger);
 
 // Passport authentication (includes session middleware)
