@@ -1,6 +1,14 @@
 # Mixarr - Lidarr music discovery and search tool
 
-A complete toolset for discovering new and related music for your Lidarr collection using Spotify, TIDAL, Deezer, Last.fm, MusicBrainz, Plex/Tautulli, and AI recommendations.
+[![Website](https://img.shields.io/badge/Website-mixarr-00d4aa?style=for-the-badge)](https://aquantumofdonuts.github.io/mixarr/)
+[![GitHub](https://img.shields.io/github/stars/aquantumofdonuts/mixarr?style=for-the-badge)](https://github.com/aquantumofdonuts/mixarr)
+[![License](https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge)](LICENSE)
+
+**The missing piece for Lidarr.** Connect your music services, get AI-powered recommendations, and grow your collection on autopilot.
+
+🌐 **[Visit the Website](https://aquantumofdonuts.github.io/mixarr/)** | 📖 **[Documentation](https://github.com/aquantumofdonuts/mixarr/wiki)**
+
+![Mixarr AI Discovery](website/img/mixarr-discover.png)
 
 ## Features
 - **Multi-Service Integration**: Spotify, TIDAL, Deezer, Last.fm, MusicBrainz, Plex/Tautulli
