@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Mixarr - Music discovery and library management companion for Lidarr. Connect Spotify, TIDAL, Last.fm and more.">
+  <meta name="keywords" content="mixarr, lidarr, music, discovery, spotify, tidal, lastfm, self-hosted, arr">
+  <meta name="author" content="Mixarr">
+  <title>Mixarr - The missing piece for Lidarr</title>
+  <link rel="icon" type="image/x-icon" href="img/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="img/favicon-16x16.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="container nav-container">
+      <a href="#home" class="logo">
+        <img src="img/favicon-48x48.png" alt="Mixarr" class="logo-img">
+        <span>MIXARR</span>
+      </a>
+      <button class="nav-toggle" aria-label="Toggle navigation">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <ul class="nav-links">
+        <li><a href="#home">Home</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="#support">Support</a></li>
+      </ul>
+      <a href="https://github.com/aquantumofdonuts/mixarr" class="nav-github" target="_blank" rel="noopener" aria-label="View on GitHub">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+        </svg>
+      </a>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section id="home" class="hero">
+    <div class="container">
+      <div class="hero-slider">
+        <div class="slides-container">
+          <div class="hero-slide active">
+            <img src="img/mixarr-discover.png" alt="AI-Powered Discovery">
+          </div>
+          <div class="hero-slide">
+            <img src="img/mixarr-subscriptions.png" alt="Subscription Management">
+          </div>
+          <div class="hero-slide">
+            <img src="img/mixarr-search.png" alt="Universal Search">
+          </div>
+          <div class="hero-slide">
+            <img src="img/mixarr-connections.png" alt="Service Connections">
+          </div>
+        </div>
+        <div class="slider-dots">
+          <button class="dot active" aria-label="Slide 1"></button>
+          <button class="dot" aria-label="Slide 2"></button>
+          <button class="dot" aria-label="Slide 3"></button>
+          <button class="dot" aria-label="Slide 4"></button>
+        </div>
+      </div>
+      <h1>The missing piece for Lidarr</h1>
+      <p class="hero-subtitle">Connect your music services, get AI-powered recommendations, and grow your collection on autopilot.</p>
+      <div class="hero-cta">
+        <a href="#features" class="btn btn-primary">See How It Works</a>
+        <a href="https://github.com/aquantumofdonuts/mixarr" class="btn btn-secondary" target="_blank" rel="noopener">View on GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Service Logos -->
+  <section class="services">
+    <div class="container">
+      <p class="services-title">Works with your favorite services</p>
+      <div class="services-logos">
+        <div class="service-logo" title="Spotify">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+        </div>
+        <div class="service-logo" title="TIDAL">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.012 3.992L8.008 7.996 4.004 3.992 0 7.996 4.004 12l4.004-4.004L12.012 12l-4.004 4.004 4.004 4.004 4.004-4.004L12.012 12l4.004-4.004-4.004-4.004zm4.004 4.004l4.004-4.004L24.024 7.996l-4.004 4.004-4.004-4.004z"/></svg>
+        </div>
+        <div class="service-logo" title="Deezer">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.81 4.16v3.03H24V4.16h-5.19zM6.27 8.38v3.027h5.189V8.38h-5.19zm12.54 0v3.027H24V8.38h-5.19zM0 12.59v3.027h5.19V12.59H0zm6.27 0v3.027h5.189V12.59h-5.19zm6.27 0v3.027h5.19V12.59h-5.19zm6.27 0v3.027H24V12.59h-5.19zM0 16.81v3.03h5.19v-3.03H0zm6.27 0v3.03h5.189v-3.03h-5.19zm6.27 0v3.03h5.19v-3.03h-5.19zm6.27 0v3.03H24v-3.03h-5.19z"/></svg>
+        </div>
+        <div class="service-logo" title="Last.fm">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10.584 17.21l-.88-2.392s-1.43 1.594-3.573 1.594c-1.897 0-3.244-1.649-3.244-4.288 0-3.382 1.704-4.591 3.381-4.591 2.418 0 3.19 1.567 3.849 3.574l.88 2.749c.88 2.666 2.529 4.81 7.285 4.81 3.409 0 5.718-1.044 5.718-3.793 0-2.227-1.265-3.381-3.63-3.931l-1.758-.385c-1.21-.275-1.567-.77-1.567-1.594 0-.934.742-1.484 1.952-1.484 1.32 0 2.034.495 2.144 1.677l2.749-.33c-.22-2.474-1.924-3.492-4.729-3.492-2.474 0-4.893.935-4.893 3.932 0 1.87.907 3.051 3.189 3.601l1.87.44c1.402.33 1.869.907 1.869 1.704 0 1.017-.99 1.43-2.86 1.43-2.776 0-3.93-1.457-4.59-3.464l-.907-2.75c-1.155-3.573-2.997-4.893-6.653-4.893C2.144 5.333 0 7.89 0 12.233c0 4.18 2.144 6.434 5.993 6.434 3.106 0 4.591-1.457 4.591-1.457z"/></svg>
+        </div>
+        <div class="service-logo" title="Plex">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.643 0H4.68l7.679 12L4.68 24h6.963l7.677-12z"/></svg>
+        </div>
+        <div class="service-logo" title="MusicBrainz">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M0 0v24h24V0zm6.77 4.55c.22-.02.45.02.66.1 2.34.85 3.46 3.13 3.22 5.12-.1.77-.1 1.6.07 2.3.18.7.53 1.33 1.17 1.72.77.5 1.82.58 2.57.14.45-.27.8-.67.96-1.17.53-1.6.18-3.45-.78-4.67-.77-.97-1.88-1.52-3.05-1.82.18-.32.36-.64.52-.97 1.62.23 3.14 1.06 4.17 2.37 1.38 1.77 1.83 4.38 1.02 6.58-.3.8-.87 1.53-1.6 1.97-1.43.87-3.47.77-4.82-.2-1.25-.9-1.94-2.32-2.16-3.78-.2-1.3-.08-2.63-.57-3.8-.27-.63-.67-1.13-1.18-1.47-.27-.18-.55-.32-.85-.4a3.1 3.1 0 01.65-2.02zm4.05 12.3c.6 0 1.1.5 1.1 1.1 0 .62-.5 1.12-1.1 1.12-.62 0-1.1-.5-1.1-1.1 0-.62.48-1.12 1.1-1.12z"/></svg>
+        </div>
+        <div class="service-logo" title="ListenBrainz">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.372 0 0 5.373 0 12c0 6.628 5.372 12 12 12 6.627 0 12-5.372 12-12 0-6.627-5.373-12-12-12zm0 2.824a9.176 9.176 0 110 18.352 9.176 9.176 0 010-18.352zM9.918 7.2v9.6l7.2-4.8z"/></svg>
+        </div>
+        <div class="service-logo" title="Lidarr">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+        </div>
+      </div>
+      <p class="services-ai">Plus AI recommendations via OpenAI, Anthropic, or Ollama</p>
+    </div>
+  </section>
+
+  <!-- Why Mixarr -->
+  <section class="why">
+    <div class="container">
+      <h2>Why Mixarr?</h2>
+      <p>Lidarr is great at downloading music, but finding new artists is manual work. You're constantly switching between Spotify, Last.fm, and charts to find what's new.</p>
+      <p>Mixarr connects all your music services in one place. Set up subscriptions to automatically discover artists from your playlists, recommendations, and charts—then review and add them to Lidarr with one click.</p>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="features">
+    <div class="container">
+      <h2>Features</h2>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-img">
+            <img src="img/mixarr-connections.png" alt="Multi-Service Integration">
+          </div>
+          <h3>🎵 Multi-Service Integration</h3>
+          <p>Connect Spotify, TIDAL, Deezer, Last.fm, Plex, MusicBrainz, and ListenBrainz. Pull from playlists, charts, and recommendations.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-img">
+            <img src="img/mixarr-discover.png" alt="AI-Powered Discovery">
+          </div>
+          <h3>🤖 AI-Powered Discovery</h3>
+          <p>Ask for artists in natural language. "Find artists like Radiohead but more electronic." Works with OpenAI, Anthropic, or local Ollama.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-img">
+            <img src="img/mixarr-subscriptions.png" alt="Subscription Automation">
+          </div>
+          <h3>🔄 Subscription Automation</h3>
+          <p>39 subscription types run on schedule. Discover Weekly, Release Radar, global charts—all feeding your review queue.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-img">
+            <img src="img/mixarr-subscription-results.png" alt="Library Health">
+          </div>
+          <h3>🛡️ Library Health</h3>
+          <p>Find artists missing metadata, posters, or bios. Bulk enrich from Last.fm, Deezer, and Discogs. Detect duplicates.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Gallery -->
+  <section class="gallery">
+    <div class="container">
+      <h2>See It In Action</h2>
+      <div class="gallery-grid">
+        <div class="gallery-item" data-caption="AI-Powered Discovery">
+          <img src="img/mixarr-discover.png" alt="AI-Powered Discovery">
+        </div>
+        <div class="gallery-item" data-caption="Subscription Management">
+          <img src="img/mixarr-subscriptions.png" alt="Subscription Management">
+        </div>
+        <div class="gallery-item" data-caption="Universal Search">
+          <img src="img/mixarr-search.png" alt="Universal Search">
+        </div>
+        <div class="gallery-item" data-caption="Service Connections">
+          <img src="img/mixarr-connections.png" alt="Service Connections">
+        </div>
+        <div class="gallery-item" data-caption="Subscription Results">
+          <img src="img/mixarr-subscription-results.png" alt="Subscription Results">
+        </div>
+        <div class="gallery-item" data-caption="User Management">
+          <img src="img/mixarr-user-management.png" alt="User Management">
+        </div>
+      </div>
+      <p class="gallery-hint">Click any image to enlarge</p>
+    </div>
+  </section>
+
+  <!-- Install -->
+  <section id="install" class="install">
+    <div class="container">
+      <h2>Install</h2>
+      <div class="install-tabs">
+        <button class="tab-btn active" data-tab="compose">Docker Compose</button>
+        <button class="tab-btn" data-tab="run">Docker Run</button>
+        <button class="tab-btn" data-tab="unraid">Unraid</button>
+      </div>
+      <div class="tab-content active" id="tab-compose">
+        <pre><code>git clone https://github.com/aquantumofdonuts/mixarr.git
+cd mixarr
+cp .env.example .env
+docker compose up -d --build
+
+# Access at https://your-ip:3443</code></pre>
+        <button class="copy-btn" data-target="tab-compose">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <div class="tab-content" id="tab-run">
+        <pre><code>docker run -d \
+  --name mixarr \
+  -p 3443:443 \
+  -v ~/mixarr-data:/data \
+  -e SESSION_SECRET="$(openssl rand -hex 32)" \
+  -e FRONTEND_URL="https://YOUR-IP:3443" \
+  -e BASE_URL="https://YOUR-IP:3443" \
+  ghcr.io/aquantumofdonuts/mixarr:latest</code></pre>
+        <button class="copy-btn" data-target="tab-run">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <div class="tab-content" id="tab-unraid">
+        <div class="unraid-content">
+          <p>Available in Community Applications</p>
+          <p>Search for <strong>"Mixarr"</strong> in the Apps tab</p>
+        </div>
+      </div>
+      <p class="install-requirements">Requirements: Docker, Docker Compose, Lidarr instance</p>
+      <a href="https://github.com/aquantumofdonuts/mixarr#readme" class="btn btn-secondary" target="_blank" rel="noopener">View Full Documentation</a>
+    </div>
+  </section>
+
+  <!-- Support -->
+  <section id="support" class="support">
+    <div class="container">
+      <h2>Support</h2>
+      <div class="support-grid">
+        <a href="https://github.com/aquantumofdonuts/mixarr/wiki" class="support-card" target="_blank" rel="noopener">
+          <span class="support-icon">📖</span>
+          <h3>Wiki</h3>
+          <p>Docs and guides on GitHub</p>
+        </a>
+        <a href="https://github.com/aquantumofdonuts/mixarr/issues" class="support-card" target="_blank" rel="noopener">
+          <span class="support-icon">🐛</span>
+          <h3>GitHub Issues</h3>
+          <p>Report bugs and feature requests</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <p>© 2026 Mixarr. Open source under <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPLv3 License</a>.</p>
+      <div class="footer-links">
+        <a href="https://github.com/aquantumofdonuts/mixarr" target="_blank" rel="noopener">GitHub</a>
+        <span>·</span>
+        <a href="https://github.com/aquantumofdonuts/mixarr/releases" target="_blank" rel="noopener">Releases</a>
+        <span>·</span>
+        <a href="https://github.com/aquantumofdonuts/mixarr/issues" target="_blank" rel="noopener">Issues</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Lightbox -->
+  <div class="lightbox" id="lightbox">
+    <button class="lightbox-close" aria-label="Close">&times;</button>
+    <button class="lightbox-prev" aria-label="Previous">&#10094;</button>
+    <button class="lightbox-next" aria-label="Next">&#10095;</button>
+    <img src="" alt="" class="lightbox-img">
+    <p class="lightbox-caption"></p>
+  </div>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
