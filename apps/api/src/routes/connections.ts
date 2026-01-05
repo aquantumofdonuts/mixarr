@@ -14,6 +14,8 @@ import { ListenBrainzService } from '../services/listenbrainz.js';
 import { DiscogsService } from '../services/discogs.js';
 import type { Connection, Prisma } from '@prisma/client';
 import type { Request } from 'express';
+import { validateBody } from '../middleware/validate.js';
+import { createConnectionSchema, updateConnectionSchema, testConnectionSchema } from '../schemas/connection.js';
 
 export const connectionsRouter = Router();
 
@@ -124,14 +126,9 @@ connectionsRouter.get('/:id/spotify/callback', async (req, res) => {
 
 // Generic connection test endpoint (public - used during setup)
 // Routes to the appropriate service based on connection type
-connectionsRouter.post('/test', async (req, res) => {
+connectionsRouter.post('/test', validateBody(testConnectionSchema), async (req, res) => {
   try {
     const { type, url, apiKey, clientId, clientSecret } = req.body;
-
-    if (!type) {
-      res.status(400).json({ success: false, error: 'Connection type required' });
-      return;
-    }
 
     switch (type) {
       case 'lidarr': {
@@ -321,14 +318,9 @@ connectionsRouter.get('/:id', async (req, res) => {
 });
 
 // Create new connection
-connectionsRouter.post('/', async (req, res) => {
+connectionsRouter.post('/', validateBody(createConnectionSchema), async (req, res) => {
   try {
     const { type, name, config } = req.body;
-    
-    if (!type || !name || !config) {
-      res.status(400).json({ error: 'Type, name, and config required' });
-      return;
-    }
 
     // Lidarr connections are global (admin only), others are per-user
     const isLidarr = type === 'lidarr';
@@ -366,7 +358,7 @@ connectionsRouter.post('/', async (req, res) => {
 });
 
 // Update connection
-connectionsRouter.put('/:id', async (req, res) => {
+connectionsRouter.put('/:id', validateBody(updateConnectionSchema), async (req, res) => {
   try {
     const id = parseIntParam(req.params.id);
     if (id === null) {
