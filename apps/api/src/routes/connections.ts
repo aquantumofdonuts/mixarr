@@ -174,6 +174,26 @@ connectionsRouter.post('/test', async (req, res) => {
         return;
       }
 
+      case 'jellyfin': {
+        const config = req.body.config || {};
+        const jellyfinUrl = config.jellyfinUrl;
+        const jellyfinApiKey = config.jellyfinApiKey;
+        
+        if (!jellyfinUrl || !jellyfinApiKey) {
+          res.status(400).json({ success: false, error: 'Jellyfin URL and API key required' });
+          return;
+        }
+        const { JellyfinService } = await import('../services/jellyfin.js');
+        const service = new JellyfinService();
+        const testResult = await service.testConnection({ jellyfinUrl, jellyfinApiKey });
+        if (!testResult.success) {
+          res.json({ success: false, error: testResult.error || 'Connection failed' });
+          return;
+        }
+        res.json({ success: true, message: `Connected to ${testResult.serverName || 'Jellyfin'}` });
+        return;
+      }
+
       default:
         res.status(400).json({ success: false, error: `Unknown connection type: ${type}` });
     }
