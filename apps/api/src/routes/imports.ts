@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { parseIntParam } from '../utils/params.js';
 import { addImportScheduledJob, removeImportScheduledJob } from '../jobs/scheduler.js';
 import { SpotifyService } from '../services/spotify.js';
 import { LastfmService } from '../services/lastfm.js';
@@ -47,7 +48,11 @@ importsRouter.get('/', async (req, res) => {
 // Get import source by id
 importsRouter.get('/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid import ID' });
+      return;
+    }
     
     const source = await prisma.importSource.findUnique({
       where: { id },
@@ -100,7 +105,11 @@ importsRouter.post('/', async (req, res) => {
 // Update import source
 importsRouter.put('/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid import ID' });
+      return;
+    }
     const { name, externalId, schedule, resultHandling, isActive } = req.body;
 
     const existing = await prisma.importSource.findUnique({
@@ -138,7 +147,11 @@ importsRouter.put('/:id', async (req, res) => {
 // Delete import source
 importsRouter.delete('/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid import ID' });
+      return;
+    }
 
     const existing = await prisma.importSource.findUnique({
       where: { id },
@@ -198,7 +211,11 @@ importsRouter.get('/review/queue', async (req, res) => {
 // Update review item status
 importsRouter.put('/review/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid review item ID' });
+      return;
+    }
     const { status } = req.body;
 
     if (!['pending', 'approved', 'rejected'].includes(status)) {
@@ -731,7 +748,11 @@ importsRouter.get('/sources/available', async (req, res) => {
 // Toggle import source active status
 importsRouter.patch('/:id/toggle', async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid import ID' });
+      return;
+    }
 
     const existing = await prisma.importSource.findFirst({
       where: { id, userId: req.user!.id },
@@ -797,7 +818,11 @@ function normalizeArtistName(name: string): string {
 // Get Spotify preview data for a connection
 importsRouter.get('/preview/spotify/:connectionId', async (req, res) => {
   try {
-    const connectionId = parseInt(req.params.connectionId, 10);
+    const connectionId = parseIntParam(req.params.connectionId);
+    if (connectionId === null) {
+      res.status(400).json({ error: 'Invalid connection ID' });
+      return;
+    }
     const includeAI = req.query.ai === 'true';
     
     const connection = await prisma.connection.findUnique({
@@ -910,7 +935,11 @@ importsRouter.get('/preview/spotify/:connectionId', async (req, res) => {
 // Get Last.fm preview data for a connection
 importsRouter.get('/preview/lastfm/:connectionId', async (req, res) => {
   try {
-    const connectionId = parseInt(req.params.connectionId, 10);
+    const connectionId = parseIntParam(req.params.connectionId);
+    if (connectionId === null) {
+      res.status(400).json({ error: 'Invalid connection ID' });
+      return;
+    }
     const includeAI = req.query.ai === 'true';
     const includeSimilar = req.query.similar === 'true';
     

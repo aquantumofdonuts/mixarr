@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { parseIntParam } from '../utils/params.js';
 import { LidarrService, LidarrCache } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { LastfmService } from '../services/lastfm.js';
@@ -630,8 +631,8 @@ searchRouter.post('/lidarr/artists/:id/refresh', async (req, res) => {
       return;
     }
 
-    const artistId = parseInt(req.params.id);
-    if (isNaN(artistId)) {
+    const artistId = parseIntParam(req.params.id);
+    if (artistId === null) {
       res.status(400).json({ error: 'Invalid artist ID' });
       return;
     }
@@ -781,8 +782,8 @@ searchRouter.post('/lidarr/artists/:id/enrich', async (req, res) => {
       return;
     }
 
-    const artistId = parseInt(req.params.id);
-    if (isNaN(artistId)) {
+    const artistId = parseIntParam(req.params.id);
+    if (artistId === null) {
       res.status(400).json({ error: 'Invalid artist ID' });
       return;
     }

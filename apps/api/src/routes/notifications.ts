@@ -13,6 +13,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { parseIntParam } from '../utils/params.js';
 import { NotificationEvent } from '../services/notifications.js';
 
 const router = Router();
@@ -123,8 +124,8 @@ router.post('/channels', requireAuth, async (req: Request, res: Response) => {
  */
 router.put('/channels/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const channelId = parseInt(req.params.id, 10);
-    if (isNaN(channelId)) {
+    const channelId = parseIntParam(req.params.id);
+    if (channelId === null) {
       return res.status(400).json({ error: 'Invalid channel ID' });
     }
 
@@ -184,8 +185,8 @@ router.put('/channels/:id', requireAuth, async (req: Request, res: Response) => 
  */
 router.delete('/channels/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const channelId = parseInt(req.params.id, 10);
-    if (isNaN(channelId)) {
+    const channelId = parseIntParam(req.params.id);
+    if (channelId === null) {
       return res.status(400).json({ error: 'Invalid channel ID' });
     }
 
@@ -215,8 +216,8 @@ router.delete('/channels/:id', requireAuth, async (req: Request, res: Response) 
  */
 router.post('/channels/:id/test', requireAuth, async (req: Request, res: Response) => {
   try {
-    const channelId = parseInt(req.params.id, 10);
-    if (isNaN(channelId)) {
+    const channelId = parseIntParam(req.params.id);
+    if (channelId === null) {
       return res.status(400).json({ error: 'Invalid channel ID' });
     }
 

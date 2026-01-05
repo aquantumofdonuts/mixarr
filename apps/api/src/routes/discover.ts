@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { parseIntParam } from '../utils/params.js';
 import { LidarrService, LidarrCache } from '../services/lidarr.js';
 import { LastfmService } from '../services/lastfm.js';
 import { fetchDeezerArtistImage, getDeezerChartArtists, getDeezerGenres, getDeezerGenreArtists } from '../services/deezer.js';
@@ -400,8 +401,8 @@ discoverRouter.get('/deezer/chart', async (req, res) => {
  */
 discoverRouter.get('/deezer/genre/:genreId/artists', async (req, res) => {
   try {
-    const genreId = parseInt(req.params.genreId);
-    if (isNaN(genreId)) {
+    const genreId = parseIntParam(req.params.genreId);
+    if (genreId === null) {
       return res.status(400).json({ error: 'Invalid genre ID' });
     }
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 100);

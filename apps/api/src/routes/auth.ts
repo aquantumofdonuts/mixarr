@@ -3,6 +3,7 @@ import passport from 'passport';
 import bcrypt from 'bcryptjs';
 import prisma from '../lib/db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { parseIntParam } from '../utils/params.js';
 import { loginLimiter, setupLimiter, createUserLimiter } from '../middleware/rate-limiter.js';
 import { SsoProviderService } from '../services/sso-provider.js';
 import { createGoogleStrategy } from '../auth/strategies/google.js';
@@ -494,7 +495,11 @@ authRouter.post('/users', requireAuth, requireAdmin, createUserLimiter, async (r
 // Admin: Reset user password
 authRouter.post('/users/:id/reset-password', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid user ID' });
+      return;
+    }
     const { newPassword } = req.body;
     
     if (!newPassword) {
@@ -518,7 +523,11 @@ authRouter.post('/users/:id/reset-password', requireAuth, requireAdmin, async (r
 // Admin: Delete user
 authRouter.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseIntParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'Invalid user ID' });
+      return;
+    }
     
     // Prevent deleting yourself
     if (req.user?.id === id) {
@@ -536,9 +545,8 @@ authRouter.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
 // Admin: Get user's linked SSO identities
 authRouter.get('/users/:userId/identities', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const userId = parseInt(req.params.userId, 10);
-    
-    if (isNaN(userId)) {
+    const userId = parseIntParam(req.params.userId);
+    if (userId === null) {
       res.status(400).json({ error: 'Invalid user ID' });
       return;
     }
@@ -564,10 +572,10 @@ authRouter.get('/users/:userId/identities', requireAuth, requireAdmin, async (re
 // Admin: Unlink a user's SSO identity
 authRouter.delete('/users/:userId/identities/:identityId', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const userId = parseInt(req.params.userId, 10);
-    const identityId = parseInt(req.params.identityId, 10);
+    const userId = parseIntParam(req.params.userId);
+    const identityId = parseIntParam(req.params.identityId);
     
-    if (isNaN(userId) || isNaN(identityId)) {
+    if (userId === null || identityId === null) {
       res.status(400).json({ error: 'Invalid ID' });
       return;
     }
