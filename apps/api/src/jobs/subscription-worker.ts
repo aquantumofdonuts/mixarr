@@ -22,6 +22,7 @@ import { BandcampService } from '../services/bandcamp.js';
 import { fetchPublicPlaylist, parseSpotifyPlaylistUrl, extractArtistsFromPlaylist } from '../services/public-playlist.js';
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
+import { isSpotifyConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 
@@ -169,7 +170,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_playlist': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const tracks = await spotify.getAllPlaylistTracks(config.playlistId);
         
@@ -191,7 +195,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_followed': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const followedArtists = await spotify.getAllFollowedArtists();
         artists = followedArtists.map(a => ({
@@ -204,7 +211,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'spotify_saved_albums': {
         // User's saved albums - discover albums, not artists
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const albums = await spotify.getAllSavedAlbums();
         
@@ -222,7 +232,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_liked_songs': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const tracks = await spotify.getAllLikedSongs();
         
@@ -266,7 +279,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_new_releases': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const albums = await spotify.getAllNewReleases(config.limit || 50, config.country);
         
@@ -300,7 +316,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_discover_weekly': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const tracks = await spotify.getDiscoverWeeklyTracks();
         
@@ -321,7 +340,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_release_radar': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const tracks = await spotify.getReleaseRadarTracks();
         
@@ -342,7 +364,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_daily_mix': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const tracks = await spotify.getDailyMixTracks();
         
@@ -363,7 +388,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_on_repeat': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const tracks = await spotify.getOnRepeatTracks();
         
@@ -384,7 +412,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_featured': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const spotifyArtists = await spotify.getFeaturedPlaylistsArtists(config.limit || 50);
         
@@ -397,7 +428,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'spotify_category': {
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         const spotifyArtists = await spotify.getCategoryArtists(config.categoryId, config.limit || 50);
         
@@ -419,7 +453,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         
         if (source === 'spotify') {
           if (!spotifyConn) throw new Error('No active Spotify connection');
-          const spotifyConfig = spotifyConn.config as any;
+          if (!isSpotifyConfig(spotifyConn.config)) {
+            throw new Error('Invalid Spotify connection config');
+          }
+          const spotifyConfig = spotifyConn.config;
           const spotify = new SpotifyService(spotifyConfig);
           const followed = await spotify.getAllFollowedArtists();
           sourceArtists = followed.slice(0, 20).map(a => a.name);
@@ -455,7 +492,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'spotify_library': {
         // Sync entire Spotify library (followed + liked songs + saved albums)
         if (!spotifyConn) throw new Error('No active Spotify connection');
-        const spotifyConfig = spotifyConn.config as any;
+        if (!isSpotifyConfig(spotifyConn.config)) {
+          throw new Error('Invalid Spotify connection config');
+        }
+        const spotifyConfig = spotifyConn.config;
         const spotify = new SpotifyService(spotifyConfig);
         
         const artistMap = new Map<string, ArtistToAdd>();
