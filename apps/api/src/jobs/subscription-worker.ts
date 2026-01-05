@@ -22,7 +22,7 @@ import { BandcampService } from '../services/bandcamp.js';
 import { fetchPublicPlaylist, parseSpotifyPlaylistUrl, extractArtistsFromPlaylist } from '../services/public-playlist.js';
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
-import { isSpotifyConfig } from '../types/connections.js';
+import { isSpotifyConfig, isLastFMConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 
@@ -134,7 +134,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     switch (subscription.type) {
       case 'lastfm_chart': {
         if (!lastfmConn) throw new Error('No active Last.fm connection');
-        const lastfm = new LastfmService({ apiKey: (lastfmConn.config as any).apiKey });
+        if (!isLastFMConfig(lastfmConn.config)) {
+          throw new Error('Invalid Last.fm connection config');
+        }
+        const lastfm = new LastfmService({ apiKey: lastfmConn.config.apiKey });
         const result = await lastfm.getTopArtists(config.limit || 50);
         artists = result.artists.map(a => ({
           name: a.name,
@@ -146,7 +149,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'lastfm_tag': {
         if (!lastfmConn) throw new Error('No active Last.fm connection');
-        const lastfm = new LastfmService({ apiKey: (lastfmConn.config as any).apiKey });
+        if (!isLastFMConfig(lastfmConn.config)) {
+          throw new Error('Invalid Last.fm connection config');
+        }
+        const lastfm = new LastfmService({ apiKey: lastfmConn.config.apiKey });
         const result = await lastfm.getTagTopArtists(config.tag, config.limit || 50);
         artists = result.artists.map(a => ({
           name: a.name,
@@ -158,7 +164,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'lastfm_geo': {
         if (!lastfmConn) throw new Error('No active Last.fm connection');
-        const lastfm = new LastfmService({ apiKey: (lastfmConn.config as any).apiKey });
+        if (!isLastFMConfig(lastfmConn.config)) {
+          throw new Error('Invalid Last.fm connection config');
+        }
+        const lastfm = new LastfmService({ apiKey: lastfmConn.config.apiKey });
         const result = await lastfm.getGeoTopArtists(config.country, config.limit || 50);
         artists = result.artists.map(a => ({
           name: a.name,
@@ -462,7 +471,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
           sourceArtists = followed.slice(0, 20).map(a => a.name);
         } else if (source === 'lastfm') {
           if (!lastfmConn) throw new Error('No active Last.fm connection');
-          const lastfm = new LastfmService({ apiKey: (lastfmConn.config as any).apiKey });
+          if (!isLastFMConfig(lastfmConn.config)) {
+            throw new Error('Invalid Last.fm connection config');
+          }
+          const lastfm = new LastfmService({ apiKey: lastfmConn.config.apiKey });
           const top = await lastfm.getTopArtists(20);
           sourceArtists = top.artists.map(a => a.name);
         }
@@ -582,7 +594,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'lastfm_library': {
         // Sync user's Last.fm top artists from scrobble history
         if (!lastfmConn) throw new Error('No active Last.fm connection');
-        const lastfmConfig = lastfmConn.config as any;
+        if (!isLastFMConfig(lastfmConn.config)) {
+          throw new Error('Invalid Last.fm connection config');
+        }
+        const lastfmConfig = lastfmConn.config;
         if (!lastfmConfig.username) {
           throw new Error('Last.fm connection is missing username. Please update your Last.fm connection with your username.');
         }
@@ -601,7 +616,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'lastfm_similar': {
         // Get artists similar to user's top scrobbled artists
         if (!lastfmConn) throw new Error('No active Last.fm connection');
-        const lastfmConfigSim = lastfmConn.config as any;
+        if (!isLastFMConfig(lastfmConn.config)) {
+          throw new Error('Invalid Last.fm connection config');
+        }
+        const lastfmConfigSim = lastfmConn.config;
         if (!lastfmConfigSim.username) {
           throw new Error('Last.fm connection is missing username. Please update your Last.fm connection with your username.');
         }
@@ -666,9 +684,12 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         // Get artists similar to user's top Plex listening history
         if (!tautulliConn) throw new Error('No active Tautulli connection. Please add a Tautulli connection first.');
         if (!lastfmConn) throw new Error('No active Last.fm connection. Required for similar artist lookup.');
+        if (!isLastFMConfig(lastfmConn.config)) {
+          throw new Error('Invalid Last.fm connection config');
+        }
         
         const tautulliConfig = tautulliConn.config as any;
-        const lastfmConfigSim = lastfmConn.config as any;
+        const lastfmConfigSim = lastfmConn.config;
         
         // Import TautulliService dynamically to avoid circular dependencies
         const { TautulliService } = await import('../services/tautulli.js');
@@ -749,9 +770,12 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         // Get artists similar to user's top Jellyfin listening history
         if (!jellyfinConn) throw new Error('No active Jellyfin connection. Please add a Jellyfin connection first.');
         if (!lastfmConn) throw new Error('No active Last.fm connection. Required for similar artist lookup.');
+        if (!isLastFMConfig(lastfmConn.config)) {
+          throw new Error('Invalid Last.fm connection config');
+        }
         
         const jellyfinConfig = jellyfinConn.config as any;
-        const lastfmConfigSim = lastfmConn.config as any;
+        const lastfmConfigSim = lastfmConn.config;
         
         // Import JellyfinService dynamically to avoid circular dependencies
         const { JellyfinService } = await import('../services/jellyfin.js');

@@ -38,6 +38,7 @@ export function isSpotifyConfig(config: unknown): config is SpotifyConnectionCon
 
 export interface LastFMConnectionConfig {
   apiKey: string;
+  username?: string;
   [key: string]: JsonValue | undefined;
 }
 
