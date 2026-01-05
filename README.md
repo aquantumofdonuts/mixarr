@@ -11,7 +11,7 @@
 ![Mixarr AI Discovery](website/img/mixarr-discover.png)
 
 ## Features
-- **Multi-Service Integration**: Spotify, TIDAL, Deezer, Last.fm, MusicBrainz, Plex/Tautulli
+- **Multi-Service Integration**: Spotify, TIDAL, Deezer, Last.fm, MusicBrainz, Plex/Tautulli, Jellyfin
 - **Automated Subscriptions**: Scheduled synchronization and discovery from connected services
 - **System Dashboard**: Overview of active subscriptions, recent artists, and system health
 - **Modern Stack**: Next.js 14 + Express.js + TypeScript
@@ -113,6 +113,12 @@ Discover artists similar to what you've been listening to on Plex.
 - Analyzes your Plex listening history via Tautulli
 - Finds similar artists using Last.fm
 
+### Jellyfin
+Discover artists similar to what you've been listening to on Jellyfin.
+- Analyzes your Jellyfin listening history directly (no third-party tool needed)
+- Get your API key from Jellyfin Dashboard → API Keys
+- Finds similar artists using Last.fm
+
 ### MusicBrainz
 Open music database integration.
 - New release discovery
@@ -186,6 +192,9 @@ LLM-powered artist discovery using OpenAI, Anthropic, or Ollama.
 
 ### Plex/Tautulli (1)
 - **Listening History Similar**: Artists similar to your Plex listening
+
+### Jellyfin (1)
+- **Listening History Similar**: Artists similar to your Jellyfin listening
 
 
 
@@ -312,6 +321,7 @@ Add any services you use for music discovery:
 | **TIDAL** | OAuth | Create app at [TIDAL Developer Portal](https://developer.tidal.com/), set redirect URI |
 | **Deezer** | Public API | No setup needed for charts/search (OAuth currently unavailable) |
 | **Plex/Tautulli** | API Key | Add Tautulli URL and API key for listening history analysis |
+| **Jellyfin** | API Key | Add Jellyfin URL and API key (Dashboard → API Keys) for listening history analysis |
 | **ListenBrainz** | Token | Add your ListenBrainz user token |
 
 ### 7. Create Your First Subscription

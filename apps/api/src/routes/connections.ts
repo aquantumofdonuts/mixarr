@@ -492,6 +492,22 @@ connectionsRouter.post('/:id/test', async (req, res) => {
         break;
       }
       
+      case 'jellyfin': {
+        const { JellyfinService } = await import('../services/jellyfin.js');
+        const service = new JellyfinService();
+        const testResult = await service.testConnection({
+          jellyfinUrl: config.jellyfinUrl,
+          jellyfinApiKey: config.jellyfinApiKey,
+        });
+        result = {
+          success: testResult.success,
+          message: testResult.success 
+            ? `Connected to ${testResult.serverName || 'Jellyfin'}` 
+            : testResult.error || 'Connection failed',
+        };
+        break;
+      }
+      
       case 'deezer': {
         // Deezer requires OAuth authorization first
         if (!config.accessToken) {
@@ -801,6 +817,50 @@ connectionsRouter.get('/:id/tautulli/top-artists', async (req, res) => {
   } catch (error) {
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to get top artists' 
+    });
+  }
+});
+
+// Get Jellyfin users
+connectionsRouter.post('/jellyfin/users', async (req, res) => {
+  try {
+    const { jellyfinUrl, jellyfinApiKey } = req.body;
+    
+    if (!jellyfinUrl || !jellyfinApiKey) {
+      res.status(400).json({ error: 'Jellyfin URL and API key required' });
+      return;
+    }
+
+    const { JellyfinService } = await import('../services/jellyfin.js');
+    const service = new JellyfinService();
+    const users = await service.getUsers({ jellyfinUrl, jellyfinApiKey });
+    
+    res.json({ users });
+  } catch (error) {
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Failed to get users' 
+    });
+  }
+});
+
+// Get Jellyfin music libraries
+connectionsRouter.post('/jellyfin/libraries', async (req, res) => {
+  try {
+    const { jellyfinUrl, jellyfinApiKey } = req.body;
+    
+    if (!jellyfinUrl || !jellyfinApiKey) {
+      res.status(400).json({ error: 'Jellyfin URL and API key required' });
+      return;
+    }
+
+    const { JellyfinService } = await import('../services/jellyfin.js');
+    const service = new JellyfinService();
+    const libraries = await service.getLibraries({ jellyfinUrl, jellyfinApiKey });
+    
+    res.json({ libraries });
+  } catch (error) {
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Failed to get libraries' 
     });
   }
 });

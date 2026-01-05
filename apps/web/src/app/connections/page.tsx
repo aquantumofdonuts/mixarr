@@ -13,7 +13,7 @@ import { Plus, TestTube2, Trash2, Edit, Check, X, Eye, EyeOff, RefreshCw, Extern
 interface Connection {
   id: number;
   userId: number | null;
-  type: 'lidarr' | 'spotify' | 'lastfm' | 'tautulli' | 'deezer' | 'tidal' | 'listenbrainz' | 'discogs';
+  type: 'lidarr' | 'spotify' | 'lastfm' | 'tautulli' | 'jellyfin' | 'deezer' | 'tidal' | 'listenbrainz' | 'discogs';
   name: string;
   isActive: boolean;
   lastTest: string | null;
@@ -46,6 +46,7 @@ const connectionTypes = [
   { value: 'spotify', label: 'Spotify', color: '#1DB954', description: 'Import & playlist subscriptions' },
   { value: 'lastfm', label: 'Last.fm', color: '#D51007', description: 'Chart & tag subscriptions' },
   { value: 'tautulli', label: 'Tautulli', color: '#E5A00D', description: 'Plex listening history' },
+  { value: 'jellyfin', label: 'Jellyfin', color: '#00A4DC', description: 'Jellyfin listening history' },
   { value: 'deezer', label: 'Deezer', color: '#FEAA2D', description: 'Deezer library & playlists' },
   { value: 'tidal', label: 'TIDAL', color: '#00FFFF', description: 'TIDAL library & mixes' },
   { value: 'listenbrainz', label: 'ListenBrainz', color: '#353070', description: 'Open-source music tracking' },
@@ -124,6 +125,11 @@ export default function ConnectionsPage() {
     tautulliApiKey: '',
     plexUserId: '',
     plexLibraryId: '',
+    // Jellyfin-specific settings
+    jellyfinUrl: '',
+    jellyfinApiKey: '',
+    jellyfinUserId: '',
+    jellyfinLibraryId: '',
     // ListenBrainz-specific settings
     listenbrainzUsername: '',
     listenbrainzToken: '',
@@ -143,6 +149,13 @@ export default function ConnectionsPage() {
     libraries: PlexLibrary[];
   } | null>(null);
   const [tautulliTested, setTautulliTested] = useState(false);
+
+  // Jellyfin data fetched when testing connection
+  const [jellyfinData, setJellyfinData] = useState<{
+    users: Array<{ userId: string; username: string; isAdmin: boolean }>;
+    libraries: Array<{ libraryId: string; name: string; type: string }>;
+  } | null>(null);
+  const [jellyfinTested, setJellyfinTested] = useState(false);
 
   // Fetch OAuth status when connections change
   useEffect(() => {
@@ -385,6 +398,56 @@ export default function ConnectionsPage() {
       }
     } else {
       addToast({ type: 'error', title: 'Failed to fetch Tautulli data' });
+    }
+  };
+
+  const fetchJellyfinData = async () => {
+    if (!form.jellyfinUrl || !form.jellyfinApiKey) {
+      addToast({ type: 'warning', title: 'Enter Jellyfin URL and API key first' });
+      return;
+    }
+
+    // Test connection first
+    const testResult = await api.post<{ success: boolean; message: string }>(
+      '/api/connections/test',
+      { type: 'jellyfin', config: { jellyfinUrl: form.jellyfinUrl, jellyfinApiKey: form.jellyfinApiKey } }
+    );
+
+    if (!testResult.data?.success) {
+      addToast({ 
+        type: 'error', 
+        title: 'Connection failed', 
+        message: testResult.data?.message || testResult.error || undefined
+      });
+      return;
+    }
+
+    // Fetch users and libraries in parallel
+    const [usersResult, librariesResult] = await Promise.all([
+      api.post<{ users: Array<{ userId: string; username: string; isAdmin: boolean }> }>('/api/connections/jellyfin/users', {
+        jellyfinUrl: form.jellyfinUrl,
+        jellyfinApiKey: form.jellyfinApiKey,
+      }),
+      api.post<{ libraries: Array<{ libraryId: string; name: string; type: string }> }>('/api/connections/jellyfin/libraries', {
+        jellyfinUrl: form.jellyfinUrl,
+        jellyfinApiKey: form.jellyfinApiKey,
+      }),
+    ]);
+
+    if (usersResult.data && librariesResult.data) {
+      setJellyfinData({
+        users: usersResult.data.users,
+        libraries: librariesResult.data.libraries,
+      });
+      setJellyfinTested(true);
+      addToast({ type: 'success', title: 'Connected to Jellyfin' });
+      
+      // Auto-select first user if available
+      if (usersResult.data.users.length > 0 && !form.jellyfinUserId) {
+        setForm(f => ({ ...f, jellyfinUserId: usersResult.data!.users[0].userId }));
+      }
+    } else {
+      addToast({ type: 'error', title: 'Failed to fetch Jellyfin data' });
     }
   };
 
@@ -1373,6 +1436,90 @@ export default function ConnectionsPage() {
               {!tautulliTested && (
                 <p className="text-xs text-muted-foreground text-center">
                   Test connection to select Plex user and library
+                </p>
+              )}
+            </>
+          )}
+
+          {form.type === 'jellyfin' && (
+            <>
+              <div>
+                <label className="text-sm font-medium">Jellyfin URL</label>
+                <Input
+                  value={form.jellyfinUrl}
+                  onChange={(e) => { setForm({ ...form, jellyfinUrl: e.target.value }); setJellyfinTested(false); }}
+                  placeholder="http://localhost:8096"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">API Key</label>
+                <div className="relative">
+                  <Input
+                    type={showPassword ? 'text' : 'password'}
+                    value={form.jellyfinApiKey}
+                    onChange={(e) => { setForm({ ...form, jellyfinApiKey: e.target.value }); setJellyfinTested(false); }}
+                    placeholder="Jellyfin API key (Dashboard → API Keys)"
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+              
+              <Button
+                type="button"
+                variant="outline"
+                onClick={fetchJellyfinData}
+                disabled={!form.jellyfinUrl || !form.jellyfinApiKey}
+                className="w-full"
+              >
+                <TestTube2 className="h-4 w-4 mr-2" />
+                {jellyfinTested ? 'Re-test Connection' : 'Test Connection & Load Options'}
+              </Button>
+
+              {jellyfinData && (
+                <>
+                  <div>
+                    <label className="text-sm font-medium">Jellyfin User</label>
+                    <Select
+                      value={form.jellyfinUserId}
+                      onChange={(e) => setForm({ ...form, jellyfinUserId: e.target.value })}
+                      options={jellyfinData.users.map(u => ({ 
+                        value: u.userId, 
+                        label: u.username + (u.isAdmin ? ' (Admin)' : '')
+                      }))}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Listening history will be fetched for this user
+                    </p>
+                  </div>
+                  {jellyfinData.libraries.length > 0 && (
+                    <div>
+                      <label className="text-sm font-medium">Music Library (Optional)</label>
+                      <Select
+                        value={form.jellyfinLibraryId}
+                        onChange={(e) => setForm({ ...form, jellyfinLibraryId: e.target.value })}
+                        options={[
+                          { value: '', label: 'All Libraries' },
+                          ...jellyfinData.libraries.map(l => ({ 
+                            value: l.libraryId, 
+                            label: l.name 
+                          }))
+                        ]}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {!jellyfinTested && (
+                <p className="text-xs text-muted-foreground text-center">
+                  Test connection to select Jellyfin user and library
                 </p>
               )}
             </>

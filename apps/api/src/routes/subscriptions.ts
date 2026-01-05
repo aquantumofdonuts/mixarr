@@ -1155,6 +1155,40 @@ subscriptionsRouter.get('/presets/list', async (_req, res) => {
       config: { period: 'all', seedLimit: 25, similarPerSeed: 5, limit: 100, minMatchCount: 2 },
     },
 
+    // JELLYFIN
+    {
+      id: 'jellyfin-similar-week',
+      name: 'Jellyfin Similar Artists (Last Week)',
+      description: 'Artists similar to your Jellyfin listening history from the past week',
+      type: 'jellyfin_similar',
+      category: 'library',
+      config: { period: 'week', seedLimit: 10, similarPerSeed: 5, limit: 25, minMatchCount: 1 },
+    },
+    {
+      id: 'jellyfin-similar-month',
+      name: 'Jellyfin Similar Artists (Last Month)',
+      description: 'Artists similar to your Jellyfin listening history from the past month',
+      type: 'jellyfin_similar',
+      category: 'library',
+      config: { period: 'month', seedLimit: 15, similarPerSeed: 5, limit: 50, minMatchCount: 1 },
+    },
+    {
+      id: 'jellyfin-similar-year',
+      name: 'Jellyfin Similar Artists (Last Year)',
+      description: 'Artists similar to your Jellyfin listening history from the past year',
+      type: 'jellyfin_similar',
+      category: 'library',
+      config: { period: 'year', seedLimit: 20, similarPerSeed: 5, limit: 75, minMatchCount: 2 },
+    },
+    {
+      id: 'jellyfin-similar-all',
+      name: 'Jellyfin Similar Artists (All Time)',
+      description: 'Artists similar to your all-time Jellyfin listening history',
+      type: 'jellyfin_similar',
+      category: 'library',
+      config: { period: 'all', seedLimit: 25, similarPerSeed: 5, limit: 100, minMatchCount: 2 },
+    },
+
     // DEEZER
     {
       id: 'deezer-favorites',
