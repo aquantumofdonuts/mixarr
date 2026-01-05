@@ -131,6 +131,7 @@ enum ConnectionType {
   tidal
   listenbrainz
   discogs
+  jellyfin
 }
 
 // ============================================================================
@@ -191,6 +192,7 @@ enum SubscriptionType {
   spotify_public_playlist
   ai_recommendation
   tautulli_similar
+  jellyfin_similar
   // Deezer subscription types
   deezer_favorites
   deezer_playlists
