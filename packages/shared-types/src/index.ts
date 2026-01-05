@@ -110,6 +110,8 @@ export type SubscriptionType =
   | 'ai_recommendation'
   // Tautulli
   | 'tautulli_similar'
+  // Jellyfin
+  | 'jellyfin_similar'
   // Deezer
   | 'deezer_favorites'
   | 'deezer_history'
