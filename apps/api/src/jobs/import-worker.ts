@@ -7,6 +7,7 @@
 import { Worker, Job } from 'bullmq';
 import { createRedisConnection } from '../lib/redis.js';
 import prisma from '../lib/db.js';
+import { isSpotifyConfig } from '../types/connections.js';
 import { QUEUE_NAMES, type ImportJobData } from './queue.js';
 import { LidarrService, LidarrCache } from '../services/lidarr.js';
 import { SpotifyService } from '../services/spotify.js';
@@ -59,7 +60,10 @@ async function processImport(job: Job<ImportJobData>): Promise<void> {
       throw new Error('No active Spotify connection');
     }
 
-    const spotifyConfig = spotifyConn.config as any;
+    if (!isSpotifyConfig(spotifyConn.config)) {
+      throw new Error('Invalid Spotify connection config');
+    }
+    const spotifyConfig = spotifyConn.config;
     const spotify = new SpotifyService(spotifyConfig, async (tokens) => {
       // Update tokens in database
       await prisma.connection.update({
