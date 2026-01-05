@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { createSubscriptionSchema, updateSubscriptionSchema } from '../schemas/subscription.js';
 import { parseIntParam } from '../utils/params.js';
 import { addScheduledJob, removeScheduledJob } from '../jobs/scheduler.js';
 import { fetchDeezerArtistImages } from '../services/deezer.js';
@@ -62,14 +64,9 @@ subscriptionsRouter.get('/:id', async (req, res) => {
 });
 
 // Create subscription
-subscriptionsRouter.post('/', async (req, res) => {
+subscriptionsRouter.post('/', validateBody(createSubscriptionSchema), async (req, res) => {
   try {
     const { name, type, config, schedule, resultHandling, isActive } = req.body;
-
-    if (!name || !type) {
-      res.status(400).json({ error: 'Name and type required' });
-      return;
-    }
 
     // Auto-link the appropriate connection based on subscription type
     let connectionId: number | null = null;
@@ -124,7 +121,7 @@ subscriptionsRouter.post('/', async (req, res) => {
 });
 
 // Update subscription
-subscriptionsRouter.put('/:id', async (req, res) => {
+subscriptionsRouter.put('/:id', validateBody(updateSubscriptionSchema), async (req, res) => {
   try {
     const id = parseIntParam(req.params.id);
     if (id === null) {
