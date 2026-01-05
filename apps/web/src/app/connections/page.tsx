@@ -570,7 +570,7 @@ export default function ConnectionsPage() {
       // Store friendly names for display
       const selectedUser = jellyfinData?.users.find(u => u.userId === form.jellyfinUserId);
       const selectedLibrary = jellyfinData?.libraries.find(l => l.libraryId === form.jellyfinLibraryId);
-      config.jellyfinUserName = selectedUser?.name;
+      config.jellyfinUserName = selectedUser?.username;
       config.jellyfinLibraryName = selectedLibrary?.name;
     }
 
@@ -668,8 +668,8 @@ export default function ConnectionsPage() {
       if (connection.type === 'jellyfin' && config.jellyfinUserId) {
         // Show existing selections
         setJellyfinData({
-          users: [{ userId: config.jellyfinUserId, name: config.jellyfinUserName || 'User' }],
-          libraries: config.jellyfinLibraryId ? [{ libraryId: config.jellyfinLibraryId, name: config.jellyfinLibraryName || 'Library' }] : [],
+          users: [{ userId: config.jellyfinUserId, username: config.jellyfinUserName || 'User', isAdmin: false }],
+          libraries: config.jellyfinLibraryId ? [{ libraryId: config.jellyfinLibraryId, name: config.jellyfinLibraryName || 'Library', type: 'music' }] : [],
         });
         setJellyfinTested(true);
       }
