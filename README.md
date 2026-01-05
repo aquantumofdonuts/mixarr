@@ -22,7 +22,7 @@
 
 **Docker Image:**
 ```
-docker pull ghcr.io/aquantumofdonuts/mixarr:latest
+docker pull ghcr.io/aquantumofdonuts/mixarr:v1.1.0
 ```
 
 **Docker Usage:**
@@ -34,7 +34,7 @@ docker run -d \
   -e SESSION_SECRET="$(openssl rand -hex 32)" \
   -e FRONTEND_URL="https://YOUR-SERVER-IP:3443" \
   -e BASE_URL="https://YOUR-SERVER-IP:3443" \
-  ghcr.io/aquantumofdonuts/mixarr:latest
+  ghcr.io/aquantumofdonuts/mixarr:v1.1.0
 ```
 
 ## Build Docker from Source
