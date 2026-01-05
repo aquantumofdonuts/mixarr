@@ -88,13 +88,14 @@ app.use('/api/sso', ssoRouter);
 app.use(errorHandler);
 
 // WebSocket connections with authentication
+// Note: Socket.io + express-session integration requires type assertions for session access
 io.use((socket, next) => {
-  // Parse session from handshake
-  sessionMiddleware(socket.request as any, {} as any, () => {
-    const session = (socket.request as any).session;
+  // Parse session from handshake - type assertions needed for express-session compatibility
+  sessionMiddleware(socket.request as any, {} as any, () => {  // eslint-disable-line @typescript-eslint/no-explicit-any
+    const session = (socket.request as any).session;  // eslint-disable-line @typescript-eslint/no-explicit-any
     if (session?.passport?.user) {
       // Attach user ID to socket for filtering events
-      (socket as any).userId = session.passport.user;
+      (socket as any).userId = session.passport.user;  // eslint-disable-line @typescript-eslint/no-explicit-any
       next();
     } else {
       next(new Error('Authentication required'));
@@ -105,7 +106,7 @@ io.use((socket, next) => {
 const log = createLogger('Server');
 
 io.on('connection', (socket) => {
-  const userId = (socket as any).userId;
+  const userId = (socket as any).userId;  // eslint-disable-line @typescript-eslint/no-explicit-any
   // Join a room for this user so we can send targeted events
   socket.join(`user:${userId}`);
   log.debug(`Client connected: ${socket.id} (user: ${userId})`);

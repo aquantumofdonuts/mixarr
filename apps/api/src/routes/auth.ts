@@ -203,6 +203,7 @@ authRouter.get('/sso/saml', async (req, res, next) => {
   const baseUrlSetting = await prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
   const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
   
+  // Type assertion required: passport-saml's Strategy type doesn't match passport's expected type
   passport.use('saml-sso', createSamlStrategy({
     callbackUrl: `${baseUrl}/api/auth/sso/saml/callback`,
     entryPoint: config.idpSsoUrl,
@@ -210,7 +211,7 @@ authRouter.get('/sso/saml', async (req, res, next) => {
     issuer: baseUrl,
     emailAttribute: config.emailAttribute,
     displayNameAttribute: config.displayNameAttribute,
-  }, prisma) as any); // Type assertion needed for passport-saml compatibility
+  }, prisma) as any);  // eslint-disable-line @typescript-eslint/no-explicit-any
 
   passport.authenticate('saml-sso')(req, res, next);
 });

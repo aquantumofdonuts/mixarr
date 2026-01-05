@@ -1636,7 +1636,8 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'discogs_label': {
         if (!discogsConn) throw new Error('No active Discogs connection. Please add a Discogs connection first.');
-        const discogsConfig = discogsConn.config as any;
+        const discogsConfig = discogsConn.config as { token?: string };
+        if (!discogsConfig.token) throw new Error('Discogs token not configured');
         const labelId = config.labelId;
         if (!labelId) throw new Error('Label ID is required for Discogs Label subscription');
         
@@ -1666,7 +1667,8 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'discogs_style': {
         if (!discogsConn) throw new Error('No active Discogs connection. Please add a Discogs connection first.');
-        const discogsConfig = discogsConn.config as any;
+        const discogsConfig = discogsConn.config as { token?: string };
+        if (!discogsConfig.token) throw new Error('Discogs token not configured');
         const style = config.style;
         if (!style) throw new Error('Style is required for Discogs Style subscription');
         

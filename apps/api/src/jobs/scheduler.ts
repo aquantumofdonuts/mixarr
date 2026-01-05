@@ -128,7 +128,7 @@ export function addImportScheduledJob(
   importSourceId: number,
   userId: number,
   cronExpression: string,
-  resultHandling: string
+  resultHandling: 'preview' | 'queue' | 'auto'
 ): void {
   const key = 10000 + importSourceId; // Offset to avoid collision with subscription IDs
   
@@ -144,7 +144,7 @@ export function addImportScheduledJob(
       cronExpression,
       async () => {
         console.log(`Running scheduled import ${importSourceId}`);
-        await scheduleImportJob(importSourceId, userId, resultHandling as any);
+        await scheduleImportJob(importSourceId, userId, resultHandling);
       },
       null,
       true,

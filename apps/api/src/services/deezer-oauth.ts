@@ -176,8 +176,8 @@ export class DeezerOAuthService {
 
     const data = await response.json() as T & { error?: { type: string; message: string; code: number } };
     
-    if ((data as any).error) {
-      throw new Error((data as any).error.message || 'Deezer API error');
+    if (data.error) {
+      throw new Error(data.error.message || 'Deezer API error');
     }
 
     return data;

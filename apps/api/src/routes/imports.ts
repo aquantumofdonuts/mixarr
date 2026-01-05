@@ -13,7 +13,8 @@ import { addLogEntry } from './logs.js';
 import { parseSpotifyPlaylistUrl, importPublicPlaylist } from '../services/public-playlist.js';
 import { notificationService } from '../services/notifications.js';
 import { createLogger } from '../lib/logger.js';
-import type { ImportSource } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { ImportSource, ReviewStatus } from '@prisma/client';
 import type { Request } from 'express';
 
 const log = createLogger('Imports');
@@ -182,8 +183,8 @@ importsRouter.get('/review/queue', async (req, res) => {
     const items = await prisma.reviewItem.findMany({
       where: {
         ...(isAdmin ? {} : { userId: req.user!.id }),
-        status: status as any,
-        ...(itemType ? { itemType: itemType as any } : {}),
+        status: status as ReviewStatus,
+        ...(itemType ? { itemType } : {}),
       },
       include: {
         user: { select: { username: true, displayName: true } },
@@ -860,7 +861,7 @@ importsRouter.get('/preview/spotify/:connectionId', async (req, res) => {
       await prisma.connection.update({
         where: { id: connectionId },
         data: {
-          config: { ...config, ...tokens } as any,
+          config: { ...config, ...tokens } as Prisma.InputJsonValue,
         },
       });
     });
