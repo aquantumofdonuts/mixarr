@@ -22,7 +22,7 @@ import { BandcampService } from '../services/bandcamp.js';
 import { fetchPublicPlaylist, parseSpotifyPlaylistUrl, extractArtistsFromPlaylist } from '../services/public-playlist.js';
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
-import { isSpotifyConfig, isLastFMConfig, isDeezerConfig } from '../types/connections.js';
+import { isSpotifyConfig, isLastFMConfig, isDeezerConfig, isTidalConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 
@@ -1031,7 +1031,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'tidal_favorites': {
         if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        const tidalConfig = tidalConn.config as any;
+        if (!isTidalConfig(tidalConn.config)) {
+          throw new Error('Invalid TIDAL connection config');
+        }
+        const tidalConfig = tidalConn.config;
         const tidal = new TidalService({
           clientId: tidalConfig.clientId,
           clientSecret: tidalConfig.clientSecret,
@@ -1057,7 +1060,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'tidal_followed_artists': {
         if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        const tidalConfig = tidalConn.config as any;
+        if (!isTidalConfig(tidalConn.config)) {
+          throw new Error('Invalid TIDAL connection config');
+        }
+        const tidalConfig = tidalConn.config;
         const tidal = new TidalService({
           clientId: tidalConfig.clientId,
           clientSecret: tidalConfig.clientSecret,
@@ -1075,7 +1081,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'tidal_playlist': {
         if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        const tidalConfig = tidalConn.config as any;
+        if (!isTidalConfig(tidalConn.config)) {
+          throw new Error('Invalid TIDAL connection config');
+        }
+        const tidalConfig = tidalConn.config;
         const tidal = new TidalService({
           clientId: tidalConfig.clientId,
           clientSecret: tidalConfig.clientSecret,
@@ -1102,7 +1111,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'tidal_playlists': {
         // All artists from all user's playlists
         if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        const tidalConfig = tidalConn.config as any;
+        if (!isTidalConfig(tidalConn.config)) {
+          throw new Error('Invalid TIDAL connection config');
+        }
+        const tidalConfig = tidalConn.config;
         const tidal = new TidalService({
           clientId: tidalConfig.clientId,
           clientSecret: tidalConfig.clientSecret,
@@ -1131,7 +1143,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'tidal_discovery': {
         if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        const tidalConfig = tidalConn.config as any;
+        if (!isTidalConfig(tidalConn.config)) {
+          throw new Error('Invalid TIDAL connection config');
+        }
+        const tidalConfig = tidalConn.config;
         const tidal = new TidalService({
           clientId: tidalConfig.clientId,
           clientSecret: tidalConfig.clientSecret,
@@ -1158,7 +1173,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'tidal_new_arrivals': {
         // New arrivals - discover albums, not artists
         if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        const tidalConfig = tidalConn.config as any;
+        if (!isTidalConfig(tidalConn.config)) {
+          throw new Error('Invalid TIDAL connection config');
+        }
+        const tidalConfig = tidalConn.config;
         const tidal = new TidalService({
           clientId: tidalConfig.clientId,
           clientSecret: tidalConfig.clientSecret,
@@ -1185,7 +1203,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'tidal_mix': {
         if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        const tidalConfig = tidalConn.config as any;
+        if (!isTidalConfig(tidalConn.config)) {
+          throw new Error('Invalid TIDAL connection config');
+        }
+        const tidalConfig = tidalConn.config;
         const tidal = new TidalService({
           clientId: tidalConfig.clientId,
           clientSecret: tidalConfig.clientSecret,
