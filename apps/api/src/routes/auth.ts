@@ -262,7 +262,7 @@ authRouter.get('/sso/plex', async (req, res) => {
     plexPins.set(pinId, Date.now());
     
     // Store pinId in session for callback
-    (req.session as any).plexPinId = pinId;
+    req.session.plexPinId = pinId;
     
     res.redirect(authUrl);
   } catch (error) {
@@ -273,7 +273,7 @@ authRouter.get('/sso/plex', async (req, res) => {
 
 // Plex - callback
 authRouter.get('/sso/plex/callback', async (req, res) => {
-  const pinId = (req.session as any)?.plexPinId;
+  const pinId = req.session.plexPinId;
   
   if (!pinId) {
     return res.redirect('/login?error=missing_plex_pin');
@@ -316,7 +316,7 @@ authRouter.get('/sso/plex/callback', async (req, res) => {
       }
       // Clean up
       plexPins.delete(pinId);
-      delete (req.session as any).plexPinId;
+      delete req.session.plexPinId;
       return res.redirect('/');
     });
   } catch (error) {
