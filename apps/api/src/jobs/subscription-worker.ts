@@ -22,7 +22,7 @@ import { BandcampService } from '../services/bandcamp.js';
 import { fetchPublicPlaylist, parseSpotifyPlaylistUrl, extractArtistsFromPlaylist } from '../services/public-playlist.js';
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
-import { isSpotifyConfig, isLastFMConfig, isDeezerConfig, isTidalConfig } from '../types/connections.js';
+import { isSpotifyConfig, isLastFMConfig, isDeezerConfig, isTidalConfig, isListenBrainzConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 
@@ -1242,7 +1242,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'listenbrainz_top': {
         if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
-        const lbConfig = listenbrainzConn.config as any;
+        if (!isListenBrainzConfig(listenbrainzConn.config)) {
+          throw new Error('Invalid ListenBrainz connection config');
+        }
+        const lbConfig = listenbrainzConn.config;
         const username = config.username || lbConfig.username;
         if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
         
@@ -1263,7 +1266,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'listenbrainz_similar': {
         if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
-        const lbConfig = listenbrainzConn.config as any;
+        if (!isListenBrainzConfig(listenbrainzConn.config)) {
+          throw new Error('Invalid ListenBrainz connection config');
+        }
+        const lbConfig = listenbrainzConn.config;
         const username = config.username || lbConfig.username;
         if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
         
@@ -1321,7 +1327,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'listenbrainz_recommendations': {
         if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
-        const lbConfig = listenbrainzConn.config as any;
+        if (!isListenBrainzConfig(listenbrainzConn.config)) {
+          throw new Error('Invalid ListenBrainz connection config');
+        }
+        const lbConfig = listenbrainzConn.config;
         const username = config.username || lbConfig.username;
         if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
         
@@ -1380,8 +1389,9 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'listenbrainz_fresh_releases': {
         // Fresh releases - discover albums, not artists (global, not personalized)
-        const lbConfig = listenbrainzConn?.config as any;
-        const listenbrainz = new ListenBrainzService(lbConfig?.username || 'anonymous');
+        const lbConfig = listenbrainzConn?.config;
+        const lbUsername = (lbConfig && isListenBrainzConfig(lbConfig)) ? lbConfig.username : 'anonymous';
+        const listenbrainz = new ListenBrainzService(lbUsername);
         const limit = config.limit || 50;
         
         const result = await listenbrainz.getFreshReleases();
@@ -1403,7 +1413,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'listenbrainz_weekly_jams': {
         // Weekly Jams - personalized playlist of familiar tracks
         if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
-        const lbConfig = listenbrainzConn.config as any;
+        if (!isListenBrainzConfig(listenbrainzConn.config)) {
+          throw new Error('Invalid ListenBrainz connection config');
+        }
+        const lbConfig = listenbrainzConn.config;
         const username = config.username || lbConfig.username;
         if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
         
@@ -1442,7 +1455,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       case 'listenbrainz_weekly_exploration': {
         // Weekly Exploration - personalized playlist of new discoveries
         if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
-        const lbConfig = listenbrainzConn.config as any;
+        if (!isListenBrainzConfig(listenbrainzConn.config)) {
+          throw new Error('Invalid ListenBrainz connection config');
+        }
+        const lbConfig = listenbrainzConn.config;
         const username = config.username || lbConfig.username;
         if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
         
@@ -1480,7 +1496,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'listenbrainz_year': {
         if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
-        const lbConfig = listenbrainzConn.config as any;
+        if (!isListenBrainzConfig(listenbrainzConn.config)) {
+          throw new Error('Invalid ListenBrainz connection config');
+        }
+        const lbConfig = listenbrainzConn.config;
         const username = config.username || lbConfig.username;
         if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
         
@@ -1500,7 +1519,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'listenbrainz_playlist': {
         if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
-        const lbConfig = listenbrainzConn.config as any;
+        if (!isListenBrainzConfig(listenbrainzConn.config)) {
+          throw new Error('Invalid ListenBrainz connection config');
+        }
+        const lbConfig = listenbrainzConn.config;
         const username = config.username || lbConfig.username;
         if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
         if (!config.playlistId) throw new Error('Playlist ID is required for ListenBrainz playlist subscription.');
@@ -1536,8 +1558,9 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         if (!config.seedMbid) throw new Error('Seed artist MBID is required for ListenBrainz radio subscription.');
         
         // Radio endpoint doesn't require auth, but use connection for consistency
-        const lbConfig = listenbrainzConn?.config as any;
-        const listenbrainz = new ListenBrainzService(lbConfig?.username || 'anonymous');
+        const lbConfig = listenbrainzConn?.config;
+        const lbUsername = (lbConfig && isListenBrainzConfig(lbConfig)) ? lbConfig.username : 'anonymous';
+        const listenbrainz = new ListenBrainzService(lbUsername);
         const mode = config.mode || 'medium';
         const limit = config.limit || 50;
         
@@ -1567,7 +1590,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       case 'listenbrainz_loved': {
         if (!listenbrainzConn) throw new Error('No active ListenBrainz connection. Please add a ListenBrainz connection first.');
-        const lbConfig = listenbrainzConn.config as any;
+        if (!isListenBrainzConfig(listenbrainzConn.config)) {
+          throw new Error('Invalid ListenBrainz connection config');
+        }
+        const lbConfig = listenbrainzConn.config;
         const username = config.username || lbConfig.username;
         if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
         
