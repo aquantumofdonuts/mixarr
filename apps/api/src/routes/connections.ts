@@ -12,7 +12,7 @@ import { DeezerOAuthService } from '../services/deezer-oauth.js';
 import { TidalService } from '../services/tidal.js';
 import { ListenBrainzService } from '../services/listenbrainz.js';
 import { DiscogsService } from '../services/discogs.js';
-import type { Connection } from '@prisma/client';
+import type { Connection, Prisma } from '@prisma/client';
 import type { Request } from 'express';
 
 export const connectionsRouter = Router();
@@ -106,7 +106,7 @@ connectionsRouter.get('/:id/spotify/callback', async (req, res) => {
     await prisma.connection.update({
       where: { id: connection.id },
       data: { 
-        config: updatedConfig as any,
+        config: updatedConfig as Prisma.InputJsonValue,
         lastTest: new Date(),
       },
     });
@@ -1053,7 +1053,7 @@ connectionsRouter.post('/:id/spotify/revoke', async (req, res) => {
 
     await prisma.connection.update({
       where: { id: connection.id },
-      data: { config: restConfig as any },
+      data: { config: restConfig as Prisma.InputJsonValue },
     });
 
     res.json({ success: true, message: 'Spotify authorization revoked' });
@@ -1132,7 +1132,7 @@ connectionsRouter.get('/:id/deezer/callback', async (req, res) => {
     await prisma.connection.update({
       where: { id: connection.id },
       data: { 
-        config: updatedConfig as any,
+        config: updatedConfig as Prisma.InputJsonValue,
         lastTest: new Date(),
       },
     });
@@ -1270,7 +1270,7 @@ connectionsRouter.post('/:id/deezer/revoke', async (req, res) => {
 
     await prisma.connection.update({
       where: { id: connection.id },
-      data: { config: restConfig as any },
+      data: { config: restConfig as Prisma.InputJsonValue },
     });
 
     res.json({ success: true, message: 'Deezer authorization revoked' });
@@ -1393,7 +1393,7 @@ connectionsRouter.get('/:id/tidal/callback', async (req, res) => {
     await prisma.connection.update({
       where: { id: connection.id },
       data: { 
-        config: updatedConfig as any,
+        config: updatedConfig as Prisma.InputJsonValue,
         lastTest: new Date(),
       },
     });
@@ -1542,7 +1542,7 @@ connectionsRouter.post('/:id/tidal/revoke', async (req, res) => {
 
     await prisma.connection.update({
       where: { id: connection.id },
-      data: { config: restConfig as any },
+      data: { config: restConfig as Prisma.InputJsonValue },
     });
 
     res.json({ success: true, message: 'TIDAL authorization revoked' });
