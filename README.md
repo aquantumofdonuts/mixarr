@@ -22,7 +22,7 @@
 
 **Docker Image:**
 ```
-docker pull ghcr.io/aquantumofdonuts/mixarr:v1.1.0
+docker pull ghcr.io/aquantumofdonuts/mixarr:latest
 ```
 
 **Docker Usage:**
@@ -34,7 +34,7 @@ docker run -d \
   -e SESSION_SECRET="$(openssl rand -hex 32)" \
   -e FRONTEND_URL="https://YOUR-SERVER-IP:3443" \
   -e BASE_URL="https://YOUR-SERVER-IP:3443" \
-  ghcr.io/aquantumofdonuts/mixarr:v1.1.0
+  ghcr.io/aquantumofdonuts/mixarr:latest
 ```
 
 ## Build Docker from Source
@@ -47,7 +47,7 @@ git clone https://github.com/aquantumofdonuts/mixarr.git
 cd mixarr
 
 # Checkout the latest release
-git checkout v1.1.0
+git checkout latest
 
 # Copy environment template and configure
 cp .env.example .env
@@ -66,7 +66,7 @@ Access:
 
 On first login, create an admin account. Then connect your Lidarr instance and music services.
 
-> **Updating**: To update to a new release, run `git fetch --tags && git checkout v1.x.x` then `docker compose up -d --build`
+> **Updating**: To update to a new release, run `git fetch --tags && git checkout latest` then `docker compose up -d --build`
 
 
 
