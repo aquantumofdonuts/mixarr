@@ -52,8 +52,31 @@ const io = new SocketIOServer(httpServer, {
   },
 });
 
-// Middleware
-app.use(helmet());
+// Security Headers via Helmet
+// See: https://helmetjs.github.io/
+// Provides: X-Content-Type-Options, X-Frame-Options, HSTS, and more
+app.use(helmet({
+  // Content Security Policy - disabled for API (no HTML content served)
+  // The frontend (Next.js) handles CSP for the actual web pages
+  contentSecurityPolicy: false,
+  
+  // X-Frame-Options: DENY - API should never be embedded in iframes
+  frameguard: { action: 'deny' },
+  
+  // HSTS - Enforce HTTPS (maxAge: 1 year, includeSubDomains)
+  // Only effective when served over HTTPS (Caddy handles this)
+  strictTransportSecurity: {
+    maxAge: 31536000, // 1 year in seconds
+    includeSubDomains: true,
+  },
+  
+  // Other defaults enabled:
+  // - X-Content-Type-Options: nosniff (prevents MIME sniffing)
+  // - X-XSS-Protection: 0 (disabled, CSP is modern replacement)
+  // - X-DNS-Prefetch-Control: off (privacy protection)
+  // - X-Permitted-Cross-Domain-Policies: none (Flash/PDF protection)
+  // - Referrer-Policy: no-referrer (privacy protection)
+}));
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true,
