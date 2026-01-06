@@ -137,7 +137,7 @@ authRouter.get('/sso/google/callback', (req, res, next) => {
 });
 
 // LDAP login (POST with username/password in body)
-authRouter.post('/sso/ldap', async (req, res, next) => {
+authRouter.post('/sso/ldap', loginLimiter, async (req, res, next) => {
   try {
     const provider = await prisma.ssoProvider.findUnique({
       where: { type: 'ldap' },
