@@ -19,6 +19,18 @@ declare global {
 // Create session middleware - exported for Socket.IO authentication
 // Using explicit MemoryStore to suppress the production warning.
 // Sessions are lost on container restart, which is acceptable for this app.
+//
+// CSRF Protection Strategy:
+// -------------------------
+// This application uses sameSite='lax' cookies as the primary CSRF defense.
+// This approach is appropriate because:
+// 1. All state-changing operations use POST/PUT/DELETE (not GET)
+// 2. Modern browsers (95%+) fully support sameSite cookies
+// 3. sameSite='lax' blocks cross-origin POST requests with cookies
+// 4. No additional CSRF tokens are needed for this protection level
+//
+// Note: sameSite='lax' allows cookies on top-level GET navigations, which is
+// required for OAuth callbacks (Google, SAML) to work correctly.
 export const sessionMiddleware: RequestHandler = session({
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
   resave: false,
@@ -28,7 +40,7 @@ export const sessionMiddleware: RequestHandler = session({
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: 'lax', // Protect against CSRF while allowing normal navigation
+    sameSite: 'lax', // CSRF protection: blocks cross-site POST/PUT/DELETE with cookies
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
   },
 });
