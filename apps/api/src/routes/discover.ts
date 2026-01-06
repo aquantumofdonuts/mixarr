@@ -62,7 +62,11 @@ discoverRouter.get('/library', async (req, res) => {
     
     const lidarr = await getLidarrService(req.user!.id);
     if (!lidarr) {
-      res.status(400).json({ error: 'No active Lidarr connection' });
+      res.status(400).json({ 
+        error: 'Discover requires a Lidarr connection',
+        code: 'LIDARR_REQUIRED',
+        message: 'Connect Lidarr to browse and discover from your library'
+      });
       return;
     }
 
@@ -143,7 +147,11 @@ discoverRouter.post('/similar', async (req, res) => {
 
     const lidarr = await getLidarrService(req.user!.id);
     if (!lidarr) {
-      res.status(400).json({ error: 'No active Lidarr connection' });
+      res.status(400).json({ 
+        error: 'Discover requires a Lidarr connection',
+        code: 'LIDARR_REQUIRED',
+        message: 'Connect Lidarr to browse and discover from your library'
+      });
       return;
     }
 
@@ -261,7 +269,11 @@ discoverRouter.post('/add', async (req, res) => {
 
     const lidarr = await getLidarrService(req.user!.id);
     if (!lidarr) {
-      res.status(400).json({ error: 'No active Lidarr connection' });
+      res.status(400).json({ 
+        error: 'Discover requires a Lidarr connection',
+        code: 'LIDARR_REQUIRED',
+        message: 'Connect Lidarr to browse and discover from your library'
+      });
       return;
     }
 
@@ -346,7 +358,11 @@ discoverRouter.get('/profiles', async (req, res) => {
   try {
     const lidarr = await getLidarrService(req.user!.id);
     if (!lidarr) {
-      res.status(400).json({ error: 'No active Lidarr connection' });
+      res.status(400).json({ 
+        error: 'Discover requires a Lidarr connection',
+        code: 'LIDARR_REQUIRED',
+        message: 'Connect Lidarr to browse and discover from your library'
+      });
       return;
     }
 
