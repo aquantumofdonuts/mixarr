@@ -118,14 +118,16 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     const listenbrainzConn = findConnection('listenbrainz');
     const discogsConn = findConnection('discogs');
 
-    if (!lidarrConn) {
-      throw new Error('No active Lidarr connection');
-    }
+    // Lidarr is optional - only needed for library dedup and 'auto' mode
+    let lidarr: LidarrService | null = null;
+    let lidarrCache: LidarrCache | null = null;
 
-    const lidarrConfig = lidarrConn.config as { url: string; apiKey: string };
-    const lidarr = new LidarrService(lidarrConfig);
-    const lidarrCache = new LidarrCache(lidarr);
-    await lidarrCache.refresh();
+    if (lidarrConn) {
+      const lidarrConfig = lidarrConn.config as { url: string; apiKey: string };
+      lidarr = new LidarrService(lidarrConfig);
+      lidarrCache = new LidarrCache(lidarr);
+      await lidarrCache.refresh();
+    }
 
     const musicbrainz = new MusicBrainzService();
     const config = subscription.config as Record<string, any>;
@@ -1787,8 +1789,8 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     for (let i = 0; i < artists.length; i++) {
       const artist = artists[i];
       
-      // Check if already in library
-      if (await lidarrCache.exists({ name: artist.name, mbid: artist.mbid })) {
+      // Check if already in library (skip if no Lidarr connection)
+      if (lidarrCache && await lidarrCache.exists({ name: artist.name, mbid: artist.mbid })) {
         skipped++;
         // Parse sources from comma-separated string
         const sourcesArray = artist.source.includes(',') ? artist.source.split(',') : [artist.source];
@@ -1877,6 +1879,34 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       } else {
         // auto_add - Add directly to Lidarr
         const sourcesArray = artist.source.includes(',') ? artist.source.split(',') : [artist.source];
+
+        // If no Lidarr connection, degrade to queue mode
+        if (!lidarr) {
+          const reviewResult = await findOrCreateReviewItem({
+            userId,
+            artistName: artist.name,
+            mbid,
+            source: `subscription:${subscription.name}`,
+          });
+          await prisma.subscriptionResult.create({
+            data: {
+              subscriptionId,
+              runId: run.id,
+              itemType: 'artist',
+              name: artist.name,
+              mbid,
+              status: reviewResult.created ? 'queued' : 'deduplicated',
+              skipReason: 'no_lidarr_connection',
+              sources: sourcesArray,
+              matchCount: sourcesArray.length,
+            },
+          });
+          if (reviewResult.created) {
+            queued++;
+          }
+          continue;
+        }
+
         try {
           const [qualityProfiles, metadataProfiles, rootFolders] = await Promise.all([
             lidarr.getQualityProfiles(),
