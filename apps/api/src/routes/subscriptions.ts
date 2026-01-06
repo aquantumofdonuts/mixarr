@@ -327,14 +327,41 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       _count: { status: true },
     });
 
+    // Lidarr is optional for preview - just can't check library status
+    const lidarrConn = await prisma.connection.findFirst({
+      where: {
+        OR: [
+          { userId: req.user!.id, type: 'lidarr', isActive: true },
+          { userId: null, type: 'lidarr', isActive: true },
+        ],
+      },
+      orderBy: { userId: 'desc' },
+    });
+
+    let existingArtists: Set<string> | null = null;
+    if (lidarrConn) {
+      try {
+        const lidarrConfig = lidarrConn.config as { url: string; apiKey: string };
+        const lidarr = new LidarrService(lidarrConfig);
+        existingArtists = new Set(
+          (await lidarr.getArtists()).map(a => a.artistName.toLowerCase())
+        );
+      } catch {
+        // Lidarr might be unreachable - continue without library status
+        existingArtists = null;
+      }
+    }
+
     // Fetch artist images from Deezer
     const artistNames = results.map(r => r.name);
     const imageMap = await fetchDeezerArtistImages(artistNames);
 
-    // Add images to results
+    // Add images and optionally inLibrary to results
     const resultsWithImages = results.map(r => ({
       ...r,
       imageUrl: imageMap.get(r.name),
+      // Only include inLibrary if we have Lidarr data
+      ...(existingArtists && { inLibrary: existingArtists.has(r.name.toLowerCase()) }),
     }));
 
     res.json({
