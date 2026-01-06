@@ -14,6 +14,7 @@ import { SpotifyService } from '../services/spotify.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { createLogger } from '../lib/logger.js';
+import { addLogEntry } from '../routes/logs.js';
 
 const logger = createLogger('ImportWorker');
 
@@ -209,7 +210,35 @@ async function processImport(job: Job<ImportJobData>): Promise<void> {
 
     // Auto mode - add directly to Lidarr
     if (!lidarrConn) {
-      throw new Error('No active Lidarr connection for auto mode');
+      // No Lidarr - degrade to queue mode
+      await addLogEntry('warn', 'import', 'Auto mode degraded to queue - no Lidarr connection', { importSourceId });
+      
+      let queued = 0;
+      let deduplicated = 0;
+      for (const item of items) {
+        const result = await findOrCreateReviewItem({
+          userId,
+          artistName: item.artistName,
+          spotifyId: item.spotifyId,
+          albumName: item.albumName,
+          releaseYear: item.releaseYear,
+          source: `import-${importSource.type}`,
+        });
+        if (result.created) {
+          queued++;
+        } else {
+          deduplicated++;
+        }
+      }
+      
+      // Update import source last run
+      await prisma.importSource.update({
+        where: { id: importSourceId },
+        data: { lastRun: new Date() },
+      });
+      
+      await job.updateProgress({ phase: 'complete', queued, deduplicated, message: 'Degraded to queue mode (no Lidarr)' });
+      return;
     }
 
     const lidarrConfig = lidarrConn.config as { url: string; apiKey: string };
