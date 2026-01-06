@@ -5,7 +5,7 @@ import { Button, Card, CardContent, Input, Modal, ModalFooter, useToast, Badge, 
 import { PageHeader } from '@/components/layout/page-header';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { useSubscriptions, usePresets, useRunSubscription, useDeleteSubscription, useToggleSubscription, queryKeys } from '@/lib/hooks';
+import { useSubscriptions, usePresets, useRunSubscription, useDeleteSubscription, useToggleSubscription, useHasLidarr, queryKeys } from '@/lib/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Play, Pause, Trash2, Edit, Clock, TrendingUp, Music2, Globe, Tag, Eye, Sparkles, ChevronRight, Brain, Headphones, Disc, ShoppingBag, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
@@ -128,10 +128,10 @@ const REQUIRED_FIELDS: Record<string, { field: string; label: string }[]> = {
   deezer_playlist: [{ field: 'playlistId', label: 'Playlist ID' }],
 };
 
-const resultHandlingOptions = [
+const getResultHandlingOptions = (hasLidarr: boolean) => [
   { value: 'preview', label: 'Preview only (store results, no action)' },
   { value: 'queue', label: 'Add to review queue' },
-  { value: 'auto', label: 'Auto-add to Lidarr' },
+  { value: 'auto', label: 'Auto-add to Lidarr', disabled: !hasLidarr },
 ];
 
 export default function SubscriptionsPage() {
@@ -140,6 +140,10 @@ export default function SubscriptionsPage() {
   
   // React Query hooks for data fetching with caching
   const { data: subscriptions = [], isLoading } = useSubscriptions();
+  const { data: hasLidarr = true } = useHasLidarr();
+  
+  // Compute result handling options based on Lidarr status
+  const resultHandlingOptions = getResultHandlingOptions(hasLidarr);
   const { data: presets = [] } = usePresets();
   const runMutation = useRunSubscription();
   const deleteMutation = useDeleteSubscription();
@@ -708,6 +712,11 @@ export default function SubscriptionsPage() {
                 {form.resultHandling === 'queue' && 'Results are added to review queue for manual approval'}
                 {form.resultHandling === 'auto' && 'Results are automatically added to Lidarr'}
               </p>
+              {!hasLidarr && form.resultHandling === 'auto' && (
+                <p className="text-xs text-amber-500 mt-1">
+                  Auto-add requires a Lidarr connection. Results will be queued instead.
+                </p>
+              )}
             </div>
 
             <div>
