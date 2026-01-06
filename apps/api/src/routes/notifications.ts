@@ -15,6 +15,9 @@ import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { parseIntParam } from '../utils/params.js';
 import { NotificationEvent } from '../services/notifications.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('NotificationsRoute');
 
 const router = Router();
 
@@ -57,7 +60,7 @@ router.get('/channels', requireAuth, async (req: Request, res: Response) => {
 
     res.json(channels);
   } catch (error) {
-    console.error('Failed to fetch notification channels:', error);
+    logger.error('Failed to fetch notification channels', { error });
     res.status(500).json({ error: 'Failed to fetch notification channels' });
   }
 });
@@ -113,7 +116,7 @@ router.post('/channels', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation failed', details: error.errors });
     }
-    console.error('Failed to create notification channel:', error);
+    logger.error('Failed to create notification channel', { error });
     res.status(500).json({ error: 'Failed to create notification channel' });
   }
 });
@@ -174,7 +177,7 @@ router.put('/channels/:id', requireAuth, async (req: Request, res: Response) => 
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation failed', details: error.errors });
     }
-    console.error('Failed to update notification channel:', error);
+    logger.error('Failed to update notification channel', { error });
     res.status(500).json({ error: 'Failed to update notification channel' });
   }
 });
@@ -205,7 +208,7 @@ router.delete('/channels/:id', requireAuth, async (req: Request, res: Response) 
 
     res.status(204).send();
   } catch (error) {
-    console.error('Failed to delete notification channel:', error);
+    logger.error('Failed to delete notification channel', { error });
     res.status(500).json({ error: 'Failed to delete notification channel' });
   }
 });
@@ -235,7 +238,7 @@ router.post('/channels/:id/test', requireAuth, async (req: Request, res: Respons
 
     res.json({ success: true, message: 'Test notification sent' });
   } catch (error) {
-    console.error('Failed to send test notification:', error);
+    logger.error('Failed to send test notification', { error });
     res.status(500).json({ 
       error: 'Failed to send test notification',
       details: error instanceof Error ? error.message : 'Unknown error',

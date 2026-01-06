@@ -7,6 +7,9 @@ import { LastfmService } from '../services/lastfm.js';
 import { fetchDeezerArtistImage, getDeezerChartArtists, getDeezerGenres, getDeezerGenreArtists } from '../services/deezer.js';
 import { addLogEntry } from './logs.js';
 import { notificationService } from '../services/notifications.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('DiscoverRoute');
 
 export const discoverRouter = Router();
 
@@ -317,7 +320,7 @@ discoverRouter.post('/add', async (req, res) => {
     res.json({ success: true, artist: result, refreshTriggered: !!refreshCommand });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to add artist';
-    console.error('Discover add error:', errorMessage, error);
+    logger.error('Discover add error', { errorMessage, error });
     
     // Log the error
     await addLogEntry('error', 'discover', `Failed to add artist "${req.body.artistName}"`, {

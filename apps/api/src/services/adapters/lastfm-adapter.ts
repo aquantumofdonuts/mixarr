@@ -2,6 +2,9 @@
 
 import type { LastfmService } from '../lastfm.js';
 import type { NormalizedArtistMetadata } from '../metadata-enrichment.types.js';
+import { createLogger } from '../../lib/logger.js';
+
+const logger = createLogger('LastfmAdapter');
 
 /**
  * Adapter to fetch and normalize artist metadata from Last.fm
@@ -30,7 +33,7 @@ export class LastfmMetadataAdapter {
         fetchedAt: new Date(),
       };
     } catch (error) {
-      console.error(`[LastfmAdapter] Error fetching metadata for "${artistName}":`, error);
+      logger.error(`Error fetching metadata for "${artistName}"`, { error });
       return {
         source: 'lastfm',
         fetchedAt: new Date(),

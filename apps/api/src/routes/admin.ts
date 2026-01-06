@@ -5,6 +5,9 @@ import { validateBody } from '../middleware/validate.js';
 import { createUserSchema, updateUserSchema } from '../schemas/user.js';
 import { parseIntParam } from '../utils/params.js';
 import bcrypt from 'bcryptjs';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('AdminRoute');
 
 export const adminRouter = Router();
 
@@ -39,7 +42,7 @@ adminRouter.get('/users', async (_req, res) => {
 
     res.json({ users });
   } catch (error) {
-    console.error('Failed to fetch users:', error);
+    logger.error('Failed to fetch users', { error });
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
@@ -81,7 +84,7 @@ adminRouter.get('/users/:id', async (req, res) => {
 
     res.json({ user });
   } catch (error) {
-    console.error('Failed to fetch user:', error);
+    logger.error('Failed to fetch user', { error });
     res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
@@ -131,7 +134,7 @@ adminRouter.post('/users', validateBody(createUserSchema), async (req, res) => {
 
     res.json({ success: true, user });
   } catch (error) {
-    console.error('Failed to create user:', error);
+    logger.error('Failed to create user', { error });
     res.status(500).json({ error: 'Failed to create user' });
   }
 });
@@ -194,7 +197,7 @@ adminRouter.put('/users/:id', validateBody(updateUserSchema), async (req, res) =
 
     res.json({ success: true, user });
   } catch (error) {
-    console.error('Failed to update user:', error);
+    logger.error('Failed to update user', { error });
     res.status(500).json({ error: 'Failed to update user' });
   }
 });
@@ -227,7 +230,7 @@ adminRouter.delete('/users/:id', async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    console.error('Failed to delete user:', error);
+    logger.error('Failed to delete user', { error });
     res.status(500).json({ error: 'Failed to delete user' });
   }
 });

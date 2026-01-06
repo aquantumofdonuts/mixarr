@@ -5,6 +5,9 @@
  */
 
 import { rateLimit } from './rate-limiter.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('MusicBrainz');
 
 interface MusicBrainzArtist {
   id: string;
@@ -221,7 +224,7 @@ export class MusicBrainzService {
         return sorted[0];
       }
       // Log when we reject a high-score match due to name mismatch
-      console.log(`MusicBrainz: Rejected high-score match "${sorted[0].name}" (score ${sorted[0].score}) for query "${name}" - insufficient word overlap`);
+      logger.debug(`Rejected high-score match "${sorted[0].name}" (score ${sorted[0].score}) for query "${name}" - insufficient word overlap`);
     }
 
     // Priority 4: Name contains the full search term (for "Artist Name" matching "Artist Name feat. X")
@@ -239,7 +242,7 @@ export class MusicBrainzService {
     }
 
     // No confident match found - return null rather than a wrong artist
-    console.log(`MusicBrainz: No confident match for "${name}". Top result was "${sorted[0].name}" with score ${sorted[0].score}`);
+    logger.debug(`No confident match for "${name}". Top result was "${sorted[0].name}" with score ${sorted[0].score}`);
     return null;
   }
 

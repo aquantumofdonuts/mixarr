@@ -2,6 +2,9 @@
 
 import { searchDeezerArtists } from '../deezer.js';
 import type { NormalizedArtistMetadata } from '../metadata-enrichment.types.js';
+import { createLogger } from '../../lib/logger.js';
+
+const logger = createLogger('DeezerAdapter');
 
 /**
  * Adapter to fetch and normalize artist metadata from Deezer
@@ -39,7 +42,7 @@ export class DeezerMetadataAdapter {
         fetchedAt: new Date(),
       };
     } catch (error) {
-      console.error(`[DeezerAdapter] Error fetching metadata for "${artistName}":`, error);
+      logger.error(`Error fetching metadata for "${artistName}"`, { error });
       return {
         source: 'deezer',
         fetchedAt: new Date(),

@@ -9,6 +9,9 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import prisma from '../lib/db.js';
 import { AIStrategy } from '@prisma/client';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('AI');
 
 export interface AIRecommendation {
   name: string;
@@ -93,7 +96,7 @@ export class AIService {
         );
         allRecommendations.push(...openaiRecs);
       } catch (error) {
-        console.error('OpenAI recommendations failed:', error);
+        logger.error('OpenAI recommendations failed', { error });
       }
     }
 
@@ -106,7 +109,7 @@ export class AIService {
         );
         allRecommendations.push(...anthropicRecs);
       } catch (error) {
-        console.error('Anthropic recommendations failed:', error);
+        logger.error('Anthropic recommendations failed', { error });
       }
     }
 
@@ -168,7 +171,7 @@ Return at least 5 unique artists total, maximum 10.`;
         sourceArtist: artistNames[0],
       }));
     } catch (error) {
-      console.error('OpenAI API error:', error);
+      logger.error('OpenAI API error', { error });
       return [];
     }
   }
@@ -213,7 +216,7 @@ Return at least 5 unique artists total, maximum 10.`;
         sourceArtist: artistNames[0],
       }));
     } catch (error) {
-      console.error('Anthropic API error:', error);
+      logger.error('Anthropic API error', { error });
       return [];
     }
   }
@@ -301,7 +304,7 @@ Return ONLY a JSON array of artist names, nothing else. Format:
         const errorMsg = error?.code === 'EAI_AGAIN' || error?.cause?.code === 'EAI_AGAIN'
           ? 'OpenAI: DNS resolution failed (network issue)'
           : `OpenAI: ${error?.message || 'Unknown error'}`;
-        console.error('[AI Search] OpenAI error:', error);
+        logger.error('AI Search OpenAI error', { error });
         errors.push(errorMsg);
       }
     }
@@ -325,7 +328,7 @@ Return ONLY a JSON array of artist names, nothing else. Format:
         const errorMsg = error?.code === 'EAI_AGAIN' || error?.cause?.code === 'EAI_AGAIN'
           ? 'Anthropic: DNS resolution failed (network issue)'
           : `Anthropic: ${error?.message || 'Unknown error'}`;
-        console.error('[AI Search] Anthropic error:', error);
+        logger.error('AI Search Anthropic error', { error });
         errors.push(errorMsg);
       }
     }
@@ -389,7 +392,7 @@ Return ONLY a JSON array of artist names, nothing else. Format:
         );
         allRecommendations.push(...openaiRecs);
       } catch (error) {
-        console.error('OpenAI recommendations failed:', error);
+        logger.error('OpenAI recommendations failed', { error });
       }
     }
 
@@ -402,7 +405,7 @@ Return ONLY a JSON array of artist names, nothing else. Format:
         );
         allRecommendations.push(...anthropicRecs);
       } catch (error) {
-        console.error('Anthropic recommendations failed:', error);
+        logger.error('Anthropic recommendations failed', { error });
       }
     }
 

@@ -7,6 +7,9 @@
 import { CronJob } from 'cron';
 import prisma from '../lib/db.js';
 import { scheduleSubscriptionJob, scheduleImportJob } from './queue.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('Scheduler');
 
 const scheduledJobs = new Map<number, CronJob>();
 
@@ -14,7 +17,7 @@ const scheduledJobs = new Map<number, CronJob>();
  * Clean up stale "running" jobs that were interrupted by container restart
  */
 async function cleanupStaleJobs(): Promise<void> {
-  console.log('Checking for stale running jobs...');
+  logger.info('Checking for stale running jobs...');
   
   // Find subscription runs stuck in "running" state
   const staleRuns = await prisma.subscriptionRun.updateMany({
@@ -29,7 +32,7 @@ async function cleanupStaleJobs(): Promise<void> {
   });
   
   if (staleRuns.count > 0) {
-    console.log(`Marked ${staleRuns.count} stale subscription runs as failed`);
+    logger.info(`Marked ${staleRuns.count} stale subscription runs as failed`);
     
     // Also update the subscription's lastRunStatus for these
     await prisma.$executeRaw`
@@ -46,7 +49,7 @@ async function cleanupStaleJobs(): Promise<void> {
 }
 
 export async function initializeScheduler(): Promise<void> {
-  console.log('Initializing scheduler...');
+  logger.info('Initializing scheduler...');
   
   // Clean up any jobs stuck in running state from previous container
   await cleanupStaleJobs();
@@ -82,7 +85,7 @@ export async function initializeScheduler(): Promise<void> {
     }
   }
 
-  console.log(`Scheduled ${scheduledJobs.size} jobs`);
+  logger.info(`Scheduled ${scheduledJobs.size} jobs`);
 }
 
 export function addScheduledJob(
@@ -97,7 +100,7 @@ export function addScheduledJob(
     const job = new CronJob(
       cronExpression,
       async () => {
-        console.log(`Running scheduled subscription ${subscriptionId}`);
+        logger.info(`Running scheduled subscription ${subscriptionId}`);
         await scheduleSubscriptionJob(subscriptionId, userId);
         
         // Update next run time
@@ -117,10 +120,10 @@ export function addScheduledJob(
     prisma.subscription.update({
       where: { id: subscriptionId },
       data: { nextRun: job.nextDate().toJSDate() },
-    }).catch(console.error);
+    }).catch((err: Error) => logger.error('Failed to update next run time', { error: err }));
 
   } catch (error) {
-    console.error(`Failed to schedule subscription ${subscriptionId}:`, error);
+    logger.error(`Failed to schedule subscription ${subscriptionId}`, { error });
   }
 }
 
@@ -143,7 +146,7 @@ export function addImportScheduledJob(
     const job = new CronJob(
       cronExpression,
       async () => {
-        console.log(`Running scheduled import ${importSourceId}`);
+        logger.info(`Running scheduled import ${importSourceId}`);
         await scheduleImportJob(importSourceId, userId, resultHandling);
       },
       null,
@@ -154,7 +157,7 @@ export function addImportScheduledJob(
     scheduledJobs.set(key, job);
 
   } catch (error) {
-    console.error(`Failed to schedule import ${importSourceId}:`, error);
+    logger.error(`Failed to schedule import ${importSourceId}`, { error });
   }
 }
 
@@ -200,7 +203,7 @@ export function startDataRetentionJob(): void {
   cleanupJob = new CronJob(
     '0 3 * * *', // Daily at 3 AM UTC
     async () => {
-      console.log('Running data retention cleanup...');
+      logger.info('Running data retention cleanup...');
       try {
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -227,13 +230,14 @@ export function startDataRetentionJob(): void {
           where: { createdAt: { lt: sevenDaysAgo } },
         });
 
-        console.log(`Data retention cleanup completed:
-          - Subscription results: ${deletedResults.count} deleted
-          - Subscription runs: ${deletedRuns.count} deleted
-          - Import sources: ${deletedImportSources.count} deleted
-          - Logs: ${deletedLogs.count} deleted`);
+        logger.info('Data retention cleanup completed', {
+          subscriptionResults: deletedResults.count,
+          subscriptionRuns: deletedRuns.count,
+          importSources: deletedImportSources.count,
+          logs: deletedLogs.count,
+        });
       } catch (error) {
-        console.error('Data retention cleanup failed:', error);
+        logger.error('Data retention cleanup failed', { error });
       }
     },
     null,
@@ -241,5 +245,5 @@ export function startDataRetentionJob(): void {
     'UTC'
   );
 
-  console.log('Data retention cleanup job scheduled (daily at 3 AM UTC)');
+  logger.info('Data retention cleanup job scheduled (daily at 3 AM UTC)');
 }

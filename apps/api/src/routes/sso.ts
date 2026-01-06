@@ -10,6 +10,9 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { SsoProviderService } from '../services/sso-provider.js';
 import prisma from '../lib/db.js';
 import type { SsoProviderType } from '@prisma/client';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('SSORoute');
 
 export const ssoRouter = Router();
 const ssoService = new SsoProviderService(prisma);
@@ -30,7 +33,7 @@ ssoRouter.get('/providers', async (_req, res) => {
     const providers = await ssoService.getAll();
     res.json({ providers });
   } catch (error) {
-    console.error('Failed to fetch SSO providers:', error);
+    logger.error('Failed to fetch SSO providers', { error });
     res.status(500).json({ error: 'Failed to fetch providers' });
   }
 });
@@ -52,7 +55,7 @@ ssoRouter.get('/providers/:type', async (req, res) => {
     
     res.json({ provider });
   } catch (error) {
-    console.error('Failed to fetch SSO provider:', error);
+    logger.error('Failed to fetch SSO provider', { error });
     res.status(500).json({ error: 'Failed to fetch provider' });
   }
 });
@@ -75,7 +78,7 @@ ssoRouter.put('/providers/:type', async (req, res) => {
     const provider = await ssoService.upsert(type, { name, config, isEnabled });
     res.json({ provider });
   } catch (error) {
-    console.error('Failed to save SSO provider:', error);
+    logger.error('Failed to save SSO provider', { error });
     if (error instanceof Error) {
       res.status(400).json({ error: error.message });
     } else {
@@ -100,7 +103,7 @@ ssoRouter.delete('/providers/:type', async (req, res) => {
     await ssoService.delete(type);
     res.json({ success: true });
   } catch (error) {
-    console.error('Failed to delete SSO provider:', error);
+    logger.error('Failed to delete SSO provider', { error });
     res.status(500).json({ error: 'Failed to delete provider' });
   }
 });
@@ -129,7 +132,7 @@ ssoRouter.patch('/providers/:type/toggle', async (req, res) => {
     const provider = await ssoService.toggle(type, isEnabled);
     res.json({ provider });
   } catch (error) {
-    console.error('Failed to toggle SSO provider:', error);
+    logger.error('Failed to toggle SSO provider', { error });
     res.status(500).json({ error: 'Failed to toggle provider' });
   }
 });
@@ -254,7 +257,7 @@ ssoRouter.post('/providers/:type/test', async (req, res) => {
         res.json({ success: true, message: `${type} connection test not yet implemented` });
     }
   } catch (error) {
-    console.error('Failed to test SSO provider:', error);
+    logger.error('Failed to test SSO provider', { error });
     res.status(500).json({ success: false, message: 'Connection test failed' });
   }
 });

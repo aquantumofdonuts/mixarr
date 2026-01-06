@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('LogsRoute');
 
 export const logsRouter = Router();
 
@@ -59,7 +62,7 @@ logsRouter.get('/', async (req, res) => {
       hasMore: offset + logs.length < total,
     });
   } catch (error) {
-    console.error('Failed to fetch logs:', error);
+    logger.error('Failed to fetch logs', { error });
     res.status(500).json({ error: 'Failed to fetch logs' });
   }
 });
@@ -84,7 +87,7 @@ logsRouter.delete('/', requireAdmin, async (req, res) => {
 
     res.json({ success: true, deleted: result.count });
   } catch (error) {
-    console.error('Failed to clear logs:', error);
+    logger.error('Failed to clear logs', { error });
     res.status(500).json({ error: 'Failed to clear logs' });
   }
 });
@@ -106,6 +109,6 @@ export async function addLogEntry(
       },
     });
   } catch (error) {
-    console.error('Failed to add log entry:', error);
+    logger.error('Failed to add log entry', { error });
   }
 }

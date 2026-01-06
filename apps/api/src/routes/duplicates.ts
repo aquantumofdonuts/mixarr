@@ -7,6 +7,9 @@ import {
   ArtistInfo,
   DuplicateScanResult 
 } from '../services/duplicate-detection.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('DuplicatesRoute');
 
 export const duplicatesRouter = Router();
 
@@ -85,7 +88,7 @@ duplicatesRouter.post('/scan', async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    console.error('Duplicate scan error:', error);
+    logger.error('Duplicate scan error', { error });
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Scan failed' 
     });
@@ -129,7 +132,7 @@ duplicatesRouter.get('/', async (req, res) => {
       message: 'No scan results available. Trigger a scan first.',
     });
   } catch (error) {
-    console.error('Get duplicates error:', error);
+    logger.error('Get duplicates error', { error });
     res.status(500).json({ error: 'Failed to get duplicates' });
   }
 });
@@ -175,7 +178,7 @@ duplicatesRouter.post('/:id/dismiss', async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    console.error('Dismiss duplicate error:', error);
+    logger.error('Dismiss duplicate error', { error });
     res.status(500).json({ error: 'Failed to dismiss duplicate' });
   }
 });
@@ -307,7 +310,7 @@ duplicatesRouter.get('/:id/guidance', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Get guidance error:', error);
+    logger.error('Get guidance error', { error });
     res.status(500).json({ error: 'Failed to get guidance' });
   }
 });

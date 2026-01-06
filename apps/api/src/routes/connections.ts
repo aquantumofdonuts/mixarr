@@ -16,6 +16,9 @@ import type { Connection, Prisma } from '@prisma/client';
 import type { Request } from 'express';
 import { validateBody } from '../middleware/validate.js';
 import { createConnectionSchema, updateConnectionSchema, testConnectionSchema } from '../schemas/connection.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('ConnectionsRoute');
 
 export const connectionsRouter = Router();
 
@@ -118,7 +121,7 @@ connectionsRouter.get('/:id/spotify/callback', async (req, res) => {
     const separator = returnPath.includes('?') ? '&' : '?';
     res.redirect(`${baseUrl}${returnPath}${separator}spotify_authorized=${connection.id}`);
   } catch (error) {
-    console.error('Error in Spotify callback:', error);
+    logger.error('Error in Spotify callback', { error });
     const baseUrl = await getBaseUrl().catch(() => 'http://localhost:3010');
     res.redirect(`${baseUrl}/connections?error=token_exchange_failed`);
   }
@@ -200,7 +203,7 @@ connectionsRouter.post('/test', validateBody(testConnectionSchema), async (req, 
         res.status(400).json({ success: false, error: `Unknown connection type: ${type}` });
     }
   } catch (error) {
-    console.error('Connection test error:', error);
+    logger.error('Connection test error', { error });
     res.status(500).json({ 
       success: false, 
       error: error instanceof Error ? error.message : 'Test failed' 
@@ -692,7 +695,7 @@ connectionsRouter.get('/:id/lidarr-options', async (req, res) => {
 
     res.json({ qualityProfiles, rootFolders });
   } catch (error) {
-    console.error('Lidarr options error:', error);
+    logger.error('Lidarr options error', { error });
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to fetch Lidarr options' 
     });
@@ -959,7 +962,7 @@ connectionsRouter.get('/:id/spotify/auth', async (req, res) => {
     
     res.json({ authUrl, redirectUri });
   } catch (error) {
-    console.error('Error getting Spotify auth URL:', error);
+    logger.error('Error getting Spotify auth URL', { error });
     res.status(500).json({ error: 'Failed to get authorization URL' });
   }
 });
@@ -1006,7 +1009,7 @@ connectionsRouter.get('/:id/spotify/status', async (req, res) => {
       needsReauthorization: !isAuthorized || isExpired,
     });
   } catch (error) {
-    console.error('Error checking Spotify status:', error);
+    logger.error('Error checking Spotify status', { error });
     res.status(500).json({ error: 'Failed to check authorization status' });
   }
 });
@@ -1050,7 +1053,7 @@ connectionsRouter.post('/:id/spotify/revoke', async (req, res) => {
 
     res.json({ success: true, message: 'Spotify authorization revoked' });
   } catch (error) {
-    console.error('Error revoking Spotify auth:', error);
+    logger.error('Error revoking Spotify auth', { error });
     res.status(500).json({ error: 'Failed to revoke authorization' });
   }
 });
@@ -1131,7 +1134,7 @@ connectionsRouter.get('/:id/deezer/callback', async (req, res) => {
 
     res.redirect(`${baseUrl}/connections?deezer_authorized=${connection.id}`);
   } catch (error) {
-    console.error('Error in Deezer callback:', error);
+    logger.error('Error in Deezer callback', { error });
     const baseUrl = await getBaseUrl().catch(() => 'http://localhost:3010');
     res.redirect(`${baseUrl}/connections?error=token_exchange_failed`);
   }
@@ -1185,7 +1188,7 @@ connectionsRouter.get('/:id/deezer/auth', async (req, res) => {
     
     res.json({ authUrl, redirectUri });
   } catch (error) {
-    console.error('Error getting Deezer auth URL:', error);
+    logger.error('Error getting Deezer auth URL', { error });
     res.status(500).json({ error: 'Failed to get authorization URL' });
   }
 });
@@ -1225,7 +1228,7 @@ connectionsRouter.get('/:id/deezer/status', async (req, res) => {
       needsReauthorization: !isAuthorized,
     });
   } catch (error) {
-    console.error('Error checking Deezer status:', error);
+    logger.error('Error checking Deezer status', { error });
     res.status(500).json({ error: 'Failed to check authorization status' });
   }
 });
@@ -1268,7 +1271,7 @@ connectionsRouter.post('/:id/deezer/revoke', async (req, res) => {
 
     res.json({ success: true, message: 'Deezer authorization revoked' });
   } catch (error) {
-    console.error('Error revoking Deezer auth:', error);
+    logger.error('Error revoking Deezer auth', { error });
     res.status(500).json({ error: 'Failed to revoke authorization' });
   }
 });
@@ -1310,7 +1313,7 @@ connectionsRouter.get('/:id/deezer/playlists', async (req, res) => {
     const playlists = await service.getAllPlaylists();
     res.json({ playlists });
   } catch (error) {
-    console.error('Error fetching Deezer playlists:', error);
+    logger.error('Error fetching Deezer playlists', { error });
     res.status(500).json({ error: 'Failed to fetch playlists' });
   }
 });
@@ -1393,7 +1396,7 @@ connectionsRouter.get('/:id/tidal/callback', async (req, res) => {
 
     res.redirect(`${baseUrl}/connections?tidal_authorized=${connection.id}`);
   } catch (error) {
-    console.error('Error in TIDAL callback:', error);
+    logger.error('Error in TIDAL callback', { error });
     const baseUrl = await getBaseUrl().catch(() => 'http://localhost:3010');
     res.redirect(`${baseUrl}/connections?error=token_exchange_failed`);
   }
@@ -1451,7 +1454,7 @@ connectionsRouter.get('/:id/tidal/auth', async (req, res) => {
     
     res.json({ authUrl, redirectUri });
   } catch (error) {
-    console.error('Error getting TIDAL auth URL:', error);
+    logger.error('Error getting TIDAL auth URL', { error });
     res.status(500).json({ error: 'Failed to get authorization URL' });
   }
 });
@@ -1498,7 +1501,7 @@ connectionsRouter.get('/:id/tidal/status', async (req, res) => {
       needsReauthorization: !isAuthorized || isExpired,
     });
   } catch (error) {
-    console.error('Error checking TIDAL status:', error);
+    logger.error('Error checking TIDAL status', { error });
     res.status(500).json({ error: 'Failed to check authorization status' });
   }
 });
@@ -1541,7 +1544,7 @@ connectionsRouter.post('/:id/tidal/revoke', async (req, res) => {
 
     res.json({ success: true, message: 'TIDAL authorization revoked' });
   } catch (error) {
-    console.error('Error revoking TIDAL auth:', error);
+    logger.error('Error revoking TIDAL auth', { error });
     res.status(500).json({ error: 'Failed to revoke authorization' });
   }
 });
@@ -1589,7 +1592,7 @@ connectionsRouter.get('/:id/tidal/playlists', async (req, res) => {
     const playlists = await service.getPlaylists();
     res.json({ playlists });
   } catch (error) {
-    console.error('Error fetching TIDAL playlists:', error);
+    logger.error('Error fetching TIDAL playlists', { error });
     res.status(500).json({ error: 'Failed to fetch playlists' });
   }
 });

@@ -7,6 +7,9 @@
 import { Queue, Job, QueueEvents } from 'bullmq';
 import { createRedisConnection } from '../lib/redis.js';
 import type { Server as SocketIOServer } from 'socket.io';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('JobQueue');
 
 // Queue names
 export const QUEUE_NAMES = {
@@ -131,7 +134,7 @@ export async function scheduleSubscriptionJob(
   if (existingJob) {
     const state = await existingJob.getState();
     if (state === 'active' || state === 'waiting' || state === 'delayed') {
-      console.log(`Subscription ${subscriptionId} already has an active job, skipping`);
+      logger.debug(`Subscription ${subscriptionId} already has an active job, skipping`);
       return existingJob;
     }
     // Remove completed/failed job to allow new one
@@ -161,7 +164,7 @@ export async function scheduleImportJob(
   if (existingJob) {
     const state = await existingJob.getState();
     if (state === 'active' || state === 'waiting' || state === 'delayed') {
-      console.log(`Import source ${importSourceId} already has an active job, skipping`);
+      logger.debug(`Import source ${importSourceId} already has an active job, skipping`);
       return existingJob;
     }
     await existingJob.remove();

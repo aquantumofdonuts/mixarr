@@ -13,6 +13,9 @@ import { LidarrService, LidarrCache } from '../services/lidarr.js';
 import { SpotifyService } from '../services/spotify.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('ImportWorker');
 
 interface ImportItem {
   artistName: string;
@@ -287,9 +290,9 @@ export const importWorker = new Worker<ImportJobData>(
 );
 
 importWorker.on('completed', (job) => {
-  console.log(`Import job ${job.id} completed`);
+  logger.info(`Import job ${job.id} completed`);
 });
 
 importWorker.on('failed', (job, error) => {
-  console.error(`Import job ${job?.id} failed:`, error);
+  logger.error(`Import job ${job?.id} failed`, { error });
 });

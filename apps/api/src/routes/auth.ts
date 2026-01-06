@@ -10,6 +10,9 @@ import { createGoogleStrategy } from '../auth/strategies/google.js';
 import { createLdapStrategy } from '../auth/strategies/ldap.js';
 import { createSamlStrategy } from '../auth/strategies/saml.js';
 import { PlexAuthService } from '../auth/strategies/plex.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('AuthRoute');
 
 export const authRouter = Router();
 const ssoService = new SsoProviderService(prisma);
@@ -79,7 +82,7 @@ authRouter.get('/sso/enabled', async (_req, res) => {
     const providers = await ssoService.getEnabled();
     res.json({ providers });
   } catch (error) {
-    console.error('Failed to fetch enabled SSO providers:', error);
+    logger.error('Failed to fetch enabled SSO providers', { error });
     res.status(500).json({ error: 'Failed to fetch providers' });
   }
 });
@@ -111,7 +114,7 @@ authRouter.get('/sso/google', async (req, res, next) => {
 
     passport.authenticate('google-sso', { scope: ['profile', 'email'] })(req, res, next);
   } catch (error) {
-    console.error('Google OAuth initiation error:', error);
+    logger.error('Google OAuth initiation error', { error });
     res.status(500).json({ error: 'Failed to initiate Google authentication' });
   }
 });
@@ -120,7 +123,7 @@ authRouter.get('/sso/google', async (req, res, next) => {
 authRouter.get('/sso/google/callback', (req, res, next) => {
   passport.authenticate('google-sso', (err: Error | null, user: Express.User | false, info: { message?: string }) => {
     if (err) {
-      console.error('Google OAuth error:', err);
+      logger.error('Google OAuth error', { error: err });
       return res.redirect('/login?error=auth_failed');
     }
     if (!user) {
@@ -162,7 +165,7 @@ authRouter.post('/sso/ldap', loginLimiter, async (req, res, next) => {
 
     passport.authenticate('ldap-sso', (err: Error | null, user: Express.User | false, info: { message?: string }) => {
       if (err) {
-        console.error('LDAP auth error:', err);
+        logger.error('LDAP auth error', { error: err });
         return res.status(500).json({ error: 'Authentication failed' });
       }
       if (!user) {
@@ -176,7 +179,7 @@ authRouter.post('/sso/ldap', loginLimiter, async (req, res, next) => {
       });
     })(req, res, next);
   } catch (error) {
-    console.error('LDAP login error:', error);
+    logger.error('LDAP login error', { error });
     res.status(500).json({ error: 'LDAP authentication failed' });
   }
 });
@@ -220,7 +223,7 @@ authRouter.get('/sso/saml', async (req, res, next) => {
 authRouter.post('/sso/saml/callback', (req, res, next) => {
   passport.authenticate('saml-sso', (err: Error | null, user: Express.User | false, info: { message?: string }) => {
     if (err) {
-      console.error('SAML auth error:', err);
+      logger.error('SAML auth error', { error: err });
       return res.redirect('/login?error=auth_failed');
     }
     if (!user) {
@@ -268,7 +271,7 @@ authRouter.get('/sso/plex', async (req, res) => {
     
     res.redirect(authUrl);
   } catch (error) {
-    console.error('Plex auth error:', error);
+    logger.error('Plex auth error', { error });
     res.redirect('/login?error=plex_init_failed');
   }
 });
@@ -322,7 +325,7 @@ authRouter.get('/sso/plex/callback', async (req, res) => {
       return res.redirect('/');
     });
   } catch (error) {
-    console.error('Plex callback error:', error);
+    logger.error('Plex callback error', { error });
     res.redirect('/login?error=plex_callback_failed');
   }
 });
@@ -358,7 +361,7 @@ authRouter.post('/setup', setupLimiter, async (req, res) => {
     // Auto-login the new admin user so they can continue the setup wizard
     req.logIn(user, (loginErr) => {
       if (loginErr) {
-        console.error('Auto-login after setup failed:', loginErr);
+        logger.error('Auto-login after setup failed', { error: loginErr });
         // Still return success - user can manually login
       }
       
@@ -373,7 +376,7 @@ authRouter.post('/setup', setupLimiter, async (req, res) => {
       });
     });
   } catch (error) {
-    console.error('Setup error:', error);
+    logger.error('Setup error', { error });
     res.status(500).json({ error: 'Setup failed' });
   }
 });
@@ -565,7 +568,7 @@ authRouter.get('/users/:userId/identities', requireAuth, requireAdmin, async (re
 
     res.json({ identities });
   } catch (error) {
-    console.error('Failed to fetch user identities:', error);
+    logger.error('Failed to fetch user identities', { error });
     res.status(500).json({ error: 'Failed to fetch identities' });
   }
 });
@@ -597,7 +600,7 @@ authRouter.delete('/users/:userId/identities/:identityId', requireAuth, requireA
 
     res.json({ success: true });
   } catch (error) {
-    console.error('Failed to delete identity:', error);
+    logger.error('Failed to delete identity', { error });
     res.status(500).json({ error: 'Failed to delete identity' });
   }
 });

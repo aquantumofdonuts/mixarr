@@ -8,6 +8,9 @@ import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { aiService } from '../services/ai.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('AIRoute');
 
 export const aiRouter = Router();
 
@@ -46,7 +49,7 @@ aiRouter.get('/settings', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Failed to get AI settings:', error);
+    logger.error('Failed to get AI settings', { error });
     res.status(500).json({ error: 'Failed to get AI settings' });
   }
 });
@@ -121,7 +124,7 @@ aiRouter.put('/settings', requireAdmin, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Failed to update AI settings:', error);
+    logger.error('Failed to update AI settings', { error });
     res.status(500).json({ error: 'Failed to update AI settings' });
   }
 });
@@ -159,7 +162,7 @@ aiRouter.post('/test', requireAdmin, async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('AI test failed:', error);
+    logger.error('AI test failed', { error });
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'AI test failed' 
     });
@@ -183,7 +186,7 @@ aiRouter.post('/recommendations', async (req, res) => {
 
     res.json({ recommendations });
   } catch (error) {
-    console.error('Failed to get AI recommendations:', error);
+    logger.error('Failed to get AI recommendations', { error });
     res.status(500).json({ error: 'Failed to get recommendations' });
   }
 });
@@ -231,7 +234,7 @@ aiRouter.get('/preferences', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Failed to get AI preferences:', error);
+    logger.error('Failed to get AI preferences', { error });
     res.status(500).json({ error: 'Failed to get AI preferences' });
   }
 });
@@ -289,7 +292,7 @@ aiRouter.put('/preferences', async (req, res) => {
 
     res.json({ success: true, preferences: newPrefs });
   } catch (error) {
-    console.error('Failed to update AI preferences:', error);
+    logger.error('Failed to update AI preferences', { error });
     res.status(500).json({ error: 'Failed to update AI preferences' });
   }
 });

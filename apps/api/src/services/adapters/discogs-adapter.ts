@@ -2,6 +2,9 @@
 
 import type { NormalizedArtistMetadata } from '../metadata-enrichment.types.js';
 import { rateLimit } from '../rate-limiter.js';
+import { createLogger } from '../../lib/logger.js';
+
+const logger = createLogger('DiscogsAdapter');
 
 const DISCOGS_API_BASE = 'https://api.discogs.com';
 const USER_AGENT = 'Mixarr/1.0 +https://github.com/mixarr';
@@ -75,7 +78,7 @@ export class DiscogsMetadataAdapter {
         fetchedAt: new Date(),
       };
     } catch (error) {
-      console.error(`[DiscogsAdapter] Error fetching metadata for "${artistName}":`, error);
+      logger.error(`Error fetching metadata for "${artistName}"`, { error });
       return {
         source: 'discogs',
         fetchedAt: new Date(),

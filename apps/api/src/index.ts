@@ -34,7 +34,8 @@ import './jobs/import-worker.js';
 // Validate required environment variables in production
 const sessionSecret = process.env.SESSION_SECRET;
 if (process.env.NODE_ENV === 'production' && (!sessionSecret || sessionSecret === 'dev-secret-change-in-production')) {
-  console.error('FATAL: SESSION_SECRET must be set to a secure value in production');
+  const startupLogger = createLogger('Startup');
+  startupLogger.error('FATAL: SESSION_SECRET must be set to a secure value in production');
   process.exit(1);
 }
 

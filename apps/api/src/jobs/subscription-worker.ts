@@ -25,6 +25,9 @@ import { deduplicateResults } from '../utils/deduplication.js';
 import { isSpotifyConfig, isLastFMConfig, isDeezerConfig, isTidalConfig, isListenBrainzConfig, isTautulliConfig, isJellyfinConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('SubscriptionWorker');
 
 interface ArtistToAdd {
   name: string;
@@ -1288,7 +1291,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         const similarUsers = await listenbrainz.getSimilarUsers();
         
         if (similarUsers.length === 0) {
-          console.warn(`No similar users found for ${username}. Listen to more music to get similar user recommendations.`);
+          logger.warn(`No similar users found for ${username}. Listen to more music to get similar user recommendations.`);
         }
         
         // Collect top artists from similar users
@@ -1314,7 +1317,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
               }
             }
           } catch (error) {
-            console.warn(`Failed to fetch top artists for similar user ${similarUser.user_name}:`, error);
+            logger.warn(`Failed to fetch top artists for similar user ${similarUser.user_name}`, { error });
           }
         }
         
@@ -1351,7 +1354,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         const result = await listenbrainz.getRecommendations(recType, limit);
         
         if (result.mbids.length === 0) {
-          console.warn(`No recommendations available for ${username}. ListenBrainz needs more listening history to generate recommendations.`);
+          logger.warn(`No recommendations available for ${username}. ListenBrainz needs more listening history to generate recommendations.`);
         }
         
         // Recommendations return recording MBIDs, we need to look up artist info
@@ -1432,7 +1435,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         const result = await listenbrainz.getLatestCreatedForYouPlaylist('weekly-jams');
         
         if (!result) {
-          console.warn(`No Weekly Jams playlist found for ${username}. Make sure you have enough listening history.`);
+          logger.warn(`No Weekly Jams playlist found for ${username}. Make sure you have enough listening history.`);
           break;
         }
 
@@ -1474,7 +1477,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         const result = await listenbrainz.getLatestCreatedForYouPlaylist('weekly-exploration');
         
         if (!result) {
-          console.warn(`No Weekly Exploration playlist found for ${username}. Make sure you have enough listening history.`);
+          logger.warn(`No Weekly Exploration playlist found for ${username}. Make sure you have enough listening history.`);
           break;
         }
 
@@ -2093,9 +2096,9 @@ export const subscriptionWorker = new Worker<SubscriptionJobData>(
 );
 
 subscriptionWorker.on('completed', (job) => {
-  console.log(`Subscription job ${job.id} completed`);
+  logger.info(`Subscription job ${job.id} completed`);
 });
 
 subscriptionWorker.on('failed', (job, error) => {
-  console.error(`Subscription job ${job?.id} failed:`, error);
+  logger.error(`Subscription job ${job?.id} failed`, { error });
 });

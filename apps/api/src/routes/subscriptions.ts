@@ -11,6 +11,9 @@ import { MusicBrainzService } from '../services/musicbrainz.js';
 import { notificationService } from '../services/notifications.js';
 import type { Subscription, ConnectionType } from '@prisma/client';
 import type { Request } from 'express';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('SubscriptionsRoute');
 
 export const subscriptionsRouter = Router();
 
@@ -113,7 +116,7 @@ subscriptionsRouter.post('/', validateBody(createSubscriptionSchema), async (req
 
     res.json({ success: true, subscription });
   } catch (error) {
-    console.error('POST /subscriptions error:', error);
+    logger.error('POST /subscriptions error', { error });
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to create subscription' 
     });
@@ -158,7 +161,7 @@ subscriptionsRouter.put('/:id', validateBody(updateSubscriptionSchema), async (r
 
     res.json({ success: true, subscription });
   } catch (error) {
-    console.error('PUT /subscriptions/:id error:', error);
+    logger.error('PUT /subscriptions/:id error', { error });
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to update subscription' 
     });
@@ -412,7 +415,7 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
       const searchName = result.itemType === 'album' && result.artistName 
         ? result.artistName 
         : result.name;
-      console.log(`[Approval] No MBID stored, searching MusicBrainz for: "${searchName}"`);
+      logger.debug(`No MBID stored, searching MusicBrainz for: "${searchName}"`);
       const musicbrainz = new MusicBrainzService();
       mbid = await musicbrainz.getMbidFromSpotifyArtist(searchName) || null;
     }
@@ -507,7 +510,7 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
       res.status(500).json({ error: `Failed to add to Lidarr: ${errorMessage}` });
     }
   } catch (error) {
-    console.error('Approve error:', error);
+    logger.error('Approve error', { error });
     res.status(500).json({ error: 'Failed to approve result' });
   }
 });
