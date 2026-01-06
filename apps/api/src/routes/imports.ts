@@ -1036,16 +1036,24 @@ importsRouter.get('/preview/lastfm/:connectionId', async (req, res) => {
 });
 
 // Import selected artists from preview
+// Modes: 'auto' (default) - add to Lidarr, 'queue' - add to review queue, 'preview' - just return artists
 importsRouter.post('/preview/import', async (req, res) => {
   try {
-    const { artistNames } = req.body;
+    const { artistNames, mode = 'auto' } = req.body;
 
     if (!Array.isArray(artistNames) || artistNames.length === 0) {
       res.status(400).json({ error: 'No artists selected' });
       return;
     }
 
-    // Get Lidarr connection
+    // Validate mode
+    const validModes = ['preview', 'queue', 'auto'];
+    if (!validModes.includes(mode)) {
+      res.status(400).json({ error: `Invalid mode. Must be one of: ${validModes.join(', ')}` });
+      return;
+    }
+
+    // Get Lidarr connection (only required for auto mode)
     const lidarrConnection = await prisma.connection.findFirst({
       where: {
         type: 'lidarr',
@@ -1054,12 +1062,83 @@ importsRouter.post('/preview/import', async (req, res) => {
       },
     });
 
-    if (!lidarrConnection) {
-      res.status(400).json({ error: 'No active Lidarr connection found' });
+    // Only require Lidarr for auto mode
+    if (mode === 'auto' && !lidarrConnection) {
+      res.status(400).json({ 
+        error: 'Auto mode requires a Lidarr connection',
+        code: 'LIDARR_REQUIRED'
+      });
       return;
     }
 
-    const config = lidarrConnection.config as {
+    // Handle preview mode - just return the artists without any action
+    if (mode === 'preview') {
+      res.json({
+        success: true,
+        mode: 'preview',
+        message: `Preview of ${artistNames.length} artist(s)`,
+        artists: artistNames.map(name => ({ name, status: 'preview' })),
+      });
+      return;
+    }
+
+    // Handle queue mode - add to review queue without Lidarr
+    if (mode === 'queue') {
+      const addedArtists: string[] = [];
+      const skippedArtists: string[] = [];
+
+      // Check which artists are already in review queue
+      const existingReviewItems = await prisma.reviewItem.findMany({
+        where: {
+          userId: req.user!.id,
+          artistName: { in: artistNames },
+          status: 'pending',
+        },
+        select: { artistName: true },
+      });
+      const existingInQueue = new Set(existingReviewItems.map(r => r.artistName.toLowerCase()));
+
+      // Add to review queue
+      for (const artistName of artistNames) {
+        if (existingInQueue.has(artistName.toLowerCase())) {
+          skippedArtists.push(artistName);
+          continue;
+        }
+
+        await prisma.reviewItem.create({
+          data: {
+            userId: req.user!.id,
+            artistName,
+            source: 'manual-import',
+            status: 'pending',
+          },
+        });
+        addedArtists.push(artistName);
+      }
+
+      await addLogEntry(
+        'info',
+        'import',
+        `Added ${addedArtists.length} artist(s) to review queue`,
+        { addedCount: addedArtists.length, skippedCount: skippedArtists.length, userId: req.user!.id }
+      );
+
+      res.json({
+        success: true,
+        mode: 'queue',
+        message: `Added ${addedArtists.length} artist(s) to review queue${skippedArtists.length > 0 ? `, ${skippedArtists.length} already queued` : ''}`,
+        added: addedArtists.length,
+        skipped: skippedArtists.length,
+        results: [
+          ...addedArtists.map(name => ({ name, success: true, message: 'Added to review queue' })),
+          ...skippedArtists.map(name => ({ name, success: false, message: 'Already in review queue' })),
+        ],
+      });
+      return;
+    }
+
+    // Auto mode - add directly to Lidarr (lidarrConnection is guaranteed at this point)
+    const config = lidarrConnection!.config as {
       url: string;
       apiKey: string;
       qualityProfileId?: number;
@@ -1104,6 +1183,7 @@ importsRouter.post('/preview/import', async (req, res) => {
 
     res.json({
       success: successCount > 0,
+      mode: 'auto',
       message: `Added ${successCount} artist(s), ${failCount} failed`,
       results,
     });
