@@ -1,12 +1,21 @@
 /**
  * Structured Logger
  * 
- * A lightweight logging system with log levels.
+ * JSON logging for production, pretty logging for development.
  * In production, only warn and error are logged by default.
  * Set LOG_LEVEL env var to override.
  */
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+interface LogEntry {
+  timestamp: string;
+  level: LogLevel;
+  context: string;
+  message: string;
+  correlationId?: string;
+  [key: string]: unknown;
+}
 
 const LOG_LEVELS: Record<LogLevel, number> = {
   debug: 0,
@@ -15,28 +24,42 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   error: 3,
 };
 
+const isDev = process.env.NODE_ENV !== 'production';
+
 function getLogLevel(): LogLevel {
   const envLevel = process.env.LOG_LEVEL?.toLowerCase() as LogLevel;
   if (envLevel && LOG_LEVELS[envLevel] !== undefined) {
     return envLevel;
   }
   // Default: info in development, warn in production
-  return process.env.NODE_ENV === 'production' ? 'warn' : 'info';
+  return isDev ? 'info' : 'warn';
 }
 
 function shouldLog(level: LogLevel): boolean {
   return LOG_LEVELS[level] >= LOG_LEVELS[getLogLevel()];
 }
 
-function formatMessage(level: LogLevel, context: string, message: string, data?: unknown): string {
-  const timestamp = new Date().toISOString();
-  const prefix = `[${timestamp}] [${level.toUpperCase()}] [${context}]`;
-  
-  if (data !== undefined) {
-    const dataStr = typeof data === 'object' ? JSON.stringify(data) : String(data);
-    return `${prefix} ${message} ${dataStr}`;
+function formatLogEntry(entry: LogEntry): string {
+  if (isDev) {
+    // Pretty format for development
+    const { timestamp, level, context, message, ...rest } = entry;
+    const meta = Object.keys(rest).length > 0 ? ` ${JSON.stringify(rest)}` : '';
+    return `[${timestamp}] [${level.toUpperCase()}] [${context}] ${message}${meta}`;
   }
-  return `${prefix} ${message}`;
+  // JSON format for production
+  return JSON.stringify(entry);
+}
+
+function outputLog(level: LogLevel, formatted: string): void {
+  if (level === 'error') {
+    console.error(formatted);
+  } else if (level === 'warn') {
+    console.warn(formatted);
+  } else if (level === 'debug') {
+    console.debug(formatted);
+  } else {
+    console.log(formatted);
+  }
 }
 
 class Logger {
@@ -46,28 +69,42 @@ class Logger {
     this.context = context;
   }
 
-  debug(message: string, data?: unknown): void {
-    if (shouldLog('debug')) {
-      console.debug(formatMessage('debug', this.context, message, data));
+  private log(level: LogLevel, message: string, data?: unknown): void {
+    if (!shouldLog(level)) return;
+
+    const entry: LogEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      context: this.context,
+      message,
+    };
+
+    // Merge in additional data
+    if (data !== undefined) {
+      if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+        Object.assign(entry, data);
+      } else {
+        entry.data = data;
+      }
     }
+
+    outputLog(level, formatLogEntry(entry));
+  }
+
+  debug(message: string, data?: unknown): void {
+    this.log('debug', message, data);
   }
 
   info(message: string, data?: unknown): void {
-    if (shouldLog('info')) {
-      console.log(formatMessage('info', this.context, message, data));
-    }
+    this.log('info', message, data);
   }
 
   warn(message: string, data?: unknown): void {
-    if (shouldLog('warn')) {
-      console.warn(formatMessage('warn', this.context, message, data));
-    }
+    this.log('warn', message, data);
   }
 
   error(message: string, data?: unknown): void {
-    if (shouldLog('error')) {
-      console.error(formatMessage('error', this.context, message, data));
-    }
+    this.log('error', message, data);
   }
 }
 

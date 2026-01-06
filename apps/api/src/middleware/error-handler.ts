@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
+import { logger } from '../lib/logger.js';
 
 interface AppError extends Error {
   statusCode?: number;
@@ -25,10 +26,11 @@ export const errorHandler: ErrorRequestHandler = (
   const correlationId = req.correlationId || 'unknown';
 
   // Log error with correlation ID for tracing
-  console.error(`[${correlationId}] Error:`, err.message);
-  if (process.env.NODE_ENV === 'development') {
-    console.error(`[${correlationId}] Stack:`, err.stack);
-  }
+  logger.error('Request error', {
+    correlationId,
+    message: err.message,
+    stack: err.stack,
+  });
 
   // Handle Zod validation errors
   if (err instanceof ZodError) {
