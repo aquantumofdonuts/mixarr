@@ -23,6 +23,7 @@ export const queryKeys = {
   // Connections
   connections: ['connections'] as const,
   connection: (id: number) => ['connections', id] as const,
+  hasLidarr: ['connections', 'hasLidarr'] as const,
   
   // Queue / Review
   reviewQueue: (status: string, itemType?: string) => ['review', 'queue', status, itemType] as const,
@@ -325,6 +326,18 @@ export function useDeleteConnection() {
       queryClient.invalidateQueries({ queryKey: queryKeys.connections });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardConnections });
     },
+  });
+}
+
+export function useHasLidarr() {
+  return useQuery({
+    queryKey: queryKeys.hasLidarr,
+    queryFn: async () => {
+      const { data, error } = await api.get<{ hasLidarr: boolean }>('/api/connections/has-lidarr');
+      if (error) throw new Error(error);
+      return data!.hasLidarr;
+    },
+    staleTime: 30 * 1000, // Cache for 30 seconds
   });
 }
 
