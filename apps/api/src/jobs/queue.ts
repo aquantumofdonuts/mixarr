@@ -249,7 +249,7 @@ export async function getRecentJobs(queueName: string, limit: number = 20) {
   return Promise.all(
     allJobs.map(async (job) => {
       const data = job.data as SubscriptionJobData | ImportJobData;
-      let enrichedData: Record<string, unknown> = { ...data };
+      const enrichedData: Record<string, unknown> = { ...data };
       
       if ('subscriptionId' in data) {
         enrichedData.subscriptionName = subscriptionNameMap.get(data.subscriptionId) || `Subscription ${data.subscriptionId}`;

@@ -446,7 +446,7 @@ export class LidarrService {
       
       // Search by MBID using lidarr: prefix for exact match
       const searchTerm = `lidarr:${artistMbid}`;
-      let searchResults = await this.searchArtist(searchTerm);
+      const searchResults = await this.searchArtist(searchTerm);
       let artistData = searchResults.find(a => a.foreignArtistId === artistMbid);
       
       // If lidarr: prefix didn't work, try searching by the raw MBID

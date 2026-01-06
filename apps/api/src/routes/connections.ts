@@ -1041,7 +1041,7 @@ connectionsRouter.post('/:id/spotify/revoke', async (req, res) => {
     const config = connection.config as Record<string, unknown>;
     
     // Remove tokens from config
-    const { accessToken, refreshToken, tokenExpiresAt, ...restConfig } = config;
+    const { accessToken: _accessToken, refreshToken: _refreshToken, tokenExpiresAt: _tokenExpiresAt, ...restConfig } = config;
 
     await prisma.connection.update({
       where: { id: connection.id },
@@ -1258,7 +1258,8 @@ connectionsRouter.post('/:id/deezer/revoke', async (req, res) => {
     }
 
     const config = connection.config as Record<string, unknown>;
-    const { accessToken, tokenExpiresAt, ...restConfig } = config;
+    // Remove tokens from config
+    const { accessToken: _accessToken, tokenExpiresAt: _tokenExpiresAt, ...restConfig } = config;
 
     await prisma.connection.update({
       where: { id: connection.id },
@@ -1530,7 +1531,8 @@ connectionsRouter.post('/:id/tidal/revoke', async (req, res) => {
     }
 
     const config = connection.config as Record<string, unknown>;
-    const { accessToken, refreshToken, tokenExpiresAt, ...restConfig } = config;
+    // Remove tokens from config
+    const { accessToken: _accessToken, refreshToken: _refreshToken, tokenExpiresAt: _tokenExpiresAt, ...restConfig } = config;
 
     await prisma.connection.update({
       where: { id: connection.id },
