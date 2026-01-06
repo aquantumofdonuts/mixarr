@@ -132,7 +132,7 @@ export function ArtistCard({
             </div>
             
             {/* Add button / In Library badge */}
-            {inLibrary ? (
+            {inLibrary === true ? (
               <Badge variant="success" className="flex-shrink-0 text-xs">
                 <Check className="h-3 w-3 mr-1" /> In Lidarr
               </Badge>

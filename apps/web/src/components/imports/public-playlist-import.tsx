@@ -7,7 +7,7 @@ import { Link2, Music2, Check, Loader2, ListMusic } from 'lucide-react';
 
 interface PlaylistArtist {
   name: string;
-  inLibrary: boolean;
+  inLibrary?: boolean;
 }
 
 interface PreviewData {
@@ -194,7 +194,7 @@ export function PublicPlaylistImport({ onImportComplete }: { onImportComplete?: 
                 <label
                   key={artist.name}
                   className={`flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-muted ${
-                    artist.inLibrary ? 'opacity-60' : ''
+                    artist.inLibrary === true ? 'opacity-60' : ''
                   }`}
                 >
                   <Checkbox
@@ -203,7 +203,7 @@ export function PublicPlaylistImport({ onImportComplete }: { onImportComplete?: 
                   />
                   <Music2 className="w-4 h-4 text-muted-foreground" />
                   <span className="flex-1">{artist.name}</span>
-                  {artist.inLibrary && (
+                  {artist.inLibrary === true && (
                     <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded">
                       In Library
                     </span>

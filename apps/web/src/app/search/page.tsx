@@ -17,7 +17,7 @@ interface ArtistResult {
   artistName: string;
   overview?: string;
   imageUrl?: string;
-  inLibrary: boolean;
+  inLibrary?: boolean;
   sources?: SearchSource[];
   spotifyId?: string;
   deezerId?: number;
@@ -192,7 +192,7 @@ export default function SearchPage() {
           artistName: r.name,
           overview: r.genres?.join(', ') || '',
           imageUrl: r.imageUrl,
-          inLibrary: r.inLibrary || false,
+          inLibrary: r.inLibrary,
           sources: r.sources || [],
           spotifyId: r.spotifyId,
           deezerId: r.deezerId,
