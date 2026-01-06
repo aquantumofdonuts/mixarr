@@ -109,7 +109,20 @@ class Logger {
 }
 
 /**
- * Create a logger instance for a specific context (e.g., service name, route)
+ * Creates a contextual logger instance for structured logging.
+ *
+ * In development, logs are formatted for readability. In production,
+ * logs are output as JSON for parsing by log aggregation tools.
+ *
+ * @param context - The context name to prefix log messages with (e.g., 'Auth', 'PlexService')
+ * @returns A Logger instance with debug, info, warn, and error methods
+ *
+ * @example
+ * ```typescript
+ * const logger = createLogger('MyService');
+ * logger.info('Service started', { port: 3000 });
+ * logger.error('Failed to connect', { error: err.message });
+ * ```
  */
 export function createLogger(context: string): Logger {
   return new Logger(context);
