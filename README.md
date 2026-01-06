@@ -18,6 +18,17 @@
 - **PWA Support**: Installable, offline-capable, push notifications
 - **Multi-User**: Authentication with admin/user roles
 
+### Running Without Lidarr (Recommendation-Only Mode)
+
+Mixarr can operate as a recommendation engine without a Lidarr connection:
+
+- **Subscriptions**: Work in `preview` and `queue` modes. `auto` mode degrades to `queue`.
+- **Search**: Returns results without library status indicators.
+- **Discover**: Requires Lidarr (library-based feature).
+- **Imports**: Work in `preview` and `queue` modes.
+
+To use Mixarr without Lidarr, simply skip adding a Lidarr connection during setup.
+
 ## Install from Docker Image
 
 **Docker Image:**
