@@ -62,36 +62,68 @@ searchRouter.get('/artists', async (req, res) => {
     }
 
     const lidarr = await getLidarrService(req.user!.id);
-    if (!lidarr) {
-      res.status(400).json({ error: 'No active Lidarr connection' });
+    
+    // If Lidarr is available, use it for search with inLibrary status
+    if (lidarr) {
+      const results = await lidarr.searchArtist(q);
+      
+      // Check which artists are already in library
+      const cache = new LidarrCache(lidarr);
+      await cache.refresh();
+      
+      // Get Deezer images for all artists
+      const artistNames = results.map(r => r.artistName);
+      const imageMap = await fetchDeezerArtistImages(artistNames);
+      
+      const enrichedResults = await Promise.all(
+        results.map(async (artist) => ({
+          ...artist,
+          inLibrary: await cache.exists({ mbid: artist.foreignArtistId }),
+          imageUrl: imageMap.get(artist.artistName),
+        }))
+      );
+
+      // Optionally enrich with Last.fm stats
+      let finalResults: typeof enrichedResults & { lastfm?: { listeners: number; playcount: number; tags: string[] } }[] = enrichedResults;
+      if (enrich === 'true') {
+        const lastfm = await getLastfmService(req.user!.id);
+        if (lastfm) {
+          finalResults = await Promise.all(
+            enrichedResults.map(async (artist) => {
+              const stats = await lastfm.getArtistStats(artist.artistName);
+              return { ...artist, lastfm: stats || undefined };
+            })
+          );
+        }
+      }
+
+      res.json({ results: finalResults });
       return;
     }
-    
-    const results = await lidarr.searchArtist(q);
-    
-    // Check which artists are already in library
-    const cache = new LidarrCache(lidarr);
-    await cache.refresh();
+
+    // No Lidarr - fall back to MusicBrainz search (no inLibrary field)
+    const mb = new MusicBrainzService();
+    const mbResults = await mb.searchArtist(q);
     
     // Get Deezer images for all artists
-    const artistNames = results.map(r => r.artistName);
+    const artistNames = mbResults.map(r => r.name);
     const imageMap = await fetchDeezerArtistImages(artistNames);
     
-    const enrichedResults = await Promise.all(
-      results.map(async (artist) => ({
-        ...artist,
-        inLibrary: await cache.exists({ mbid: artist.foreignArtistId }),
-        imageUrl: imageMap.get(artist.artistName),
-      }))
-    );
+    // Transform MusicBrainz results to match expected format (without inLibrary)
+    const results = mbResults.map(artist => ({
+      foreignArtistId: artist.id,
+      artistName: artist.name,
+      overview: artist.disambiguation || undefined,
+      imageUrl: imageMap.get(artist.name),
+    }));
 
     // Optionally enrich with Last.fm stats
-    let finalResults: typeof enrichedResults & { lastfm?: { listeners: number; playcount: number; tags: string[] } }[] = enrichedResults;
+    let finalResults: typeof results & { lastfm?: { listeners: number; playcount: number; tags: string[] } }[] = results;
     if (enrich === 'true') {
       const lastfm = await getLastfmService(req.user!.id);
       if (lastfm) {
         finalResults = await Promise.all(
-          enrichedResults.map(async (artist) => {
+          results.map(async (artist) => {
             const stats = await lastfm.getArtistStats(artist.artistName);
             return { ...artist, lastfm: stats || undefined };
           })
@@ -103,7 +135,7 @@ searchRouter.get('/artists', async (req, res) => {
   } catch (error) {
     log.error('Search /artists error:', error);
     const message = error instanceof Error ? error.message : 'Search failed';
-    res.status(500).json({ error: `Lidarr API error: ${message}` });
+    res.status(500).json({ error: message });
   }
 });
 
@@ -181,12 +213,8 @@ searchRouter.post('/ai', async (req, res) => {
       return;
     }
 
-    // Get Lidarr service for enrichment
+    // Get Lidarr service for enrichment (optional - can use MusicBrainz if not available)
     const lidarr = await getLidarrService(req.user!.id);
-    if (!lidarr) {
-      res.status(400).json({ error: 'No active Lidarr connection' });
-      return;
-    }
 
     // Get AI recommendations (limit to 10 to keep response time reasonable)
     const truncated = prompt.length > 50 ? `${prompt.substring(0, 50)}...` : prompt;
@@ -211,14 +239,20 @@ searchRouter.post('/ai', async (req, res) => {
       return;
     }
 
-    // Resolve each artist name to MBID via Lidarr search
-    const cache = new LidarrCache(lidarr);
-    try {
-      await cache.refresh();
-    } catch (cacheError) {
-      log.error('Failed to refresh library cache:', cacheError);
-      // Continue without cache - inLibrary will be false for all
+    // Resolve each artist name to MBID via Lidarr or MusicBrainz
+    let cache: LidarrCache | null = null;
+    if (lidarr) {
+      cache = new LidarrCache(lidarr);
+      try {
+        await cache.refresh();
+      } catch (cacheError) {
+        log.error('Failed to refresh library cache:', cacheError);
+        // Continue without cache - inLibrary will be false for all
+      }
     }
+
+    // Use MusicBrainz as fallback when no Lidarr
+    const mb = lidarr ? null : new MusicBrainzService();
 
     // Resolve artists with limited parallelism (5 at a time to stay within timeout)
     const BATCH_SIZE = 5;
@@ -227,7 +261,7 @@ searchRouter.post('/ai', async (req, res) => {
       artistName: string;
       overview: string | undefined;
       imageUrl: null;
-      inLibrary: boolean;
+      inLibrary?: boolean;
     } | null)[] = [];
 
     for (let i = 0; i < artistNames.length; i += BATCH_SIZE) {
@@ -235,22 +269,41 @@ searchRouter.post('/ai', async (req, res) => {
       const batchResults = await Promise.all(
         batch.map(async (name) => {
           try {
-            const searchResults = await lidarr.searchArtist(name);
-            if (searchResults.length === 0) {
-              log.debug(`No Lidarr results for: ${name}`);
-              return null;
+            if (lidarr) {
+              // Use Lidarr for search and library check
+              const searchResults = await lidarr.searchArtist(name);
+              if (searchResults.length === 0) {
+                log.debug(`No Lidarr results for: ${name}`);
+                return null;
+              }
+
+              const artist = searchResults[0];
+              const inLibrary = cache ? await cache.exists({ mbid: artist.foreignArtistId }) : false;
+
+              return {
+                foreignArtistId: artist.foreignArtistId,
+                artistName: artist.artistName,
+                overview: artist.overview,
+                imageUrl: null as null, // Will be enriched below
+                inLibrary,
+              };
+            } else {
+              // Use MusicBrainz for search (no library check available)
+              const mbResults = await mb!.searchArtist(name, 1);
+              if (mbResults.length === 0) {
+                log.debug(`No MusicBrainz results for: ${name}`);
+                return null;
+              }
+
+              const artist = mbResults[0];
+              return {
+                foreignArtistId: artist.id,
+                artistName: artist.name,
+                overview: artist.disambiguation || undefined,
+                imageUrl: null as null, // Will be enriched below
+                // inLibrary omitted when no Lidarr
+              };
             }
-
-            const artist = searchResults[0];
-            const inLibrary = await cache.exists({ mbid: artist.foreignArtistId });
-
-            return {
-              foreignArtistId: artist.foreignArtistId,
-              artistName: artist.artistName,
-              overview: artist.overview,
-              imageUrl: null as null, // Will be enriched below
-              inLibrary,
-            };
           } catch (error) {
             log.error(`Error resolving artist "${name}":`, error instanceof Error ? error.message : error);
             return null;

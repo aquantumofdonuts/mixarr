@@ -42,9 +42,15 @@ vi.mock('../../src/services/deezer.js', () => ({
   fetchDeezerArtistImages: vi.fn().mockResolvedValue(new Map()),
 }));
 
-vi.mock('../../src/services/musicbrainz.js', () => ({
-  MusicBrainzService: vi.fn(),
-}));
+vi.mock('../../src/services/musicbrainz.js', () => {
+  const mockMbSearchArtist = vi.fn();
+  return {
+    MusicBrainzService: class MockMusicBrainzService {
+      searchArtist = mockMbSearchArtist;
+    },
+    __mockMbSearchArtist: mockMbSearchArtist,
+  };
+});
 
 vi.mock('../../src/services/lastfm.js', () => ({
   LastfmService: vi.fn(),
@@ -79,6 +85,8 @@ vi.mock('../../src/middleware/auth.js', () => ({
 
 import prisma from '../../src/lib/db.js';
 import { aiService } from '../../src/services/ai.js';
+// Get mock function from the mock module
+const { __mockMbSearchArtist: mockMbSearchArtist } = await import('../../src/services/musicbrainz.js') as any;
 
 const app = express();
 app.use(express.json());
@@ -119,16 +127,29 @@ describe('POST /api/search/ai', () => {
     expect(res.body.configured).toBe(false);
   });
 
-  it('should return 400 if no Lidarr connection', async () => {
+  it('should use MusicBrainz when no Lidarr connection and omit inLibrary field', async () => {
     vi.mocked(aiService.isAvailable).mockResolvedValue(true);
+    vi.mocked(aiService.searchByPrompt).mockResolvedValue({
+      artists: ['Nujabes'],
+      providers: ['openai'],
+    });
     vi.mocked(prisma.connection.findFirst).mockResolvedValue(null);
+    
+    // Mock MusicBrainz to return an artist
+    mockMbSearchArtist.mockResolvedValueOnce([
+      { id: 'mb-12345', name: 'Nujabes', disambiguation: 'Japanese producer' }
+    ]);
     
     const res = await request(app)
       .post('/api/search/ai')
       .send({ prompt: 'chill lo-fi beats' });
     
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Lidarr');
+    expect(res.status).toBe(200);
+    expect(res.body.results).toHaveLength(1);
+    expect(res.body.results[0].foreignArtistId).toBe('mb-12345');
+    expect(res.body.results[0].artistName).toBe('Nujabes');
+    // inLibrary should be omitted when no Lidarr
+    expect(res.body.results[0]).not.toHaveProperty('inLibrary');
   });
 
   it('should return empty results when AI finds no artists', async () => {
