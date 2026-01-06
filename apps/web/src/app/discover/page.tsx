@@ -9,10 +9,12 @@ import { api } from '@/lib/api';
 import { 
   Search, Sparkles, Plus, Check, ChevronLeft, ChevronRight, 
   CheckSquare, Square, Music2, RefreshCw, ChevronDown, ChevronUp, X,
-  Download, Filter
+  Download, Filter, Library
 } from 'lucide-react';
 import { LastfmIcon, MusicBrainzIcon } from '@/components/ExternalLinks';
 import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { useHasLidarr } from '@/lib/hooks';
 
 interface LibraryArtist {
   id: number;
@@ -39,6 +41,8 @@ interface Profiles {
 }
 
 export default function DiscoverPage() {
+  const router = useRouter();
+  const { data: hasLidarr, isLoading: lidarrLoading } = useHasLidarr();
   const [selectedArtists, setSelectedArtists] = useState<Set<string>>(new Set());
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [selectedRecs, setSelectedRecs] = useState<Set<string>>(new Set());
@@ -319,6 +323,26 @@ export default function DiscoverPage() {
 
   // Get list of selected recs that are still available (not in library)
   const selectedRecsAvailable = recommendations.filter(r => selectedRecs.has(r.name) && !r.inLibrary);
+
+  // Show friendly message when Lidarr is not connected
+  if (!lidarrLoading && !hasLidarr) {
+    return (
+      <>
+        <PageHeader title="Discover" description="Explore your library and find new music" />
+        <Card className="p-8 text-center max-w-md mx-auto mt-8">
+          <Library className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+          <h3 className="text-lg font-medium mb-2">Library Connection Required</h3>
+          <p className="text-muted-foreground mb-4">
+            Discover browses your existing music library to find similar artists. 
+            Connect Lidarr to enable this feature.
+          </p>
+          <Button onClick={() => router.push('/connections')}>
+            <Plus className="h-4 w-4 mr-2" /> Add Lidarr Connection
+          </Button>
+        </Card>
+      </>
+    );
+  }
 
   return (
     <div className="space-y-6">
