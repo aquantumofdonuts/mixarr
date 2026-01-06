@@ -216,6 +216,25 @@ connectionsRouter.post('/test', validateBody(testConnectionSchema), async (req, 
 // All remaining connection routes require authentication
 connectionsRouter.use(requireAuth);
 
+// Check if user has a Lidarr connection (user-owned or global)
+connectionsRouter.get('/has-lidarr', async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const lidarrConn = await prisma.connection.findFirst({
+      where: {
+        OR: [
+          { userId, type: 'lidarr', isActive: true },
+          { userId: null, type: 'lidarr', isActive: true },
+        ],
+      },
+    });
+    res.json({ hasLidarr: !!lidarrConn });
+  } catch (error) {
+    logger.error('Failed to check Lidarr status', { error, userId: req.user!.id });
+    res.status(500).json({ error: 'Failed to check Lidarr status' });
+  }
+});
+
 // Get all connections for current user (+ global Lidarr connections)
 // Admins see all connections
 connectionsRouter.get('/', async (req, res) => {
