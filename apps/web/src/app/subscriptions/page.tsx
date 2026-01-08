@@ -257,6 +257,9 @@ export default function SubscriptionsPage() {
     if (form.type === 'lastfm_tag') {
       config.tag = form.tag;
     }
+    if (form.type === 'spotify_category') {
+      config.categoryId = form.tag;
+    }
     if (form.type === 'spotify_playlist' || form.type === 'deezer_playlist' || form.type === 'tidal_playlist') {
       config.playlistId = form.playlistId;
     }
@@ -362,7 +365,7 @@ export default function SubscriptionsPage() {
         resultHandling: subscription.resultHandling || 'preview',
         limit: subscription.config.limit?.toString() || '50',
         country: subscription.config.country || '',
-        tag: subscription.config.tag || '',
+        tag: subscription.config.tag || subscription.config.categoryId || '',
         playlistId: subscription.config.playlistId || '',
         aiStrategy: subscription.config.strategy || 'similar',
         aiSource: subscription.config.source || 'spotify',
@@ -435,7 +438,7 @@ export default function SubscriptionsPage() {
       resultHandling: 'preview',
       limit: preset.config.limit?.toString() || '50',
       country: preset.config.country || '',
-      tag: preset.config.tag || '',
+      tag: preset.config.tag || preset.config.categoryId || '',
       playlistId: preset.config.playlistId || '',
       aiStrategy: preset.config.strategy || 'similar',
       aiSource: preset.config.source || 'spotify',

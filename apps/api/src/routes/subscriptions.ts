@@ -1032,7 +1032,7 @@ subscriptionsRouter.get('/presets/list', async (_req, res) => {
       description: 'Import from any public Spotify playlist - no login required',
       type: 'spotify_public_playlist',
       category: 'spotify',
-      config: { publicPlaylistUrl: '', discoverAlbums: false, includeAllArtists: false },
+      config: { publicPlaylistUrl: 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M', discoverAlbums: false, includeAllArtists: false },
     },
     {
       id: 'spotify-category-pop',
