@@ -183,22 +183,21 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       }
 
       case 'spotify_playlist': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const tracks = await spotify.getAllPlaylistTracks(config.playlistId);
+        // Use public playlist fetcher - works without authentication and is more reliable
+        // for Spotify-curated playlists that may not be accessible via the authenticated API
+        const playlistId = config.playlistId;
+        if (!playlistId) throw new Error('Playlist ID is required');
+        
+        const playlist = await fetchPublicPlaylist(playlistId);
         
         // Extract unique artists
         const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
+        for (const track of playlist.tracks) {
           for (const artist of track.artists) {
             if (!artistMap.has(artist.name)) {
               artistMap.set(artist.name, {
                 name: artist.name,
-                source: `spotify-playlist-${config.playlistId}`,
+                source: `spotify-playlist-${playlistId}`,
               });
             }
           }
