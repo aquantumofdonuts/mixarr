@@ -78,8 +78,14 @@ export const subscriptionTypeSchema = z.enum(subscriptionTypes);
 
 /**
  * Schedule options for subscriptions
+ * Can be null/empty (manual) or a cron expression string
+ * Examples: '0 0 * * *' (daily), '0 0 * * 0' (weekly), '0 0 1 * *' (monthly)
  */
-export const scheduleSchema = z.enum(['manual', 'daily', 'weekly', 'monthly']).nullable().optional();
+export const scheduleSchema = z.union([
+  z.literal(''),  // Empty string = manual
+  z.literal(null),  // null = manual  
+  z.string().regex(/^(\d+|\*)\s+(\d+|\*|(\*\/\d+))\s+(\d+|\*)\s+(\d+|\*)\s+(\d+|\*)$/, 'Invalid cron expression'),
+]).nullable().optional();
 
 /**
  * Result handling options
