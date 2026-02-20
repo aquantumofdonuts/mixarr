@@ -4,6 +4,7 @@ import { parseIntParam } from '../utils/params.js';
 import { getBaseUrl } from '../lib/settings.js';
 import { createSignedState, verifySignedState } from '../lib/oauth-state.js';
 import { requireAuth } from '../middleware/auth.js';
+import { withTypedConnection, canAccessConnection, canModifyConnection } from '../middleware/typed-connection.js';
 import { LidarrService } from '../services/lidarr.js';
 import { SpotifyService } from '../services/spotify.js';
 import { LastfmService } from '../services/lastfm.js';
@@ -13,8 +14,7 @@ import { TidalService } from '../services/tidal.js';
 import { SlskdService } from '../services/slskd.js';
 import { ListenBrainzService } from '../services/listenbrainz.js';
 import { DiscogsService } from '../services/discogs.js';
-import type { Connection, Prisma } from '@prisma/client';
-import type { Request } from 'express';
+import type { Prisma } from '@prisma/client';
 import { validateBody } from '../middleware/validate.js';
 import { createConnectionSchema, updateConnectionSchema, testConnectionSchema } from '../schemas/connection.js';
 import { createLogger } from '../lib/logger.js';
@@ -23,23 +23,6 @@ import { sanitizeConnectionError } from '../utils/sanitize-error.js';
 const logger = createLogger('ConnectionsRoute');
 
 export const connectionsRouter = Router();
-
-// Helper: Check if user can access a connection
-function canAccessConnection(req: Request, connection: Connection): boolean {
-  const isAdmin = req.user!.role === 'admin';
-  const isOwner = connection.userId === req.user!.id;
-  const isGlobalLidarr = connection.userId === null && connection.type === 'lidarr';
-  return isAdmin || isOwner || isGlobalLidarr;
-}
-
-// Helper: Check if user can modify a connection
-function canModifyConnection(req: Request, connection: Connection): boolean {
-  const isAdmin = req.user!.role === 'admin';
-  const isOwner = connection.userId === req.user!.id;
-  // Only admins can modify global Lidarr, users can modify their own
-  if (connection.userId === null) return isAdmin;
-  return isAdmin || isOwner;
-}
 
 // PUBLIC ROUTES (no auth required)
 
@@ -720,28 +703,9 @@ connectionsRouter.post('/:id/test', async (req, res) => {
 });
 
 // Get Lidarr options (quality profiles, root folders) for an existing connection
-connectionsRouter.get('/:id/lidarr-options', async (req, res) => {
+connectionsRouter.get('/:id/lidarr-options', withTypedConnection('lidarr'), async (req, res) => {
   try {
-    const id = parseIntParam(req.params.id);
-    if (id === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id },
-    });
-    
-    if (!connection || !canAccessConnection(req, connection)) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (connection.type !== 'lidarr') {
-      res.status(400).json({ error: 'Not a Lidarr connection' });
-      return;
-    }
-
-    const config = connection.config as Record<string, any>;
+    const config = req.typedConnectionConfig!;
     
     if (!config.url || !config.apiKey) {
       res.status(400).json({ error: 'Lidarr connection is missing URL or API key. Please edit the connection.' });
@@ -904,31 +868,12 @@ connectionsRouter.post('/tautulli/libraries', async (req, res) => {
 });
 
 // Get top artists for a Tautulli connection
-connectionsRouter.get('/:id/tautulli/top-artists', async (req, res) => {
+connectionsRouter.get('/:id/tautulli/top-artists', withTypedConnection('tautulli'), async (req, res) => {
   try {
-    const id = parseIntParam(req.params.id);
-    if (id === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
     const period = (req.query.period as string) || 'month';
     const limit = parseInt(req.query.limit as string) || 25;
-    
-    const connection = await prisma.connection.findUnique({
-      where: { id },
-    });
-    
-    if (!connection || !canAccessConnection(req, connection)) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
 
-    if (connection.type !== 'tautulli') {
-      res.status(400).json({ error: 'Connection is not a Tautulli connection' });
-      return;
-    }
-
-    const config = connection.config as Record<string, any>;
+    const config = req.typedConnectionConfig!;
     const service = new TautulliService();
     
     const artists = await service.getTopArtists(
@@ -1008,33 +953,10 @@ connectionsRouter.post('/jellyfin/libraries', async (req, res) => {
 // Spotify OAuth Routes
 
 // Get Spotify authorization URL for a connection
-connectionsRouter.get('/:id/spotify/auth', async (req, res) => {
+connectionsRouter.get('/:id/spotify/auth', withTypedConnection('spotify'), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (!canAccessConnection(req, connection)) {
-      res.status(403).json({ error: 'Access denied' });
-      return;
-    }
-
-    if (connection.type !== 'spotify') {
-      res.status(400).json({ error: 'Connection is not a Spotify connection' });
-      return;
-    }
-
-    const config = connection.config as { clientId?: string; clientSecret?: string };
+    const connection = req.typedConnection!;
+    const config = req.typedConnectionConfig! as { clientId?: string; clientSecret?: string };
     if (!config.clientId || !config.clientSecret) {
       res.status(400).json({ error: 'Spotify client ID and secret are required' });
       return;
@@ -1064,33 +986,9 @@ connectionsRouter.get('/:id/spotify/auth', async (req, res) => {
 });
 
 // Check if Spotify connection is authorized
-connectionsRouter.get('/:id/spotify/status', async (req, res) => {
+connectionsRouter.get('/:id/spotify/status', withTypedConnection('spotify'), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (!canAccessConnection(req, connection)) {
-      res.status(403).json({ error: 'Access denied' });
-      return;
-    }
-
-    if (connection.type !== 'spotify') {
-      res.status(400).json({ error: 'Connection is not a Spotify connection' });
-      return;
-    }
-
-    const config = connection.config as { 
+    const config = req.typedConnectionConfig! as { 
       accessToken?: string; 
       refreshToken?: string;
       tokenExpiresAt?: number;
@@ -1111,33 +1009,10 @@ connectionsRouter.get('/:id/spotify/status', async (req, res) => {
 });
 
 // Revoke Spotify authorization
-connectionsRouter.post('/:id/spotify/revoke', async (req, res) => {
+connectionsRouter.post('/:id/spotify/revoke', withTypedConnection('spotify', { requireModify: true }), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (!canModifyConnection(req, connection)) {
-      res.status(403).json({ error: 'Access denied' });
-      return;
-    }
-
-    if (connection.type !== 'spotify') {
-      res.status(400).json({ error: 'Connection is not a Spotify connection' });
-      return;
-    }
-
-    const config = connection.config as Record<string, unknown>;
+    const connection = req.typedConnection!;
+    const config = req.typedConnectionConfig! as Record<string, unknown>;
     
     // Remove tokens from config
     const { accessToken: _accessToken, refreshToken: _refreshToken, tokenExpiresAt: _tokenExpiresAt, ...restConfig } = config;
@@ -1237,33 +1112,10 @@ connectionsRouter.get('/:id/deezer/callback', async (req, res) => {
 });
 
 // Get Deezer authorization URL for a connection
-connectionsRouter.get('/:id/deezer/auth', async (req, res) => {
+connectionsRouter.get('/:id/deezer/auth', withTypedConnection('deezer'), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (!canAccessConnection(req, connection)) {
-      res.status(403).json({ error: 'Access denied' });
-      return;
-    }
-
-    if (connection.type !== 'deezer') {
-      res.status(400).json({ error: 'Connection is not a Deezer connection' });
-      return;
-    }
-
-    const config = connection.config as { appId?: string; appSecret?: string };
+    const connection = req.typedConnection!;
+    const config = req.typedConnectionConfig! as { appId?: string; appSecret?: string };
     if (!config.appId || !config.appSecret) {
       res.status(400).json({ error: 'Deezer App ID and Secret are required' });
       return;
@@ -1290,33 +1142,9 @@ connectionsRouter.get('/:id/deezer/auth', async (req, res) => {
 });
 
 // Check if Deezer connection is authorized
-connectionsRouter.get('/:id/deezer/status', async (req, res) => {
+connectionsRouter.get('/:id/deezer/status', withTypedConnection('deezer'), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (!canAccessConnection(req, connection)) {
-      res.status(403).json({ error: 'Access denied' });
-      return;
-    }
-
-    if (connection.type !== 'deezer') {
-      res.status(400).json({ error: 'Connection is not a Deezer connection' });
-      return;
-    }
-
-    const config = connection.config as { accessToken?: string };
+    const config = req.typedConnectionConfig! as { accessToken?: string };
     const isAuthorized = !!config.accessToken;
 
     res.json({ 
@@ -1330,33 +1158,10 @@ connectionsRouter.get('/:id/deezer/status', async (req, res) => {
 });
 
 // Revoke Deezer authorization
-connectionsRouter.post('/:id/deezer/revoke', async (req, res) => {
+connectionsRouter.post('/:id/deezer/revoke', withTypedConnection('deezer', { requireModify: true }), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (!canModifyConnection(req, connection)) {
-      res.status(403).json({ error: 'Access denied' });
-      return;
-    }
-
-    if (connection.type !== 'deezer') {
-      res.status(400).json({ error: 'Connection is not a Deezer connection' });
-      return;
-    }
-
-    const config = connection.config as Record<string, unknown>;
+    const connection = req.typedConnection!;
+    const config = req.typedConnectionConfig! as Record<string, unknown>;
     // Remove tokens from config
     const { accessToken: _accessToken, tokenExpiresAt: _tokenExpiresAt, ...restConfig } = config;
 
@@ -1373,28 +1178,9 @@ connectionsRouter.post('/:id/deezer/revoke', async (req, res) => {
 });
 
 // Get user's Deezer playlists
-connectionsRouter.get('/:id/deezer/playlists', async (req, res) => {
+connectionsRouter.get('/:id/deezer/playlists', withTypedConnection('deezer'), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection || !canAccessConnection(req, connection)) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (connection.type !== 'deezer') {
-      res.status(400).json({ error: 'Connection is not a Deezer connection' });
-      return;
-    }
-
-    const config = connection.config as { appId: string; appSecret: string; accessToken?: string };
+    const config = req.typedConnectionConfig! as { appId: string; appSecret: string; accessToken?: string };
     if (!config.accessToken) {
       res.status(400).json({ error: 'Deezer connection not authorized' });
       return;
@@ -1499,33 +1285,10 @@ connectionsRouter.get('/:id/tidal/callback', async (req, res) => {
 });
 
 // Get TIDAL authorization URL for a connection
-connectionsRouter.get('/:id/tidal/auth', async (req, res) => {
+connectionsRouter.get('/:id/tidal/auth', withTypedConnection('tidal'), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (!canAccessConnection(req, connection)) {
-      res.status(403).json({ error: 'Access denied' });
-      return;
-    }
-
-    if (connection.type !== 'tidal') {
-      res.status(400).json({ error: 'Connection is not a TIDAL connection' });
-      return;
-    }
-
-    const config = connection.config as { clientId?: string; clientSecret?: string };
+    const connection = req.typedConnection!;
+    const config = req.typedConnectionConfig! as { clientId?: string; clientSecret?: string };
     if (!config.clientId || !config.clientSecret) {
       res.status(400).json({ error: 'TIDAL Client ID and Secret are required' });
       return;
@@ -1556,33 +1319,9 @@ connectionsRouter.get('/:id/tidal/auth', async (req, res) => {
 });
 
 // Check if TIDAL connection is authorized
-connectionsRouter.get('/:id/tidal/status', async (req, res) => {
+connectionsRouter.get('/:id/tidal/status', withTypedConnection('tidal'), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (!canAccessConnection(req, connection)) {
-      res.status(403).json({ error: 'Access denied' });
-      return;
-    }
-
-    if (connection.type !== 'tidal') {
-      res.status(400).json({ error: 'Connection is not a TIDAL connection' });
-      return;
-    }
-
-    const config = connection.config as { 
+    const config = req.typedConnectionConfig! as { 
       accessToken?: string; 
       refreshToken?: string;
       tokenExpiresAt?: number;
@@ -1603,33 +1342,10 @@ connectionsRouter.get('/:id/tidal/status', async (req, res) => {
 });
 
 // Revoke TIDAL authorization
-connectionsRouter.post('/:id/tidal/revoke', async (req, res) => {
+connectionsRouter.post('/:id/tidal/revoke', withTypedConnection('tidal', { requireModify: true }), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (!canModifyConnection(req, connection)) {
-      res.status(403).json({ error: 'Access denied' });
-      return;
-    }
-
-    if (connection.type !== 'tidal') {
-      res.status(400).json({ error: 'Connection is not a TIDAL connection' });
-      return;
-    }
-
-    const config = connection.config as Record<string, unknown>;
+    const connection = req.typedConnection!;
+    const config = req.typedConnectionConfig! as Record<string, unknown>;
     // Remove tokens from config
     const { accessToken: _accessToken, refreshToken: _refreshToken, tokenExpiresAt: _tokenExpiresAt, ...restConfig } = config;
 
@@ -1646,28 +1362,9 @@ connectionsRouter.post('/:id/tidal/revoke', async (req, res) => {
 });
 
 // Get user's TIDAL playlists
-connectionsRouter.get('/:id/tidal/playlists', async (req, res) => {
+connectionsRouter.get('/:id/tidal/playlists', withTypedConnection('tidal'), async (req, res) => {
   try {
-    const connectionId = parseIntParam(req.params.id);
-    if (connectionId === null) {
-      res.status(400).json({ error: 'Invalid connection ID' });
-      return;
-    }
-    const connection = await prisma.connection.findUnique({
-      where: { id: connectionId },
-    });
-
-    if (!connection || !canAccessConnection(req, connection)) {
-      res.status(404).json({ error: 'Connection not found' });
-      return;
-    }
-
-    if (connection.type !== 'tidal') {
-      res.status(400).json({ error: 'Connection is not a TIDAL connection' });
-      return;
-    }
-
-    const config = connection.config as { 
+    const config = req.typedConnectionConfig! as { 
       clientId: string; 
       clientSecret: string; 
       accessToken?: string;
