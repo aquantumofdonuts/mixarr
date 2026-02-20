@@ -64,6 +64,9 @@ RUN apk add --no-cache \
     mariadb-client \
     redis
 
+# Create non-root user for app processes
+RUN addgroup -S mixarr && adduser -S -G mixarr -h /app mixarr
+
 # Create directories
 RUN mkdir -p /app/api /app/web /data/certs /data/mysql /data/redis /var/log/supervisor /run/mysqld \
     && chown -R mysql:mysql /data/mysql /run/mysqld
@@ -91,6 +94,9 @@ WORKDIR /app
 COPY --from=builder-web /app/apps/web/.next/standalone /app/web/
 COPY --from=builder-web /app/apps/web/.next/static /app/web/apps/web/.next/static
 COPY --from=builder-web /app/apps/web/public /app/web/apps/web/public
+
+# Fix ownership for non-root user
+RUN chown -R mixarr:mixarr /app
 
 # -----------------------------------------------------------------------------
 # MariaDB configuration
@@ -188,6 +194,7 @@ stderr_logfile_maxbytes=0
 
 [program:api]
 command=node /app/api/dist/index.js
+user=mixarr
 directory=/app/api
 autostart=true
 autorestart=true
@@ -202,6 +209,7 @@ environment=NODE_ENV=production,PORT=3005,DATABASE_URL="mysql://mixarr:mixarr@12
 
 [program:web]
 command=node /app/web/apps/web/server.js
+user=mixarr
 directory=/app/web
 autostart=true
 autorestart=true
@@ -248,6 +256,7 @@ fi
 mkdir -p /data/certs /data/mysql /data/redis /run/mysqld
 chown -R mysql:mysql /data/mysql /run/mysqld
 chown -R redis:redis /data/redis 2>/dev/null || true
+chown -R mixarr:mixarr /app
 
 # -----------------------------------------------------------------------------
 # Initialize MariaDB if needed
