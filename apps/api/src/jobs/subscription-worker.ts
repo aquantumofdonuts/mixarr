@@ -19,7 +19,7 @@ import { TidalService } from '../services/tidal.js';
 import { ListenBrainzService, VALID_PERIODS, type ListenBrainzPeriod } from '../services/listenbrainz.js';
 import { DiscogsService } from '../services/discogs.js';
 import { BandcampService } from '../services/bandcamp.js';
-import { fetchPublicPlaylist, parseSpotifyPlaylistUrl, extractArtistsFromPlaylist } from '../services/public-playlist.js';
+
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
 import { isSpotifyConfig, isLastFMConfig, isDeezerConfig, isTidalConfig, isListenBrainzConfig, isTautulliConfig, isJellyfinConfig, isSlskdConfig, LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
@@ -29,25 +29,13 @@ import { createLogger } from '../lib/logger.js';
 import { SlskdService } from '../services/slskd.js';
 import { SlskdSubscriptionProcessor } from '../services/slskd-subscription-processor.js';
 
+// Strategy pattern — register Spotify strategies at import time
+import './strategies/spotify.js';
+import { getStrategy } from './strategies/registry.js';
+import type { StrategyContext, ArtistToAdd, AlbumToAdd } from './strategies/types.js';
+import type { SubscriptionType } from '../schemas/subscription.js';
+
 const logger = createLogger('SubscriptionWorker');
-
-interface ArtistToAdd {
-  name: string;
-  mbid?: string;
-  source: string;
-  imageUrl?: string;
-}
-
-interface AlbumToAdd {
-  albumName: string;
-  artistName: string;
-  albumMbid?: string;
-  artistMbid?: string;
-  releaseDate?: string;
-  releaseYear?: number;
-  releaseType?: string;
-  source: string;
-}
 
 async function processSubscription(job: Job<SubscriptionJobData>): Promise<void> {
   const { subscriptionId, userId } = job.data;
@@ -157,6 +145,18 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     let artists: ArtistToAdd[] = [];
     let albumsToAdd: AlbumToAdd[] = [];
 
+    // Try strategy registry first (extracted subscription types)
+    const strategyContext: StrategyContext = {
+      config,
+      connections: connectionMap as Map<string, { id: number; type: string; config: unknown }>,
+    };
+
+    const strategy = getStrategy(subscription.type as SubscriptionType);
+    if (strategy) {
+      const result = await strategy.execute(strategyContext);
+      artists = result.artists;
+      albumsToAdd = result.albums;
+    } else {
     // Fetch artists based on subscription type
     switch (subscription.type) {
       case 'lastfm_chart': {
@@ -204,91 +204,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         break;
       }
 
-      case 'spotify_playlist': {
-        // Use public playlist fetcher - works without authentication and is more reliable
-        // for Spotify-curated playlists that may not be accessible via the authenticated API
-        const playlistId = config.playlistId;
-        if (!playlistId) throw new Error('Playlist ID is required');
-        
-        const playlist = await fetchPublicPlaylist(playlistId);
-        
-        // Extract unique artists
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of playlist.tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: `spotify-playlist-${playlistId}`,
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'spotify_followed': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const followedArtists = await spotify.getAllFollowedArtists();
-        artists = followedArtists.map(a => ({
-          name: a.name,
-          source: 'spotify-followed',
-        }));
-        break;
-      }
-
-      case 'spotify_saved_albums': {
-        // User's saved albums - discover albums, not artists
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const albums = await spotify.getAllSavedAlbums();
-        
-        // Saved albums = album discovery (user explicitly saved these albums)
-        albumsToAdd = albums.map(album => ({
-          albumName: album.name,
-          artistName: album.artists[0]?.name || 'Unknown Artist',
-          releaseDate: album.release_date,
-          releaseYear: album.release_date ? parseInt(album.release_date.split('-')[0]) : undefined,
-          releaseType: 'album',
-          source: 'spotify-saved-albums',
-        }));
-        break;
-      }
-
-      case 'spotify_liked_songs': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const tracks = await spotify.getAllLikedSongs();
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'spotify-liked-songs',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
       case 'musicbrainz_new': {
         // New releases from MusicBrainz - discover albums, not artists
         const year = new Date().getFullYear();
@@ -309,171 +224,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             source: 'musicbrainz-new',
           };
         });
-        break;
-      }
-
-      case 'spotify_new_releases': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const albums = await spotify.getAllNewReleases(config.limit || 50, config.country);
-        
-        if (config.discoverAlbums) {
-          // Album discovery mode - add albums to review queue
-          albumsToAdd = albums.map(album => ({
-            albumName: album.name,
-            artistName: album.artists[0]?.name || 'Unknown Artist',
-            releaseDate: album.release_date,
-            releaseYear: album.release_date ? parseInt(album.release_date.split('-')[0]) : undefined,
-            releaseType: 'album',
-            source: 'spotify-new-releases',
-          }));
-        } else {
-          // Artist discovery mode (default) - extract artists from albums
-          const artistMap = new Map<string, ArtistToAdd>();
-          for (const album of albums) {
-            for (const artist of album.artists) {
-              if (!artistMap.has(artist.name)) {
-                artistMap.set(artist.name, {
-                  name: artist.name,
-                  source: 'spotify-new-releases',
-                });
-              }
-            }
-          }
-          artists = Array.from(artistMap.values());
-        }
-        break;
-      }
-
-      case 'spotify_discover_weekly': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const tracks = await spotify.getDiscoverWeeklyTracks();
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'spotify-discover-weekly',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'spotify_release_radar': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const tracks = await spotify.getReleaseRadarTracks();
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'spotify-release-radar',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'spotify_daily_mix': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const tracks = await spotify.getDailyMixTracks();
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'spotify-daily-mix',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'spotify_on_repeat': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const tracks = await spotify.getOnRepeatTracks();
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'spotify-on-repeat',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'spotify_featured': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const spotifyArtists = await spotify.getFeaturedPlaylistsArtists(config.limit || 50);
-        
-        artists = spotifyArtists.map(a => ({
-          name: a.name,
-          source: 'spotify-featured',
-        }));
-        break;
-      }
-
-      case 'spotify_category': {
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        const spotifyArtists = await spotify.getCategoryArtists(config.categoryId, config.limit || 50);
-        
-        artists = spotifyArtists.map(a => ({
-          name: a.name,
-          source: `spotify-category-${config.categoryId}`,
-        }));
         break;
       }
 
@@ -524,96 +274,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
           name: r.name,
           source: `ai-${source}-${strategy}`,
         }));
-        break;
-      }
-
-      case 'spotify_library': {
-        // Sync entire Spotify library (followed + liked songs + saved albums)
-        if (!spotifyConn) throw new Error('No active Spotify connection');
-        if (!isSpotifyConfig(spotifyConn.config)) {
-          throw new Error('Invalid Spotify connection config');
-        }
-        const spotifyConfig = spotifyConn.config;
-        const spotify = new SpotifyService(spotifyConfig);
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        
-        // Get followed artists
-        const followed = await spotify.getAllFollowedArtists();
-        for (const artist of followed) {
-          if (!artistMap.has(artist.name)) {
-            artistMap.set(artist.name, {
-              name: artist.name,
-              source: 'spotify-library-followed',
-            });
-          }
-        }
-        
-        // Get artists from liked songs
-        const likedSongs = await spotify.getAllLikedSongs();
-        for (const track of likedSongs) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'spotify-library-liked',
-              });
-            }
-          }
-        }
-        
-        // Get artists from saved albums
-        const savedAlbums = await spotify.getAllSavedAlbums();
-        for (const album of savedAlbums) {
-          for (const artist of album.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'spotify-library-albums',
-              });
-            }
-          }
-        }
-        
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'spotify_public_playlist': {
-        // Public playlist import - no auth required
-        const playlistUrl = config.playlistUrl;
-        if (!playlistUrl) throw new Error('Playlist URL is required');
-        
-        const playlistId = parseSpotifyPlaylistUrl(playlistUrl);
-        if (!playlistId) throw new Error('Invalid Spotify playlist URL');
-        
-        const playlist = await fetchPublicPlaylist(playlistId);
-        const includeAllArtists = config.includeAllArtists || false;
-        
-        if (config.discoverAlbums) {
-          // Album discovery mode - extract unique albums from tracks
-          const albumMap = new Map<string, AlbumToAdd>();
-          for (const track of playlist.tracks) {
-            // Use track name as album approximation (tracks from same album would have same name pattern)
-            const artistName = track.artists[0]?.name || 'Unknown Artist';
-            const key = `${artistName}-${track.name}`.toLowerCase();
-            if (!albumMap.has(key)) {
-              albumMap.set(key, {
-                albumName: track.name,
-                artistName,
-                source: `spotify-public-playlist-${playlistId}`,
-              });
-            }
-          }
-          albumsToAdd = Array.from(albumMap.values()).slice(0, config.limit || 100);
-        } else {
-          // Artist discovery mode (default)
-          const artistNames = extractArtistsFromPlaylist(playlist.tracks, { includeAllArtists });
-          artists = artistNames.slice(0, config.limit || 100).map(name => ({
-            name,
-            source: `spotify-public-playlist-${playlistId}`,
-          }));
-        }
         break;
       }
 
@@ -1774,6 +1434,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         break;
       }
     }
+    } // end else (strategy not in registry)
 
     await job.updateProgress({ phase: 'fetched', artistCount: artists.length });
 
