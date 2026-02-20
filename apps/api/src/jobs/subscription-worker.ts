@@ -14,14 +14,13 @@ import { LastfmService } from '../services/lastfm.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { AIService } from '../services/ai.js';
 
-import { TidalService } from '../services/tidal.js';
 import { ListenBrainzService, VALID_PERIODS, type ListenBrainzPeriod } from '../services/listenbrainz.js';
 import { DiscogsService } from '../services/discogs.js';
 import { BandcampService } from '../services/bandcamp.js';
 
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
-import { isSpotifyConfig, isLastFMConfig, isTidalConfig, isListenBrainzConfig, isTautulliConfig, isJellyfinConfig, isSlskdConfig, LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
+import { isSpotifyConfig, isLastFMConfig, isListenBrainzConfig, isTautulliConfig, isJellyfinConfig, isSlskdConfig, LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 import { createLogger } from '../lib/logger.js';
@@ -32,6 +31,7 @@ import { SlskdSubscriptionProcessor } from '../services/slskd-subscription-proce
 import './strategies/spotify.js';
 import './strategies/lastfm.js';
 import './strategies/deezer.js';
+import './strategies/tidal.js';
 import { getStrategy } from './strategies/registry.js';
 import type { StrategyContext, ArtistToAdd, AlbumToAdd } from './strategies/types.js';
 import type { SubscriptionType } from '../schemas/subscription.js';
@@ -108,7 +108,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     const lastfmConn = findConnection('lastfm');
     const tautulliConn = findConnection('tautulli');
     const jellyfinConn = findConnection('jellyfin');
-    const tidalConn = findConnection('tidal');
     const listenbrainzConn = findConnection('listenbrainz');
     const discogsConn = findConnection('discogs');
     const slskdConn = findConnection('slskd');
@@ -407,217 +406,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
           mbid: a.mbid,
           source: `jellyfin-similar-${period}`,
         }));
-        break;
-      }
-
-      // TIDAL SUBSCRIPTION TYPES
-
-      case 'tidal_favorites': {
-        if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        if (!isTidalConfig(tidalConn.config)) {
-          throw new Error('Invalid TIDAL connection config');
-        }
-        const tidalConfig = tidalConn.config;
-        const tidal = new TidalService({
-          clientId: tidalConfig.clientId,
-          clientSecret: tidalConfig.clientSecret,
-          accessToken: tidalConfig.accessToken,
-          refreshToken: tidalConfig.refreshToken,
-        });
-        const tracks = await tidal.getCollectionTracks(config.limit || 50);
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'tidal-favorites',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'tidal_followed_artists': {
-        if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        if (!isTidalConfig(tidalConn.config)) {
-          throw new Error('Invalid TIDAL connection config');
-        }
-        const tidalConfig = tidalConn.config;
-        const tidal = new TidalService({
-          clientId: tidalConfig.clientId,
-          clientSecret: tidalConfig.clientSecret,
-          accessToken: tidalConfig.accessToken,
-          refreshToken: tidalConfig.refreshToken,
-        });
-        const followedArtists = await tidal.getCollectionArtists(config.limit || 100);
-        
-        artists = followedArtists.map(a => ({
-          name: a.name,
-          source: 'tidal-followed',
-        }));
-        break;
-      }
-
-      case 'tidal_playlist': {
-        if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        if (!isTidalConfig(tidalConn.config)) {
-          throw new Error('Invalid TIDAL connection config');
-        }
-        const tidalConfig = tidalConn.config;
-        const tidal = new TidalService({
-          clientId: tidalConfig.clientId,
-          clientSecret: tidalConfig.clientSecret,
-          accessToken: tidalConfig.accessToken,
-          refreshToken: tidalConfig.refreshToken,
-        });
-        const tracks = await tidal.getPlaylistTracks(config.playlistId, config.limit || 50);
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: `tidal-playlist-${config.playlistId}`,
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'tidal_playlists': {
-        // All artists from all user's playlists
-        if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        if (!isTidalConfig(tidalConn.config)) {
-          throw new Error('Invalid TIDAL connection config');
-        }
-        const tidalConfig = tidalConn.config;
-        const tidal = new TidalService({
-          clientId: tidalConfig.clientId,
-          clientSecret: tidalConfig.clientSecret,
-          accessToken: tidalConfig.accessToken,
-          refreshToken: tidalConfig.refreshToken,
-        });
-        const playlists = await tidal.getPlaylists(50);
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const playlist of playlists.slice(0, 10)) { // Limit to first 10 playlists
-          const tracks = await tidal.getPlaylistTracks(playlist.id, 50);
-          for (const track of tracks) {
-            for (const artist of track.artists) {
-              if (!artistMap.has(artist.name)) {
-                artistMap.set(artist.name, {
-                  name: artist.name,
-                  source: 'tidal-playlists',
-                });
-              }
-            }
-          }
-        }
-        artists = Array.from(artistMap.values()).slice(0, config.limit || 50);
-        break;
-      }
-
-      case 'tidal_discovery': {
-        if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        if (!isTidalConfig(tidalConn.config)) {
-          throw new Error('Invalid TIDAL connection config');
-        }
-        const tidalConfig = tidalConn.config;
-        const tidal = new TidalService({
-          clientId: tidalConfig.clientId,
-          clientSecret: tidalConfig.clientSecret,
-          accessToken: tidalConfig.accessToken,
-          refreshToken: tidalConfig.refreshToken,
-        });
-        const tracks = await tidal.getDiscoveryMixTracks();
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'tidal-discovery',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values()).slice(0, config.limit || 50);
-        break;
-      }
-
-      case 'tidal_new_arrivals': {
-        // New arrivals - discover albums, not artists
-        if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        if (!isTidalConfig(tidalConn.config)) {
-          throw new Error('Invalid TIDAL connection config');
-        }
-        const tidalConfig = tidalConn.config;
-        const tidal = new TidalService({
-          clientId: tidalConfig.clientId,
-          clientSecret: tidalConfig.clientSecret,
-          accessToken: tidalConfig.accessToken,
-          refreshToken: tidalConfig.refreshToken,
-        });
-        const tracks = await tidal.getNewArrivalTracks();
-        
-        // New arrivals = album discovery - extract unique albums from tracks
-        const albumMap = new Map<string, AlbumToAdd>();
-        for (const track of tracks) {
-          if (track.album && !albumMap.has(track.album.id)) {
-            albumMap.set(track.album.id, {
-              albumName: track.album.title,
-              artistName: track.artists[0]?.name || 'Unknown Artist',
-              releaseType: 'album',
-              source: 'tidal-new-arrivals',
-            });
-          }
-        }
-        albumsToAdd = Array.from(albumMap.values()).slice(0, config.limit || 50);
-        break;
-      }
-
-      case 'tidal_mix': {
-        if (!tidalConn) throw new Error('No active TIDAL connection. Please add a TIDAL connection first.');
-        if (!isTidalConfig(tidalConn.config)) {
-          throw new Error('Invalid TIDAL connection config');
-        }
-        const tidalConfig = tidalConn.config;
-        const tidal = new TidalService({
-          clientId: tidalConfig.clientId,
-          clientSecret: tidalConfig.clientSecret,
-          accessToken: tidalConfig.accessToken,
-          refreshToken: tidalConfig.refreshToken,
-        });
-        
-        // Get My Mixes
-        const mixes = await tidal.getMyMixes();
-        const allTracks: Awaited<ReturnType<typeof tidal.getPlaylistTracks>> = [];
-        
-        for (const mix of mixes.slice(0, 3)) {
-          const tracks = await tidal.getPlaylistTracks(mix.id, 50);
-          allTracks.push(...tracks);
-        }
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of allTracks) {
-          for (const artist of track.artists) {
-            if (!artistMap.has(artist.name)) {
-              artistMap.set(artist.name, {
-                name: artist.name,
-                source: 'tidal-mix',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values()).slice(0, config.limit || 50);
         break;
       }
 
