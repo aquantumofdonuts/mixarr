@@ -9,12 +9,11 @@ import { createRedisConnection } from '../lib/redis.js';
 import prisma from '../lib/db.js';
 import { QUEUE_NAMES, type SubscriptionJobData } from './queue.js';
 import { LidarrService, LidarrCache } from '../services/lidarr.js';
-import { LastfmService } from '../services/lastfm.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
-import { isLastFMConfig, isTautulliConfig, isJellyfinConfig, isSlskdConfig, LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
+import { isSlskdConfig, LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 import { createLogger } from '../lib/logger.js';
@@ -31,6 +30,8 @@ import './strategies/musicbrainz.js';
 import './strategies/discogs.js';
 import './strategies/bandcamp.js';
 import './strategies/ai.js';
+import './strategies/tautulli.js';
+import './strategies/jellyfin.js';
 import { getStrategy } from './strategies/registry.js';
 import type { StrategyContext, ArtistToAdd, AlbumToAdd } from './strategies/types.js';
 import type { SubscriptionType } from '../schemas/subscription.js';
@@ -103,9 +104,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
     // Get all connections from the pre-built map
     const lidarrConn = findConnection('lidarr');
-    const lastfmConn = findConnection('lastfm');
-    const tautulliConn = findConnection('tautulli');
-    const jellyfinConn = findConnection('jellyfin');
     const slskdConn = findConnection('slskd');
 
     // Lidarr is optional - only needed for library dedup and 'auto' mode
@@ -151,188 +149,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       const result = await strategy.execute(strategyContext);
       artists = result.artists;
       albumsToAdd = result.albums;
-    } else {
-    // Fetch artists based on subscription type
-    switch (subscription.type) {
-      case 'tautulli_similar': {
-        // Get artists similar to user's top Plex listening history
-        if (!tautulliConn) throw new Error('No active Tautulli connection. Please add a Tautulli connection first.');
-        if (!lastfmConn) throw new Error('No active Last.fm connection. Required for similar artist lookup.');
-        if (!isLastFMConfig(lastfmConn.config)) {
-          throw new Error('Invalid Last.fm connection config');
-        }
-        if (!isTautulliConfig(tautulliConn.config)) {
-          throw new Error('Invalid Tautulli connection config');
-        }
-        
-        const tautulliConfig = tautulliConn.config;
-        const lastfmConfigSim = lastfmConn.config;
-        
-        // Import TautulliService dynamically to avoid circular dependencies
-        const { TautulliService } = await import('../services/tautulli.js');
-        const tautulli = new TautulliService();
-        const lastfmSim = new LastfmService({ apiKey: lastfmConfigSim.apiKey });
-        
-        // Config options
-        const period = config.period || 'month';
-        const seedLimit = config.seedLimit || 10;
-        const similarPerSeed = config.similarPerSeed || 5;
-        const totalLimit = config.limit || 50;
-        const minMatchCount = config.minMatchCount || 1;
-        
-        // Get top artists from Plex listening history
-        const topArtists = await tautulli.getTopArtists(
-          {
-            tautulliUrl: tautulliConfig.tautulliUrl,
-            tautulliApiKey: tautulliConfig.tautulliApiKey,
-            plexUserId: tautulliConfig.plexUserId,
-            plexLibraryId: tautulliConfig.plexLibraryId,
-          },
-          { period: period as 'week' | 'month' | 'year' | 'all', limit: seedLimit }
-        );
-        
-        if (topArtists.length === 0) {
-          throw new Error(`No listening history found for Plex user (period: ${period})`);
-        }
-        
-        // Collect similar artists from each seed using Last.fm
-        const similarMap = new Map<string, { name: string; mbid?: string; match: number; seedCount: number; sources: string[] }>();
-        
-        for (const seed of topArtists) {
-          try {
-            const similarArtists = await lastfmSim.getSimilarArtists(seed.name, similarPerSeed);
-            for (const similar of similarArtists) {
-              const key = similar.name.toLowerCase();
-              const existing = similarMap.get(key);
-              if (existing) {
-                // Seen from multiple seeds - increase relevance
-                existing.seedCount++;
-                existing.sources.push(seed.name);
-                if (similar.match > existing.match) {
-                  existing.match = similar.match;
-                }
-              } else {
-                similarMap.set(key, {
-                  name: similar.name,
-                  mbid: similar.mbid,
-                  match: similar.match,
-                  seedCount: 1,
-                  sources: [seed.name],
-                });
-              }
-            }
-          } catch {
-            // Skip this seed if API call fails
-          }
-        }
-        
-        // Filter by minMatchCount, sort by seedCount then match score
-        const sortedSimilar = Array.from(similarMap.values())
-          .filter(a => a.seedCount >= minMatchCount)
-          .sort((a, b) => {
-            if (b.seedCount !== a.seedCount) return b.seedCount - a.seedCount;
-            return b.match - a.match;
-          })
-          .slice(0, totalLimit);
-        
-        artists = sortedSimilar.map(a => ({
-          name: a.name,
-          mbid: a.mbid,
-          source: `tautulli-similar-${period}`,
-        }));
-        break;
-      }
-
-      case 'jellyfin_similar': {
-        // Get artists similar to user's top Jellyfin listening history
-        if (!jellyfinConn) throw new Error('No active Jellyfin connection. Please add a Jellyfin connection first.');
-        if (!lastfmConn) throw new Error('No active Last.fm connection. Required for similar artist lookup.');
-        if (!isLastFMConfig(lastfmConn.config)) {
-          throw new Error('Invalid Last.fm connection config');
-        }
-        if (!isJellyfinConfig(jellyfinConn.config)) {
-          throw new Error('Invalid Jellyfin connection config');
-        }
-        
-        const jellyfinConfig = jellyfinConn.config;
-        const lastfmConfigSim = lastfmConn.config;
-        
-        // Import JellyfinService dynamically to avoid circular dependencies
-        const { JellyfinService } = await import('../services/jellyfin.js');
-        const jellyfin = new JellyfinService();
-        const lastfmSim = new LastfmService({ apiKey: lastfmConfigSim.apiKey });
-        
-        // Config options (same as tautulli_similar)
-        const period = config.period || 'month';
-        const seedLimit = config.seedLimit || 10;
-        const similarPerSeed = config.similarPerSeed || 5;
-        const totalLimit = config.limit || 50;
-        const minMatchCount = config.minMatchCount || 1;
-        
-        // Get top artists from Jellyfin listening history
-        const topArtists = await jellyfin.getTopArtists(
-          {
-            jellyfinUrl: jellyfinConfig.jellyfinUrl,
-            jellyfinApiKey: jellyfinConfig.jellyfinApiKey,
-            jellyfinUserId: jellyfinConfig.jellyfinUserId,
-            jellyfinLibraryId: jellyfinConfig.jellyfinLibraryId,
-          },
-          { period: period as 'week' | 'month' | 'year' | 'all', limit: seedLimit }
-        );
-        
-        if (topArtists.length === 0) {
-          throw new Error(`No listening history found for Jellyfin user (period: ${period})`);
-        }
-        
-        // Collect similar artists from each seed using Last.fm
-        const similarMap = new Map<string, { name: string; mbid?: string; match: number; seedCount: number; sources: string[] }>();
-        
-        for (const seed of topArtists) {
-          try {
-            const similarArtists = await lastfmSim.getSimilarArtists(seed.name, similarPerSeed);
-            for (const similar of similarArtists) {
-              const key = similar.name.toLowerCase();
-              const existing = similarMap.get(key);
-              if (existing) {
-                // Seen from multiple seeds - increase relevance
-                existing.seedCount++;
-                existing.sources.push(seed.name);
-                if (similar.match > existing.match) {
-                  existing.match = similar.match;
-                }
-              } else {
-                similarMap.set(key, {
-                  name: similar.name,
-                  mbid: similar.mbid,
-                  match: similar.match,
-                  seedCount: 1,
-                  sources: [seed.name],
-                });
-              }
-            }
-          } catch {
-            // Skip this seed if API call fails
-          }
-        }
-        
-        // Filter by minMatchCount, sort by seedCount then match score
-        const sortedSimilar = Array.from(similarMap.values())
-          .filter(a => a.seedCount >= minMatchCount)
-          .sort((a, b) => {
-            if (b.seedCount !== a.seedCount) return b.seedCount - a.seedCount;
-            return b.match - a.match;
-          })
-          .slice(0, totalLimit);
-        
-        artists = sortedSimilar.map(a => ({
-          name: a.name,
-          mbid: a.mbid,
-          source: `jellyfin-similar-${period}`,
-        }));
-        break;
-      }
     }
-    } // end else (strategy not in registry)
 
     await job.updateProgress({ phase: 'fetched', artistCount: artists.length });
 
