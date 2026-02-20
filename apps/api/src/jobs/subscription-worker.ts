@@ -9,16 +9,12 @@ import { createRedisConnection } from '../lib/redis.js';
 import prisma from '../lib/db.js';
 import { QUEUE_NAMES, type SubscriptionJobData } from './queue.js';
 import { LidarrService, LidarrCache } from '../services/lidarr.js';
-import { SpotifyService } from '../services/spotify.js';
 import { LastfmService } from '../services/lastfm.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
-import { AIService } from '../services/ai.js';
-import { DiscogsService } from '../services/discogs.js';
-import { BandcampService } from '../services/bandcamp.js';
 
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
-import { isSpotifyConfig, isLastFMConfig, isTautulliConfig, isJellyfinConfig, isSlskdConfig, LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
+import { isLastFMConfig, isTautulliConfig, isJellyfinConfig, isSlskdConfig, LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 import { createLogger } from '../lib/logger.js';
@@ -31,6 +27,10 @@ import './strategies/lastfm.js';
 import './strategies/deezer.js';
 import './strategies/tidal.js';
 import './strategies/listenbrainz.js';
+import './strategies/musicbrainz.js';
+import './strategies/discogs.js';
+import './strategies/bandcamp.js';
+import './strategies/ai.js';
 import { getStrategy } from './strategies/registry.js';
 import type { StrategyContext, ArtistToAdd, AlbumToAdd } from './strategies/types.js';
 import type { SubscriptionType } from '../schemas/subscription.js';
@@ -103,11 +103,9 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
     // Get all connections from the pre-built map
     const lidarrConn = findConnection('lidarr');
-    const spotifyConn = findConnection('spotify');
     const lastfmConn = findConnection('lastfm');
     const tautulliConn = findConnection('tautulli');
     const jellyfinConn = findConnection('jellyfin');
-    const discogsConn = findConnection('discogs');
     const slskdConn = findConnection('slskd');
 
     // Lidarr is optional - only needed for library dedup and 'auto' mode
@@ -156,79 +154,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     } else {
     // Fetch artists based on subscription type
     switch (subscription.type) {
-      case 'musicbrainz_new': {
-        // New releases from MusicBrainz - discover albums, not artists
-        const year = new Date().getFullYear();
-        const result = await musicbrainz.searchByYear(year, config.limit || 50);
-        
-        // Release groups = album discovery
-        albumsToAdd = result.releaseGroups.map(rg => {
-          const artistCredit = rg['artist-credit'];
-          const artist = artistCredit?.[0]?.artist;
-          return {
-            albumName: rg.title,
-            artistName: artist?.name || 'Unknown Artist',
-            albumMbid: rg.id,
-            artistMbid: artist?.id,
-            releaseDate: rg['first-release-date'],
-            releaseYear: rg['first-release-date'] ? parseInt(rg['first-release-date'].split('-')[0]) : year,
-            releaseType: rg['primary-type'] || 'album',
-            source: 'musicbrainz-new',
-          };
-        });
-        break;
-      }
-
-      case 'ai_recommendation': {
-        // AI recommendations based on source library (Spotify or Last.fm)
-        const source = config.source as 'spotify' | 'lastfm';
-        const strategy = config.strategy || 'similar';
-        const limit = config.limit || 20;
-        
-        // Get source artists to analyze
-        let sourceArtists: string[] = [];
-        
-        if (source === 'spotify') {
-          if (!spotifyConn) throw new Error('No active Spotify connection');
-          if (!isSpotifyConfig(spotifyConn.config)) {
-            throw new Error('Invalid Spotify connection config');
-          }
-          const spotifyConfig = spotifyConn.config;
-          const spotify = new SpotifyService(spotifyConfig);
-          const followed = await spotify.getAllFollowedArtists();
-          sourceArtists = followed.slice(0, 20).map(a => a.name);
-        } else if (source === 'lastfm') {
-          if (!lastfmConn) throw new Error('No active Last.fm connection');
-          if (!isLastFMConfig(lastfmConn.config)) {
-            throw new Error('Invalid Last.fm connection config');
-          }
-          const lastfm = new LastfmService({ apiKey: lastfmConn.config.apiKey });
-          const top = await lastfm.getTopArtists(20);
-          sourceArtists = top.artists.map(a => a.name);
-        }
-        
-        if (sourceArtists.length === 0) {
-          throw new Error(`No artists found in ${source} library to analyze`);
-        }
-        
-        // Get AI recommendations
-        const aiService = new AIService();
-        await aiService.loadSettings();
-        
-        // Override strategy from subscription config
-        const recs = await aiService.getRecommendationsWithStrategy(
-          sourceArtists,
-          strategy,
-          limit
-        );
-        
-        artists = recs.map(r => ({
-          name: r.name,
-          source: `ai-${source}-${strategy}`,
-        }));
-        break;
-      }
-
       case 'tautulli_similar': {
         // Get artists similar to user's top Plex listening history
         if (!tautulliConn) throw new Error('No active Tautulli connection. Please add a Tautulli connection first.');
@@ -403,122 +328,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
           name: a.name,
           mbid: a.mbid,
           source: `jellyfin-similar-${period}`,
-        }));
-        break;
-      }
-
-      // DISCOGS SUBSCRIPTION TYPES
-
-      case 'discogs_label': {
-        if (!discogsConn) throw new Error('No active Discogs connection. Please add a Discogs connection first.');
-        const discogsConfig = discogsConn.config as { token?: string };
-        if (!discogsConfig.token) throw new Error('Discogs token not configured');
-        const labelId = config.labelId;
-        if (!labelId) throw new Error('Label ID is required for Discogs Label subscription');
-        
-        const discogs = new DiscogsService(discogsConfig.token);
-        const limit = config.limit || 50;
-        
-        // Fetch releases from the label
-        const result = await discogs.getLabelReleases(labelId, 1);
-        
-        // Extract unique artists from releases
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const release of result.releases.slice(0, limit)) {
-          // The artist field may contain "Various" or actual artist name
-          if (release.artist && release.artist.toLowerCase() !== 'various') {
-            if (!artistMap.has(release.artist)) {
-              artistMap.set(release.artist, {
-                name: release.artist,
-                source: `discogs-label-${labelId}`,
-              });
-            }
-          }
-        }
-        
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'discogs_style': {
-        if (!discogsConn) throw new Error('No active Discogs connection. Please add a Discogs connection first.');
-        const discogsConfig = discogsConn.config as { token?: string };
-        if (!discogsConfig.token) throw new Error('Discogs token not configured');
-        const style = config.style;
-        if (!style) throw new Error('Style is required for Discogs Style subscription');
-        
-        const discogs = new DiscogsService(discogsConfig.token);
-        const limit = config.limit || 50;
-        
-        // Search for releases by style
-        const result = await discogs.searchByStyle(style, 1);
-        
-        // Extract unique artists from search results
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const item of result.results.slice(0, limit)) {
-          // The title often contains "Artist - Album" format
-          const titleParts = item.title.split(' - ');
-          if (titleParts.length > 0) {
-            const artistName = titleParts[0].trim();
-            if (artistName && artistName.toLowerCase() !== 'various' && artistName.toLowerCase() !== 'various artists') {
-              if (!artistMap.has(artistName)) {
-                artistMap.set(artistName, {
-                  name: artistName,
-                  source: `discogs-style-${style}`,
-                });
-              }
-            }
-          }
-        }
-        
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      // BANDCAMP SUBSCRIPTION TYPES
-
-      case 'bandcamp_tag': {
-        // Bandcamp is public - no connection required
-        const tag = config.tag;
-        if (!tag) throw new Error('Tag is required for Bandcamp Tag subscription');
-        
-        const bandcamp = new BandcampService();
-        const limit = config.limit || 50;
-        const sort = config.sort || 'pop';
-        
-        const result = await bandcamp.getTagReleases(tag, sort, 0);
-        
-        // Extract unique artists from releases
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const release of result.releases.slice(0, limit)) {
-          if (release.artistName && !artistMap.has(release.artistName)) {
-            artistMap.set(release.artistName, {
-              name: release.artistName,
-              source: `bandcamp-tag-${tag}`,
-            });
-          }
-        }
-        
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'bandcamp_new': {
-        // New releases by tag - discover albums, not artists
-        const tag = config.tag || 'all';
-        const limit = config.limit || 50;
-        
-        const bandcamp = new BandcampService();
-        
-        // Sort by date to get newest releases
-        const result = await bandcamp.getTagReleases(tag, 'date', 0);
-        
-        // New releases = album discovery
-        albumsToAdd = result.releases.slice(0, limit).map(release => ({
-          albumName: release.title,
-          artistName: release.artistName,
-          releaseType: release.type === 'a' ? 'album' : 'single',
-          source: `bandcamp-new-${tag}`,
         }));
         break;
       }
