@@ -24,6 +24,172 @@ const logger = createLogger('ConnectionsRoute');
 
 export const connectionsRouter = Router();
 
+// Strategy map for connection test handlers
+type ConnectionTestResult = {
+  success: boolean;
+  message: string;
+  details?: any;
+  needsAuthorization?: boolean;
+};
+
+const connectionTestHandlers: Record<string, (config: Record<string, any>) => Promise<ConnectionTestResult>> = {
+  lidarr: async (config) => {
+    const service = new LidarrService({
+      url: config.url,
+      apiKey: config.apiKey,
+    });
+    const testResult = await service.testConnection();
+    return {
+      success: testResult.success,
+      message: testResult.success
+        ? `Connected to Lidarr v${testResult.version}`
+        : testResult.error || 'Connection failed',
+      details: { version: testResult.version },
+    };
+  },
+
+  spotify: async (config) => {
+    const service = new SpotifyService({
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      accessToken: config.accessToken,
+      refreshToken: config.refreshToken,
+    });
+    const testResult = await service.testConnection();
+    return {
+      success: testResult.success,
+      message: testResult.success
+        ? `Connected as ${testResult.user}`
+        : testResult.error || 'Connection failed',
+      details: { user: testResult.user },
+    };
+  },
+
+  lastfm: async (config) => {
+    const service = new LastfmService({ apiKey: config.apiKey });
+    const testResult = await service.testConnection();
+    return {
+      success: testResult.success,
+      message: testResult.success
+        ? 'Connected to Last.fm'
+        : testResult.error || 'Connection failed',
+    };
+  },
+
+  tautulli: async (config) => {
+    const service = new TautulliService();
+    const testResult = await service.testConnection({
+      tautulliUrl: config.tautulliUrl,
+      tautulliApiKey: config.tautulliApiKey,
+    });
+    return {
+      success: testResult.success,
+      message: testResult.success
+        ? 'Connected to Tautulli'
+        : testResult.error || 'Connection failed',
+    };
+  },
+
+  jellyfin: async (config) => {
+    const { JellyfinService } = await import('../services/jellyfin.js');
+    const service = new JellyfinService();
+    const testResult = await service.testConnection({
+      jellyfinUrl: config.jellyfinUrl,
+      jellyfinApiKey: config.jellyfinApiKey,
+    });
+    return {
+      success: testResult.success,
+      message: testResult.success
+        ? `Connected to ${testResult.serverName || 'Jellyfin'}`
+        : testResult.error || 'Connection failed',
+    };
+  },
+
+  deezer: async (config) => {
+    if (!config.accessToken) {
+      return {
+        success: false,
+        message: 'Deezer authorization required. Click "Authorize Deezer" to connect your account.',
+        needsAuthorization: true,
+      };
+    }
+
+    const service = new DeezerOAuthService({
+      appId: config.appId,
+      appSecret: config.appSecret,
+      accessToken: config.accessToken,
+    });
+    const testResult = await service.testConnection();
+    return {
+      success: testResult.success,
+      message: testResult.success
+        ? `Connected as ${testResult.user}`
+        : testResult.error || 'Connection failed',
+      details: { user: testResult.user },
+    };
+  },
+
+  tidal: async (config) => {
+    if (!config.accessToken || !config.refreshToken) {
+      return {
+        success: false,
+        message: 'TIDAL authorization required. Click "Authorize TIDAL" to connect your account.',
+        needsAuthorization: true,
+      };
+    }
+
+    const service = new TidalService({
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      accessToken: config.accessToken,
+      refreshToken: config.refreshToken,
+    });
+    const testResult = await service.testConnection();
+    return {
+      success: testResult.success,
+      message: testResult.success
+        ? `Connected as ${testResult.user}`
+        : testResult.error || 'Connection failed',
+      details: { user: testResult.user },
+    };
+  },
+
+  listenbrainz: async (config) => {
+    try {
+      const service = new ListenBrainzService(config.username, config.token);
+      const isValid = await service.validateUser();
+      return {
+        success: isValid,
+        message: isValid
+          ? `Connected to ListenBrainz as ${config.username}`
+          : config.token
+            ? 'Invalid token or username mismatch. Verify your token matches your username.'
+            : 'User not found on ListenBrainz. Check the username spelling.',
+      };
+    } catch (error) {
+      logger.error('ListenBrainz connection test failed', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return {
+        success: false,
+        message: sanitizeConnectionError(error),
+      };
+    }
+  },
+
+  discogs: async (config) => {
+    const service = new DiscogsService(config.token);
+    const testResult = await service.testConnection();
+    return {
+      success: testResult.success,
+      message: testResult.success
+        ? 'Connected to Discogs'
+        : testResult.error || 'Connection failed',
+    };
+  },
+};
+
 // PUBLIC ROUTES (no auth required)
 
 // Spotify OAuth callback - must be public as Spotify redirects here
@@ -496,192 +662,25 @@ connectionsRouter.post('/:id/test', async (req, res) => {
       res.status(400).json({ error: 'Invalid connection ID' });
       return;
     }
-    
+
     const connection = await prisma.connection.findUnique({
       where: { id },
     });
-    
+
     if (!connection || !canAccessConnection(req, connection)) {
       res.status(404).json({ error: 'Connection not found' });
       return;
     }
 
     const config = connection.config as Record<string, any>;
-    let result: { success: boolean; message: string; details?: any; needsAuthorization?: boolean };
+    const handler = connectionTestHandlers[connection.type];
 
-    switch (connection.type) {
-      case 'lidarr': {
-        const service = new LidarrService({
-          url: config.url,
-          apiKey: config.apiKey,
-        });
-        const testResult = await service.testConnection();
-        result = {
-          success: testResult.success,
-          message: testResult.success 
-            ? `Connected to Lidarr v${testResult.version}` 
-            : testResult.error || 'Connection failed',
-          details: { version: testResult.version },
-        };
-        break;
-      }
-      
-      case 'spotify': {
-        const service = new SpotifyService({
-          clientId: config.clientId,
-          clientSecret: config.clientSecret,
-          accessToken: config.accessToken,
-          refreshToken: config.refreshToken,
-        });
-        const testResult = await service.testConnection();
-        result = {
-          success: testResult.success,
-          message: testResult.success 
-            ? `Connected as ${testResult.user}` 
-            : testResult.error || 'Connection failed',
-          details: { user: testResult.user },
-        };
-        break;
-      }
-      
-      case 'lastfm': {
-        const service = new LastfmService({ apiKey: config.apiKey });
-        const testResult = await service.testConnection();
-        result = {
-          success: testResult.success,
-          message: testResult.success 
-            ? 'Connected to Last.fm' 
-            : testResult.error || 'Connection failed',
-        };
-        break;
-      }
-      
-      case 'tautulli': {
-        const service = new TautulliService();
-        const testResult = await service.testConnection({
-          tautulliUrl: config.tautulliUrl,
-          tautulliApiKey: config.tautulliApiKey,
-        });
-        result = {
-          success: testResult.success,
-          message: testResult.success 
-            ? 'Connected to Tautulli' 
-            : testResult.error || 'Connection failed',
-        };
-        break;
-      }
-      
-      case 'jellyfin': {
-        const { JellyfinService } = await import('../services/jellyfin.js');
-        const service = new JellyfinService();
-        const testResult = await service.testConnection({
-          jellyfinUrl: config.jellyfinUrl,
-          jellyfinApiKey: config.jellyfinApiKey,
-        });
-        result = {
-          success: testResult.success,
-          message: testResult.success 
-            ? `Connected to ${testResult.serverName || 'Jellyfin'}` 
-            : testResult.error || 'Connection failed',
-        };
-        break;
-      }
-      
-      case 'deezer': {
-        // Deezer requires OAuth authorization first
-        if (!config.accessToken) {
-          result = {
-            success: false,
-            message: 'Deezer authorization required. Click "Authorize Deezer" to connect your account.',
-            needsAuthorization: true,
-          };
-          break;
-        }
-        
-        const service = new DeezerOAuthService({
-          appId: config.appId,
-          appSecret: config.appSecret,
-          accessToken: config.accessToken,
-        });
-        const testResult = await service.testConnection();
-        result = {
-          success: testResult.success,
-          message: testResult.success 
-            ? `Connected as ${testResult.user}` 
-            : testResult.error || 'Connection failed',
-          details: { user: testResult.user },
-        };
-        break;
-      }
-      
-      case 'tidal': {
-        // TIDAL requires OAuth authorization first
-        if (!config.accessToken || !config.refreshToken) {
-          result = {
-            success: false,
-            message: 'TIDAL authorization required. Click "Authorize TIDAL" to connect your account.',
-            needsAuthorization: true,
-          };
-          break;
-        }
-        
-        const service = new TidalService({
-          clientId: config.clientId,
-          clientSecret: config.clientSecret,
-          accessToken: config.accessToken,
-          refreshToken: config.refreshToken,
-        });
-        const testResult = await service.testConnection();
-        result = {
-          success: testResult.success,
-          message: testResult.success 
-            ? `Connected as ${testResult.user}` 
-            : testResult.error || 'Connection failed',
-          details: { user: testResult.user },
-        };
-        break;
-      }
-      
-      case 'listenbrainz': {
-        try {
-          const service = new ListenBrainzService(config.username, config.token);
-          const isValid = await service.validateUser();
-          result = {
-            success: isValid,
-            message: isValid 
-              ? `Connected to ListenBrainz as ${config.username}` 
-              : config.token 
-                ? 'Invalid token or username mismatch. Verify your token matches your username.'
-                : 'User not found on ListenBrainz. Check the username spelling.',
-          };
-        } catch (error) {
-          logger.error('ListenBrainz connection test failed', {
-            error: error instanceof Error ? error.message : String(error),
-            stack: error instanceof Error ? error.stack : undefined,
-          });
-          result = {
-            success: false,
-            message: sanitizeConnectionError(error),
-          };
-        }
-        break;
-      }
-      
-      case 'discogs': {
-        const service = new DiscogsService(config.token);
-        const testResult = await service.testConnection();
-        result = {
-          success: testResult.success,
-          message: testResult.success 
-            ? 'Connected to Discogs' 
-            : testResult.error || 'Connection failed',
-        };
-        break;
-      }
-      
-      default:
-        result = { success: false, message: 'Unknown connection type' };
+    if (!handler) {
+      res.json({ success: false, message: `No test handler for type: ${connection.type}` });
+      return;
     }
+
+    const result = await handler(config);
 
     // Update last test timestamp
     await prisma.connection.update({
@@ -695,9 +694,9 @@ connectionsRouter.post('/:id/test', async (req, res) => {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
-    res.status(500).json({ 
-      success: false, 
-      message: sanitizeConnectionError(error) 
+    res.status(500).json({
+      success: false,
+      message: sanitizeConnectionError(error),
     });
   }
 });
