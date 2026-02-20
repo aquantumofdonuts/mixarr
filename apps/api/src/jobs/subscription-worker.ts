@@ -13,8 +13,7 @@ import { SpotifyService } from '../services/spotify.js';
 import { LastfmService } from '../services/lastfm.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { AIService } from '../services/ai.js';
-import { DeezerOAuthService } from '../services/deezer-oauth.js';
-import { getDeezerChartArtists, getDeezerGenreArtists, searchDeezerArtists } from '../services/deezer.js';
+
 import { TidalService } from '../services/tidal.js';
 import { ListenBrainzService, VALID_PERIODS, type ListenBrainzPeriod } from '../services/listenbrainz.js';
 import { DiscogsService } from '../services/discogs.js';
@@ -22,7 +21,7 @@ import { BandcampService } from '../services/bandcamp.js';
 
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
-import { isSpotifyConfig, isLastFMConfig, isDeezerConfig, isTidalConfig, isListenBrainzConfig, isTautulliConfig, isJellyfinConfig, isSlskdConfig, LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
+import { isSpotifyConfig, isLastFMConfig, isTidalConfig, isListenBrainzConfig, isTautulliConfig, isJellyfinConfig, isSlskdConfig, LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
 import { findOrCreateReviewItem } from '../utils/review-queue.js';
 import { notificationService } from '../services/notifications.js';
 import { createLogger } from '../lib/logger.js';
@@ -32,6 +31,7 @@ import { SlskdSubscriptionProcessor } from '../services/slskd-subscription-proce
 // Strategy pattern — register strategies at import time
 import './strategies/spotify.js';
 import './strategies/lastfm.js';
+import './strategies/deezer.js';
 import { getStrategy } from './strategies/registry.js';
 import type { StrategyContext, ArtistToAdd, AlbumToAdd } from './strategies/types.js';
 import type { SubscriptionType } from '../schemas/subscription.js';
@@ -108,7 +108,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     const lastfmConn = findConnection('lastfm');
     const tautulliConn = findConnection('tautulli');
     const jellyfinConn = findConnection('jellyfin');
-    const deezerConn = findConnection('deezer');
     const tidalConn = findConnection('tidal');
     const listenbrainzConn = findConnection('listenbrainz');
     const discogsConn = findConnection('discogs');
@@ -407,181 +406,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
           name: a.name,
           mbid: a.mbid,
           source: `jellyfin-similar-${period}`,
-        }));
-        break;
-      }
-
-      // DEEZER SUBSCRIPTION TYPES
-
-      case 'deezer_favorites': {
-        if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        if (!isDeezerConfig(deezerConn.config)) {
-          throw new Error('Invalid Deezer connection config');
-        }
-        const deezerConfig = deezerConn.config;
-        const deezer = new DeezerOAuthService({
-          appId: deezerConfig.appId,
-          appSecret: deezerConfig.appSecret,
-          accessToken: deezerConfig.accessToken,
-        });
-        const tracks = await deezer.getAllFavoriteTracks();
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          if (track.artist && !artistMap.has(track.artist.name)) {
-            artistMap.set(track.artist.name, {
-              name: track.artist.name,
-              source: 'deezer-favorites',
-            });
-          }
-        }
-        artists = Array.from(artistMap.values()).slice(0, config.limit || 50);
-        break;
-      }
-
-      case 'deezer_history': {
-        if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        if (!isDeezerConfig(deezerConn.config)) {
-          throw new Error('Invalid Deezer connection config');
-        }
-        const deezerConfig = deezerConn.config;
-        const deezer = new DeezerOAuthService({
-          appId: deezerConfig.appId,
-          appSecret: deezerConfig.appSecret,
-          accessToken: deezerConfig.accessToken,
-        });
-        const tracks = await deezer.getAllListeningHistory();
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          if (track.artist && !artistMap.has(track.artist.name)) {
-            artistMap.set(track.artist.name, {
-              name: track.artist.name,
-              source: 'deezer-history',
-            });
-          }
-        }
-        artists = Array.from(artistMap.values()).slice(0, config.limit || 50);
-        break;
-      }
-
-      case 'deezer_flow': {
-        if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        if (!isDeezerConfig(deezerConn.config)) {
-          throw new Error('Invalid Deezer connection config');
-        }
-        const deezerConfig = deezerConn.config;
-        const deezer = new DeezerOAuthService({
-          appId: deezerConfig.appId,
-          appSecret: deezerConfig.appSecret,
-          accessToken: deezerConfig.accessToken,
-        });
-        const flow = await deezer.getFlow(config.limit || 50);
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of flow.data) {
-          if (track.artist && !artistMap.has(track.artist.name)) {
-            artistMap.set(track.artist.name, {
-              name: track.artist.name,
-              source: 'deezer-flow',
-            });
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'deezer_playlist': {
-        if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        if (!isDeezerConfig(deezerConn.config)) {
-          throw new Error('Invalid Deezer connection config');
-        }
-        const deezerConfig = deezerConn.config;
-        const deezer = new DeezerOAuthService({
-          appId: deezerConfig.appId,
-          appSecret: deezerConfig.appSecret,
-          accessToken: deezerConfig.accessToken,
-        });
-        const tracks = await deezer.getAllPlaylistTracks(config.playlistId);
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const track of tracks) {
-          if (track.artist && !artistMap.has(track.artist.name)) {
-            artistMap.set(track.artist.name, {
-              name: track.artist.name,
-              source: `deezer-playlist-${config.playlistId}`,
-            });
-          }
-        }
-        artists = Array.from(artistMap.values());
-        break;
-      }
-
-      case 'deezer_playlists': {
-        // All artists from all user's playlists
-        if (!deezerConn) throw new Error('No active Deezer connection. Please add a Deezer connection first.');
-        if (!isDeezerConfig(deezerConn.config)) {
-          throw new Error('Invalid Deezer connection config');
-        }
-        const deezerConfig = deezerConn.config;
-        const deezer = new DeezerOAuthService({
-          appId: deezerConfig.appId,
-          appSecret: deezerConfig.appSecret,
-          accessToken: deezerConfig.accessToken,
-        });
-        const playlists = await deezer.getAllPlaylists();
-        
-        const artistMap = new Map<string, ArtistToAdd>();
-        for (const playlist of playlists.slice(0, 10)) { // Limit to first 10 playlists
-          const tracks = await deezer.getAllPlaylistTracks(playlist.id.toString());
-          for (const track of tracks) {
-            if (track.artist && !artistMap.has(track.artist.name)) {
-              artistMap.set(track.artist.name, {
-                name: track.artist.name,
-                source: 'deezer-playlists',
-              });
-            }
-          }
-        }
-        artists = Array.from(artistMap.values()).slice(0, config.limit || 50);
-        break;
-      }
-
-      case 'deezer_chart': {
-        // Public API - no authentication required
-        const chartArtists = await getDeezerChartArtists(config.limit || 100);
-        
-        artists = chartArtists.map(a => ({
-          name: a.name,
-          source: 'deezer-chart',
-        }));
-        break;
-      }
-
-      case 'deezer_genre': {
-        // Public API - no authentication required
-        const genreId = config.genreId;
-        if (!genreId) throw new Error('Genre ID is required for Deezer Genre subscription');
-        
-        const genreArtists = await getDeezerGenreArtists(genreId, config.limit || 100);
-        
-        artists = genreArtists.map(a => ({
-          name: a.name,
-          source: `deezer-genre-${genreId}`,
-        }));
-        break;
-      }
-
-      case 'deezer_search': {
-        // Public API - no authentication required
-        const query = config.query;
-        if (!query) throw new Error('Search query is required for Deezer Search subscription');
-        
-        const searchResults = await searchDeezerArtists(query, config.limit || 25);
-        
-        artists = searchResults.map(a => ({
-          name: a.name,
-          source: 'deezer-search',
         }));
         break;
       }
