@@ -29,8 +29,9 @@ import { createLogger } from '../lib/logger.js';
 import { SlskdService } from '../services/slskd.js';
 import { SlskdSubscriptionProcessor } from '../services/slskd-subscription-processor.js';
 
-// Strategy pattern — register Spotify strategies at import time
+// Strategy pattern — register strategies at import time
 import './strategies/spotify.js';
+import './strategies/lastfm.js';
 import { getStrategy } from './strategies/registry.js';
 import type { StrategyContext, ArtistToAdd, AlbumToAdd } from './strategies/types.js';
 import type { SubscriptionType } from '../schemas/subscription.js';
@@ -159,51 +160,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     } else {
     // Fetch artists based on subscription type
     switch (subscription.type) {
-      case 'lastfm_chart': {
-        if (!lastfmConn) throw new Error('No active Last.fm connection');
-        if (!isLastFMConfig(lastfmConn.config)) {
-          throw new Error('Invalid Last.fm connection config');
-        }
-        const lastfm = new LastfmService({ apiKey: lastfmConn.config.apiKey });
-        const result = await lastfm.getTopArtists(config.limit || 50);
-        artists = result.artists.map(a => ({
-          name: a.name,
-          mbid: a.mbid,
-          source: 'lastfm-chart',
-        }));
-        break;
-      }
-
-      case 'lastfm_tag': {
-        if (!lastfmConn) throw new Error('No active Last.fm connection');
-        if (!isLastFMConfig(lastfmConn.config)) {
-          throw new Error('Invalid Last.fm connection config');
-        }
-        const lastfm = new LastfmService({ apiKey: lastfmConn.config.apiKey });
-        const result = await lastfm.getTagTopArtists(config.tag, config.limit || 50);
-        artists = result.artists.map(a => ({
-          name: a.name,
-          mbid: a.mbid,
-          source: `lastfm-tag-${config.tag}`,
-        }));
-        break;
-      }
-
-      case 'lastfm_geo': {
-        if (!lastfmConn) throw new Error('No active Last.fm connection');
-        if (!isLastFMConfig(lastfmConn.config)) {
-          throw new Error('Invalid Last.fm connection config');
-        }
-        const lastfm = new LastfmService({ apiKey: lastfmConn.config.apiKey });
-        const result = await lastfm.getGeoTopArtists(config.country, config.limit || 50);
-        artists = result.artists.map(a => ({
-          name: a.name,
-          mbid: a.mbid,
-          source: `lastfm-geo-${config.country}`,
-        }));
-        break;
-      }
-
       case 'musicbrainz_new': {
         // New releases from MusicBrainz - discover albums, not artists
         const year = new Date().getFullYear();
@@ -273,95 +229,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         artists = recs.map(r => ({
           name: r.name,
           source: `ai-${source}-${strategy}`,
-        }));
-        break;
-      }
-
-      case 'lastfm_library': {
-        // Sync user's Last.fm top artists from scrobble history
-        if (!lastfmConn) throw new Error('No active Last.fm connection');
-        if (!isLastFMConfig(lastfmConn.config)) {
-          throw new Error('Invalid Last.fm connection config');
-        }
-        const lastfmConfig = lastfmConn.config;
-        if (!lastfmConfig.username) {
-          throw new Error('Last.fm connection is missing username. Please update your Last.fm connection with your username.');
-        }
-        const lastfm = new LastfmService({ apiKey: lastfmConfig.apiKey });
-        const period = config.period || 'overall'; // overall, 7day, 1month, 3month, 6month, 12month
-        const limit = config.limit || 100;
-        const result = await lastfm.getUserTopArtists(lastfmConfig.username, period, limit);
-        artists = result.artists.map(a => ({
-          name: a.name,
-          mbid: a.mbid,
-          source: `lastfm-library-${period}`,
-        }));
-        break;
-      }
-
-      case 'lastfm_similar': {
-        // Get artists similar to user's top scrobbled artists
-        if (!lastfmConn) throw new Error('No active Last.fm connection');
-        if (!isLastFMConfig(lastfmConn.config)) {
-          throw new Error('Invalid Last.fm connection config');
-        }
-        const lastfmConfigSim = lastfmConn.config;
-        if (!lastfmConfigSim.username) {
-          throw new Error('Last.fm connection is missing username. Please update your Last.fm connection with your username.');
-        }
-        const lastfmSim = new LastfmService({ apiKey: lastfmConfigSim.apiKey });
-        
-        // Config options
-        const topArtistsLimit = config.topArtistsLimit || 20; // How many of user's top artists to use as seeds
-        const similarPerArtist = config.similarPerArtist || 10; // How many similar artists per seed
-        const period = config.period || 'overall';
-        const totalLimit = config.limit || 100; // Max total results
-        
-        // Get user's top artists as seed artists
-        const topResult = await lastfmSim.getUserTopArtists(lastfmConfigSim.username, period, topArtistsLimit);
-        const seedArtists = topResult.artists;
-        
-        // Collect similar artists from each seed
-        const similarMap = new Map<string, { name: string; mbid?: string; match: number; seedCount: number }>();
-        
-        for (const seed of seedArtists) {
-          try {
-            const similarArtists = await lastfmSim.getSimilarArtists(seed.name, similarPerArtist);
-            for (const similar of similarArtists) {
-              const key = similar.name.toLowerCase();
-              const existing = similarMap.get(key);
-              if (existing) {
-                // Seen from multiple seeds - increase relevance
-                existing.seedCount++;
-                if (similar.match > existing.match) {
-                  existing.match = similar.match;
-                }
-              } else {
-                similarMap.set(key, {
-                  name: similar.name,
-                  mbid: similar.mbid,
-                  match: similar.match,
-                  seedCount: 1,
-                });
-              }
-            }
-          } catch {
-            // Skip this seed if API call fails
-          }
-        }
-        
-        // Sort by seedCount (appears similar to multiple top artists) then by match score
-        const sortedSimilar = Array.from(similarMap.values())
-          .sort((a, b) => {
-            if (b.seedCount !== a.seedCount) return b.seedCount - a.seedCount;
-            return b.match - a.match;
-          })
-          .slice(0, totalLimit);
-        
-        artists = sortedSimilar.map(a => ({
-          name: a.name,
-          mbid: a.mbid,
-          source: `lastfm-similar-${period}`,
         }));
         break;
       }
