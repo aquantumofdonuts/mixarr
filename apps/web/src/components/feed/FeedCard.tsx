@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
  * Examples: 5000000 -> "5M", 123456 -> "123K", 999 -> "999"
  */
 function formatListeners(count: number): string {
+  if (count < 0) return '0';
   if (count >= 1000000) {
     return `${Math.floor(count / 1000000)}M`;
   }
@@ -146,7 +147,7 @@ export function FeedCard({
             className="text-xs text-muted-foreground truncate mt-1"
           >
             {tags!.map((tag, idx) => (
-              <span key={idx} className="inline-flex items-center">
+              <span key={`${tag}-${idx}`} className="inline-flex items-center">
                 {idx > 0 && <span className="mx-0.5 text-muted-foreground/60">,</span>}
                 <span className="text-foreground/80">{tag}</span>
               </span>
