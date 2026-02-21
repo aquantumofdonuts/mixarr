@@ -10,6 +10,7 @@ import {
   userSettingKeySchema,
   updatePreferencesSchema,
   globalSettingKeySchema,
+  bulkUpdateGlobalSettingsSchema,
 } from '../schemas/settings.js';
 
 const logger = createLogger('SettingsRoute');
@@ -158,6 +159,25 @@ settingsRouter.get('/global', requireAdmin, async (_req, res) => {
       stack: error instanceof Error ? error.stack : undefined,
     });
     res.status(500).json({ error: 'Failed to fetch global settings' });
+  }
+});
+
+// Admin: Bulk update global settings
+settingsRouter.put('/global', requireAdmin, validateBody(bulkUpdateGlobalSettingsSchema), async (req, res) => {
+  try {
+    const { settings } = req.body;
+
+    for (const [key, value] of Object.entries(settings)) {
+      await SettingsService.setGlobalSetting(key, value as any);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Failed to bulk update global settings', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    res.status(500).json({ error: 'Failed to save global settings' });
   }
 });
 

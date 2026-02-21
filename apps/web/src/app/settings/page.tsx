@@ -158,17 +158,12 @@ export default function SettingsPage() {
   const handleSaveGlobal = async () => {
     setIsSavingGlobal(true);
     
-    // Save each global setting
-    for (const [key, value] of Object.entries(globalSettings)) {
-      const { error } = await api.put(`/api/settings/global/${key}`, { value });
-      if (error) {
-        addToast({ type: 'error', title: 'Failed to save global settings', message: error });
-        setIsSavingGlobal(false);
-        return;
-      }
+    const { error } = await api.put('/api/settings/global', { settings: globalSettings });
+    if (error) {
+      addToast({ type: 'error', title: 'Failed to save global settings', message: error });
+    } else {
+      addToast({ type: 'success', title: 'Global settings saved' });
     }
-    
-    addToast({ type: 'success', title: 'Global settings saved' });
     setIsSavingGlobal(false);
   };
 
