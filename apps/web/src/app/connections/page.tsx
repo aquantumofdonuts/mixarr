@@ -119,7 +119,6 @@ export default function ConnectionsPage() {
   };
 
   // Derived state
-  const isAdmin = user?.role === 'admin';
   const showWelcomeBanner = connections.length === 0 && !welcomeDismissed;
 
   return (
