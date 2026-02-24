@@ -64,6 +64,9 @@ RUN apk add --no-cache \
     mariadb-client \
     redis
 
+# Create non-root user for app processes
+RUN addgroup -S mixarr && adduser -S -G mixarr -h /app mixarr
+
 # Create directories
 RUN mkdir -p /app/api /app/web /data/certs /data/mysql /data/redis /var/log/supervisor /run/mysqld \
     && chown -R mysql:mysql /data/mysql /run/mysqld
@@ -91,6 +94,9 @@ WORKDIR /app
 COPY --from=builder-web /app/apps/web/.next/standalone /app/web/
 COPY --from=builder-web /app/apps/web/.next/static /app/web/apps/web/.next/static
 COPY --from=builder-web /app/apps/web/public /app/web/apps/web/public
+
+# Fix ownership for non-root user
+RUN chown -R mixarr:mixarr /app
 
 # -----------------------------------------------------------------------------
 # MariaDB configuration
@@ -188,6 +194,7 @@ stderr_logfile_maxbytes=0
 
 [program:api]
 command=node /app/api/dist/index.js
+user=mixarr
 directory=/app/api
 autostart=true
 autorestart=true
@@ -198,10 +205,11 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=NODE_ENV=production,PORT=3005,DATABASE_URL="mysql://mixarr:mixarr@127.0.0.1:3306/mixarr",REDIS_URL="redis://127.0.0.1:6379"
+environment=NODE_ENV=production,PORT=3005,DATABASE_URL="%(ENV_DATABASE_URL)s",REDIS_URL="redis://127.0.0.1:6379",SESSION_SECRET="%(ENV_SESSION_SECRET)s"
 
 [program:web]
 command=node /app/web/apps/web/server.js
+user=mixarr
 directory=/app/web
 autostart=true
 autorestart=true
@@ -248,6 +256,24 @@ fi
 mkdir -p /data/certs /data/mysql /data/redis /run/mysqld
 chown -R mysql:mysql /data/mysql /run/mysqld
 chown -R redis:redis /data/redis 2>/dev/null || true
+chown -R mixarr:mixarr /app
+
+# -----------------------------------------------------------------------------
+# Auto-generate database credentials if not provided
+# -----------------------------------------------------------------------------
+if [ -z "$MYSQL_PASSWORD" ]; then
+  export MYSQL_PASSWORD=$(openssl rand -hex 16)
+  echo "Generated random MYSQL_PASSWORD"
+  echo "Set MYSQL_PASSWORD env var explicitly for persistent credentials."
+fi
+
+if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+  export MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
+  echo "Generated random MYSQL_ROOT_PASSWORD"
+fi
+
+# Update DATABASE_URL with the actual password
+export DATABASE_URL="mysql://mixarr:${MYSQL_PASSWORD}@127.0.0.1:3306/mixarr"
 
 # -----------------------------------------------------------------------------
 # Initialize MariaDB if needed
@@ -273,8 +299,8 @@ if [ ! -d "/data/mysql/mysql" ]; then
     echo "Creating Mixarr database and user..."
     mysql -u root <<-EOSQL
         CREATE DATABASE IF NOT EXISTS mixarr CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-        CREATE USER IF NOT EXISTS 'mixarr'@'127.0.0.1' IDENTIFIED BY 'mixarr';
-        CREATE USER IF NOT EXISTS 'mixarr'@'localhost' IDENTIFIED BY 'mixarr';
+        CREATE USER IF NOT EXISTS 'mixarr'@'127.0.0.1' IDENTIFIED BY '${MYSQL_PASSWORD}';
+        CREATE USER IF NOT EXISTS 'mixarr'@'localhost' IDENTIFIED BY '${MYSQL_PASSWORD}';
         GRANT ALL PRIVILEGES ON mixarr.* TO 'mixarr'@'127.0.0.1';
         GRANT ALL PRIVILEGES ON mixarr.* TO 'mixarr'@'localhost';
         FLUSH PRIVILEGES;
@@ -341,7 +367,6 @@ done
 # -----------------------------------------------------------------------------
 echo "Running database migrations..."
 cd /app/api
-export DATABASE_URL="mysql://mixarr:mixarr@127.0.0.1:3306/mixarr"
 export REDIS_URL="redis://127.0.0.1:6379"
 npx prisma db push --accept-data-loss || echo "Warning: Database migration had issues, continuing..."
 
@@ -357,9 +382,11 @@ RUN chmod +x /entrypoint.sh
 # Environment variables with defaults (internal DB/Redis used by default)
 ENV NODE_ENV=production
 ENV PORT=3005
-ENV DATABASE_URL="mysql://mixarr:mixarr@127.0.0.1:3306/mixarr"
+ENV DATABASE_URL=""
 ENV REDIS_URL="redis://127.0.0.1:6379"
 ENV SESSION_SECRET=""
+ENV MYSQL_PASSWORD=""
+ENV MYSQL_ROOT_PASSWORD=""
 ENV FRONTEND_URL=""
 ENV BASE_URL=""
 

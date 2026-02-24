@@ -1,43 +1,114 @@
 /**
  * Scheduler Service Tests
- * 
- * Tests:
- * - Stale job cleanup
- * - Cron job scheduling
- * - Job management (add/remove)
- * - Data retention job
+ *
+ * Tests the ACTUAL exported functions from the scheduler module.
+ * All dependencies (Prisma, queue, slskd-poll, cron) are mocked at the module level.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createMockPrisma, resetIdCounter } from '../utils/fixtures.js';
+
+// ── Mock all dependencies BEFORE importing scheduler ────────────────────────
+
+vi.mock('../../src/lib/db.js', () => ({
+  default: {
+    subscriptionRun: { updateMany: vi.fn(), deleteMany: vi.fn() },
+    subscription: { findMany: vi.fn(), update: vi.fn() },
+    importSource: { findMany: vi.fn(), deleteMany: vi.fn() },
+    subscriptionResult: { deleteMany: vi.fn() },
+    logEntry: { deleteMany: vi.fn() },
+    $executeRaw: vi.fn(),
+  },
+}));
+
+vi.mock('../../src/jobs/queue.js', () => ({
+  scheduleSubscriptionJob: vi.fn(),
+  scheduleImportJob: vi.fn(),
+}));
+
+vi.mock('../../src/jobs/slskd-poll.js', () => ({
+  pollSlskdDownloads: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../src/lib/logger.js', () => ({
+  createLogger: vi.fn(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  })),
+}));
+
+vi.mock('cron', () => ({
+  CronJob: vi.fn().mockImplementation(function (
+    this: any,
+    expression: string,
+    onTick: Function,
+    _onComplete: unknown,
+    _start: boolean,
+    _tz: string
+  ) {
+    this.expression = expression;
+    this.onTick = onTick;
+    this.start = vi.fn();
+    this.stop = vi.fn();
+    this.nextDate = vi.fn(() => ({ toJSDate: () => new Date('2025-01-02T00:00:00Z') }));
+  }),
+}));
+
+// ── Import module under test (uses mocked deps) ────────────────────────────
+
+import {
+  initializeScheduler,
+  addScheduledJob,
+  addImportScheduledJob,
+  removeScheduledJob,
+  removeImportScheduledJob,
+  getScheduledJobCount,
+  stopAllJobs,
+  startDataRetentionJob,
+  startSlskdPollJob,
+  stopSlskdPollJob,
+} from '../../src/jobs/scheduler.js';
+
+// ── Import mocked dependencies for assertions ──────────────────────────────
+
+import prisma from '../../src/lib/db.js';
+import { CronJob } from 'cron';
+import { scheduleSubscriptionJob, scheduleImportJob } from '../../src/jobs/queue.js';
+import { pollSlskdDownloads } from '../../src/jobs/slskd-poll.js';
+
+// ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('Scheduler Service', () => {
-  let mockPrisma: ReturnType<typeof createMockPrisma>;
-
   beforeEach(() => {
-    resetIdCounter();
-    mockPrisma = createMockPrisma();
+    vi.clearAllMocks();
+
+    // Safe default return values for all Prisma mocks
+    vi.mocked(prisma.subscriptionRun.updateMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.subscriptionRun.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.subscription.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.subscription.update).mockResolvedValue({} as any);
+    vi.mocked(prisma.importSource.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.importSource.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.subscriptionResult.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.logEntry.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.$executeRaw).mockResolvedValue(0 as any);
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    stopAllJobs();
+    stopSlskdPollJob();
   });
 
-  describe('cleanupStaleJobs', () => {
+  // ── cleanupStaleJobs (internal, tested via initializeScheduler) ─────────
+
+  describe('cleanupStaleJobs (via initializeScheduler)', () => {
     it('should mark running jobs as failed on startup', async () => {
-      mockPrisma.subscriptionRun.updateMany.mockResolvedValue({ count: 3 });
+      vi.mocked(prisma.subscriptionRun.updateMany).mockResolvedValue({ count: 3 });
 
-      const result = await mockPrisma.subscriptionRun.updateMany({
-        where: { status: 'running' },
-        data: {
-          status: 'failed',
-          errorMessage: 'Job interrupted by server restart',
-          completedAt: new Date(),
-        },
-      });
+      await initializeScheduler();
 
-      expect(result.count).toBe(3);
-      expect(mockPrisma.subscriptionRun.updateMany).toHaveBeenCalledWith({
+      expect(prisma.subscriptionRun.updateMany).toHaveBeenCalledWith({
         where: { status: 'running' },
         data: expect.objectContaining({
           status: 'failed',
@@ -46,249 +117,322 @@ describe('Scheduler Service', () => {
       });
     });
 
-    it('should do nothing when no stale jobs exist', async () => {
-      mockPrisma.subscriptionRun.updateMany.mockResolvedValue({ count: 0 });
+    it('should update subscription status when stale jobs are found', async () => {
+      vi.mocked(prisma.subscriptionRun.updateMany).mockResolvedValue({ count: 2 });
 
-      const result = await mockPrisma.subscriptionRun.updateMany({
-        where: { status: 'running' },
-        data: {
-          status: 'failed',
-          errorMessage: 'Job interrupted by server restart',
-          completedAt: new Date(),
-        },
-      });
+      await initializeScheduler();
 
-      expect(result.count).toBe(0);
+      expect(prisma.$executeRaw).toHaveBeenCalled();
     });
 
-    it('should set completedAt timestamp for stale jobs', async () => {
-      const now = new Date();
-      mockPrisma.subscriptionRun.updateMany.mockResolvedValue({ count: 1 });
+    it('should NOT call $executeRaw when no stale jobs exist', async () => {
+      vi.mocked(prisma.subscriptionRun.updateMany).mockResolvedValue({ count: 0 });
 
-      await mockPrisma.subscriptionRun.updateMany({
-        where: { status: 'running' },
-        data: {
-          status: 'failed',
-          errorMessage: 'Job interrupted by server restart',
-          completedAt: now,
+      await initializeScheduler();
+
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── initializeScheduler ─────────────────────────────────────────────────
+
+  describe('initializeScheduler', () => {
+    it('should query active subscriptions with schedules', async () => {
+      await initializeScheduler();
+
+      expect(prisma.subscription.findMany).toHaveBeenCalledWith({
+        where: {
+          isActive: true,
+          schedule: { not: null },
         },
       });
+    });
 
-      expect(mockPrisma.subscriptionRun.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            completedAt: now,
-          }),
-        })
+    it('should query active import sources with schedules', async () => {
+      await initializeScheduler();
+
+      expect(prisma.importSource.findMany).toHaveBeenCalledWith({
+        where: {
+          isActive: true,
+          schedule: { not: null },
+        },
+      });
+    });
+
+    it('should create a CronJob for each subscription with a schedule', async () => {
+      vi.mocked(prisma.subscription.findMany).mockResolvedValue([
+        { id: 1, userId: 1, schedule: '0 0 * * *', isActive: true },
+        { id: 2, userId: 1, schedule: '0 12 * * *', isActive: true },
+      ] as any);
+
+      await initializeScheduler();
+
+      // Filter out the data-retention CronJob ('0 3 * * *')
+      const subscriptionCronCalls = vi.mocked(CronJob).mock.calls.filter(
+        (call) => call[0] === '0 0 * * *' || call[0] === '0 12 * * *'
+      );
+      expect(subscriptionCronCalls).toHaveLength(2);
+    });
+
+    it('should report correct job count after initialization', async () => {
+      vi.mocked(prisma.subscription.findMany).mockResolvedValue([
+        { id: 1, userId: 1, schedule: '0 0 * * *', isActive: true },
+        { id: 2, userId: 2, schedule: '0 6 * * *', isActive: true },
+      ] as any);
+      vi.mocked(prisma.importSource.findMany).mockResolvedValue([
+        { id: 1, userId: 1, schedule: '0 3 * * 1', isActive: true, resultHandling: 'preview' },
+      ] as any);
+
+      await initializeScheduler();
+
+      // 2 subscriptions + 1 import source = 3
+      expect(getScheduledJobCount()).toBe(3);
+    });
+
+    it('should skip subscriptions with null schedule', async () => {
+      vi.mocked(prisma.subscription.findMany).mockResolvedValue([
+        { id: 1, userId: 1, schedule: null, isActive: true },
+        { id: 2, userId: 1, schedule: '0 0 * * *', isActive: true },
+      ] as any);
+
+      await initializeScheduler();
+
+      // Only 1 subscription has a non-null schedule
+      expect(getScheduledJobCount()).toBe(1);
+    });
+  });
+
+  // ── addScheduledJob ─────────────────────────────────────────────────────
+
+  describe('addScheduledJob', () => {
+    it('should create a CronJob with the given cron expression', () => {
+      addScheduledJob(1, 1, '0 0 * * *');
+
+      expect(CronJob).toHaveBeenCalledWith(
+        '0 0 * * *',
+        expect.any(Function),
+        null,
+        true,
+        'UTC'
+      );
+    });
+
+    it('should remove existing job before adding a new one for the same subscriptionId', () => {
+      addScheduledJob(1, 1, '0 0 * * *');
+      const firstInstance = vi.mocked(CronJob).mock.instances[0];
+
+      addScheduledJob(1, 1, '0 12 * * *');
+
+      expect(firstInstance.stop).toHaveBeenCalled();
+      expect(getScheduledJobCount()).toBe(1);
+    });
+
+    it('should update subscription nextRun after adding job', () => {
+      addScheduledJob(1, 1, '0 0 * * *');
+
+      expect(prisma.subscription.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { nextRun: new Date('2025-01-02T00:00:00Z') },
+      });
+    });
+
+    it('should handle invalid cron expression gracefully without throwing', () => {
+      vi.mocked(CronJob).mockImplementationOnce(() => {
+        throw new Error('Invalid cron pattern');
+      });
+
+      expect(() => addScheduledJob(1, 1, 'not-a-cron')).not.toThrow();
+      expect(getScheduledJobCount()).toBe(0);
+    });
+
+    it('should increment job count for different subscriptionIds', () => {
+      addScheduledJob(1, 1, '0 0 * * *');
+      addScheduledJob(2, 1, '0 6 * * *');
+
+      expect(getScheduledJobCount()).toBe(2);
+    });
+  });
+
+  // ── removeScheduledJob ──────────────────────────────────────────────────
+
+  describe('removeScheduledJob', () => {
+    it('should stop and remove an existing job', () => {
+      addScheduledJob(1, 1, '0 0 * * *');
+      const jobInstance = vi.mocked(CronJob).mock.instances[0];
+      expect(getScheduledJobCount()).toBe(1);
+
+      removeScheduledJob(1);
+
+      expect(jobInstance.stop).toHaveBeenCalled();
+      expect(getScheduledJobCount()).toBe(0);
+    });
+
+    it('should handle non-existent job gracefully', () => {
+      expect(() => removeScheduledJob(999)).not.toThrow();
+      expect(getScheduledJobCount()).toBe(0);
+    });
+  });
+
+  // ── addImportScheduledJob ───────────────────────────────────────────────
+
+  describe('addImportScheduledJob', () => {
+    it('should use 10000 + importSourceId as key to avoid collision with subscriptions', () => {
+      addScheduledJob(1, 1, '0 0 * * *');                          // key = 1
+      addImportScheduledJob(1, 1, '0 6 * * *', 'preview' as any);  // key = 10001
+
+      // Both coexist without collision
+      expect(getScheduledJobCount()).toBe(2);
+    });
+
+    it('should create a CronJob with the given expression', () => {
+      addImportScheduledJob(5, 2, '*/30 * * * *', 'preview' as any);
+
+      expect(CronJob).toHaveBeenCalledWith(
+        '*/30 * * * *',
+        expect.any(Function),
+        null,
+        true,
+        'UTC'
       );
     });
   });
 
-  describe('initializeScheduler', () => {
-    it('should load active subscriptions with schedules', async () => {
-      const scheduledSubs = [
-        { id: 1, userId: 1, schedule: '0 0 * * *', isActive: true },
-        { id: 2, userId: 1, schedule: '0 12 * * *', isActive: true },
-      ];
+  // ── removeImportScheduledJob ────────────────────────────────────────────
 
-      mockPrisma.subscription.findMany.mockResolvedValue(scheduledSubs);
+  describe('removeImportScheduledJob', () => {
+    it('should use 10000 + importSourceId as key', () => {
+      addImportScheduledJob(5, 1, '0 6 * * *', 'preview' as any);
+      expect(getScheduledJobCount()).toBe(1);
 
-      const subs = await mockPrisma.subscription.findMany({
-        where: { isActive: true, schedule: { not: null } },
-      });
-
-      expect(subs).toHaveLength(2);
-      expect(subs[0].schedule).toBe('0 0 * * *');
+      removeImportScheduledJob(5);
+      expect(getScheduledJobCount()).toBe(0);
     });
 
-    it('should load active import sources with schedules', async () => {
-      const scheduledImports = [
-        { id: 1, userId: 1, schedule: '0 6 * * *', isActive: true, resultHandling: 'preview' },
-      ];
+    it('should not affect subscription jobs with the same base ID', () => {
+      addScheduledJob(5, 1, '0 0 * * *');                          // key = 5
+      addImportScheduledJob(5, 1, '0 6 * * *', 'preview' as any);  // key = 10005
+      expect(getScheduledJobCount()).toBe(2);
 
-      mockPrisma.importSource.findMany.mockResolvedValue(scheduledImports);
+      removeImportScheduledJob(5);
 
-      const sources = await mockPrisma.importSource.findMany({
-        where: { isActive: true, schedule: { not: null } },
-      });
-
-      expect(sources).toHaveLength(1);
-      expect(sources[0].resultHandling).toBe('preview');
-    });
-
-    it('should not load inactive subscriptions', async () => {
-      mockPrisma.subscription.findMany.mockResolvedValue([]);
-
-      const subs = await mockPrisma.subscription.findMany({
-        where: { isActive: true, schedule: { not: null } },
-      });
-
-      expect(subs).toHaveLength(0);
+      expect(getScheduledJobCount()).toBe(1); // subscription job still present
     });
   });
 
-  describe('addScheduledJob', () => {
-    it('should validate cron expression format', () => {
-      const validCronExpressions = [
-        '* * * * *',      // Every minute
-        '0 * * * *',      // Every hour
-        '0 0 * * *',      // Every day at midnight
-        '0 0 * * 0',      // Every Sunday
-        '0 0 1 * *',      // First of every month
-        '*/5 * * * *',    // Every 5 minutes
-        '0 9-17 * * 1-5', // 9-5 weekdays
-      ];
+  // ── getScheduledJobCount ────────────────────────────────────────────────
 
-      validCronExpressions.forEach(expr => {
-        // Basic cron format validation (5 or 6 fields)
-        const parts = expr.split(' ');
-        expect(parts.length).toBeGreaterThanOrEqual(5);
-        expect(parts.length).toBeLessThanOrEqual(6);
-      });
+  describe('getScheduledJobCount', () => {
+    it('should return 0 when no jobs are scheduled', () => {
+      expect(getScheduledJobCount()).toBe(0);
     });
 
-    it('should remove existing job before adding new one', () => {
-      const scheduledJobs = new Map<number, any>();
-      const existingJob = { stop: vi.fn() };
-      scheduledJobs.set(1, existingJob);
+    it('should return the correct count after adding jobs', () => {
+      addScheduledJob(1, 1, '0 0 * * *');
+      addScheduledJob(2, 1, '0 12 * * *');
+      addImportScheduledJob(1, 1, '0 6 * * *', 'preview' as any);
 
-      // Simulate removeScheduledJob
-      if (scheduledJobs.has(1)) {
-        scheduledJobs.get(1).stop();
-        scheduledJobs.delete(1);
-      }
+      expect(getScheduledJobCount()).toBe(3);
+    });
+  });
 
-      expect(existingJob.stop).toHaveBeenCalled();
-      expect(scheduledJobs.has(1)).toBe(false);
+  // ── stopAllJobs ─────────────────────────────────────────────────────────
+
+  describe('stopAllJobs', () => {
+    it('should stop all scheduled jobs and clear the map', () => {
+      addScheduledJob(1, 1, '0 0 * * *');
+      addScheduledJob(2, 1, '0 12 * * *');
+      const job1 = vi.mocked(CronJob).mock.instances[0];
+      const job2 = vi.mocked(CronJob).mock.instances[1];
+
+      stopAllJobs();
+
+      expect(job1.stop).toHaveBeenCalled();
+      expect(job2.stop).toHaveBeenCalled();
+      expect(getScheduledJobCount()).toBe(0);
     });
 
-    it('should update next run time after adding job', async () => {
-      mockPrisma.subscription.update.mockResolvedValue({
-        id: 1,
-        nextRun: new Date('2025-01-02T00:00:00Z'),
-      });
+    it('should result in zero job count after stopping', () => {
+      addScheduledJob(1, 1, '0 0 * * *');
+      addScheduledJob(2, 1, '0 6 * * *');
+      addImportScheduledJob(1, 1, '0 3 * * *', 'preview' as any);
+      expect(getScheduledJobCount()).toBe(3);
 
-      await mockPrisma.subscription.update({
-        where: { id: 1 },
+      stopAllJobs();
+
+      expect(getScheduledJobCount()).toBe(0);
+    });
+  });
+
+  // ── startDataRetentionJob ───────────────────────────────────────────────
+
+  describe('startDataRetentionJob', () => {
+    it('should create a CronJob for daily data retention cleanup', () => {
+      startDataRetentionJob();
+
+      expect(CronJob).toHaveBeenCalledWith(
+        '0 3 * * *',
+        expect.any(Function),
+        null,
+        true,
+        'UTC'
+      );
+    });
+  });
+
+  // ── startSlskdPollJob / stopSlskdPollJob ────────────────────────────────
+
+  describe('startSlskdPollJob', () => {
+    it('should call pollSlskdDownloads immediately', () => {
+      startSlskdPollJob();
+
+      expect(pollSlskdDownloads).toHaveBeenCalled();
+    });
+  });
+
+  describe('stopSlskdPollJob', () => {
+    it('should handle being called when no poll job is active', () => {
+      expect(() => stopSlskdPollJob()).not.toThrow();
+    });
+  });
+
+  // ── Cron job callbacks ──────────────────────────────────────────────────
+
+  describe('cron job callbacks', () => {
+    it('should call scheduleSubscriptionJob when subscription cron triggers', async () => {
+      addScheduledJob(42, 7, '0 0 * * *');
+
+      // Grab the onTick callback passed to CronJob
+      const cronCall = vi.mocked(CronJob).mock.calls.find(
+        (call) => call[0] === '0 0 * * *'
+      );
+      expect(cronCall).toBeDefined();
+      const onTick = cronCall![1] as () => Promise<void>;
+
+      // Clear the initial update call from addScheduledJob
+      vi.mocked(prisma.subscription.update).mockClear();
+
+      await onTick();
+
+      expect(scheduleSubscriptionJob).toHaveBeenCalledWith(42, 7);
+      // Callback also updates nextRun
+      expect(prisma.subscription.update).toHaveBeenCalledWith({
+        where: { id: 42 },
         data: { nextRun: new Date('2025-01-02T00:00:00Z') },
       });
-
-      expect(mockPrisma.subscription.update).toHaveBeenCalled();
-    });
-  });
-
-  describe('removeScheduledJob', () => {
-    it('should stop and remove job from map', () => {
-      const scheduledJobs = new Map<number, any>();
-      const job = { stop: vi.fn() };
-      scheduledJobs.set(1, job);
-
-      // Simulate removeScheduledJob
-      const existing = scheduledJobs.get(1);
-      if (existing) {
-        existing.stop();
-        scheduledJobs.delete(1);
-      }
-
-      expect(job.stop).toHaveBeenCalled();
-      expect(scheduledJobs.size).toBe(0);
     });
 
-    it('should handle non-existent job gracefully', () => {
-      const scheduledJobs = new Map<number, any>();
+    it('should call scheduleImportJob when import cron triggers', async () => {
+      addImportScheduledJob(3, 5, '0 6 * * *', 'preview' as any);
 
-      // Simulate removeScheduledJob for non-existent ID
-      const existing = scheduledJobs.get(999);
-      if (existing) {
-        existing.stop();
-        scheduledJobs.delete(999);
-      }
+      const cronCall = vi.mocked(CronJob).mock.calls.find(
+        (call) => call[0] === '0 6 * * *'
+      );
+      expect(cronCall).toBeDefined();
+      const onTick = cronCall![1] as () => Promise<void>;
 
-      // Should not throw
-      expect(scheduledJobs.size).toBe(0);
-    });
-  });
+      await onTick();
 
-  describe('Import Scheduled Jobs', () => {
-    it('should use offset IDs to avoid collision with subscriptions', () => {
-      const importSourceId = 1;
-      const key = 10000 + importSourceId;
-
-      expect(key).toBe(10001);
-      // This ensures import job IDs don't collide with subscription IDs
-    });
-  });
-
-  describe('Data Retention Job', () => {
-    it('should delete old subscription results', async () => {
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-      mockPrisma.subscriptionResult.deleteMany.mockResolvedValue({ count: 100 });
-
-      const result = await mockPrisma.subscriptionResult.deleteMany({
-        where: {
-          createdAt: { lt: thirtyDaysAgo },
-        },
-      });
-
-      expect(result.count).toBe(100);
-    });
-
-    it('should delete old log entries', async () => {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
-      mockPrisma.logEntry.deleteMany.mockResolvedValue({ count: 500 });
-
-      const result = await mockPrisma.logEntry.deleteMany({
-        where: {
-          createdAt: { lt: sevenDaysAgo },
-        },
-      });
-
-      expect(result.count).toBe(500);
-    });
-  });
-
-  describe('Job Execution', () => {
-    it('should call scheduleSubscriptionJob when cron triggers', async () => {
-      const scheduleSubscriptionJob = vi.fn().mockResolvedValue({ id: 'job-123' });
-
-      await scheduleSubscriptionJob(1, 1);
-
-      expect(scheduleSubscriptionJob).toHaveBeenCalledWith(1, 1);
-    });
-
-    it('should update next run time after execution', async () => {
-      mockPrisma.subscription.update.mockResolvedValue({
-        id: 1,
-        nextRun: new Date('2025-01-03T00:00:00Z'),
-      });
-
-      await mockPrisma.subscription.update({
-        where: { id: 1 },
-        data: { nextRun: new Date('2025-01-03T00:00:00Z') },
-      });
-
-      expect(mockPrisma.subscription.update).toHaveBeenCalled();
-    });
-  });
-
-  describe('Error Handling', () => {
-    it('should log error for invalid cron expression', () => {
-      const invalidCron = 'not a valid cron';
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-      try {
-        // Simulate what CronJob would do with invalid expression
-        if (!invalidCron.match(/^[\d\s\*\-\/,]+$/)) {
-          throw new Error('Invalid cron expression');
-        }
-      } catch (error) {
-        console.error('Failed to schedule subscription:', error);
-      }
-
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
+      expect(scheduleImportJob).toHaveBeenCalledWith(3, 5, 'preview');
     });
   });
 });
