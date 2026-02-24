@@ -6,9 +6,15 @@ import { Badge } from '@/components/ui/badge';
 import Check from 'lucide-react/dist/esm/icons/check';
 import Edit from 'lucide-react/dist/esm/icons/edit';
 import Plus from 'lucide-react/dist/esm/icons/plus';
+import Search from 'lucide-react/dist/esm/icons/search';
 import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
+import { OAuthButtons } from './OAuthButtons';
+import { LidarrMaintenance } from './LidarrMaintenance';
+import type { OAuthType } from '../hooks/useOAuthStatus';
+
+const OAUTH_TYPES: ReadonlySet<string> = new Set(['spotify', 'deezer', 'tidal']);
 
 export interface Connection {
   id: number;
@@ -30,6 +36,7 @@ export interface ConnectionCardProps {
   onTest: (id: number) => void;
   onDelete: (id: number) => void;
   testingId: number | null;
+  onPreview?: (connectionId: number, type: string) => void;
 }
 
 export function ConnectionCard({
@@ -41,6 +48,7 @@ export function ConnectionCard({
   onTest,
   onDelete,
   testingId,
+  onPreview,
 }: ConnectionCardProps) {
   return (
     <Card>
@@ -106,8 +114,31 @@ export function ConnectionCard({
                     </Button>
                   </div>
                 </div>
-                {/* TODO: OAuthButtons — will be filled in E1.4 */}
-                {/* TODO: LidarrMaintenance — will be filled in E1.5 */}
+                {/* OAuth buttons for Spotify/Deezer/TIDAL */}
+                {OAUTH_TYPES.has(conn.type) && (
+                  <OAuthButtons
+                    type={conn.type as OAuthType}
+                    connectionId={conn.id}
+                    onPreview={onPreview}
+                  />
+                )}
+                {/* Last.fm preview button */}
+                {conn.type === 'lastfm' && onPreview && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onPreview(conn.id, 'lastfm')}
+                    >
+                      <Search className="h-3 w-3 mr-1" />
+                      Preview Artists
+                    </Button>
+                  </div>
+                )}
+                {/* Lidarr library maintenance */}
+                {conn.type === 'lidarr' && isAdmin && (
+                  <LidarrMaintenance connectionId={conn.id} />
+                )}
               </div>
             ))}
           </div>

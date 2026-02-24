@@ -1,6 +1,17 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConnectionCard, type Connection, type ConnectionCardProps } from '../components/ConnectionCard';
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
+function Wrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+}
 
 const makeTypeConfig = (overrides?: Partial<ConnectionCardProps['typeConfig']>) => ({
   value: 'spotify',
@@ -41,13 +52,13 @@ describe('ConnectionCard', () => {
   // --- Rendering basics ---
 
   it('renders type label and description', () => {
-    render(<ConnectionCard {...defaultProps} />);
+    render(<ConnectionCard {...defaultProps} />, { wrapper: Wrapper });
     expect(screen.getByText('Spotify')).toBeInTheDocument();
     expect(screen.getByText('Import & playlist subscriptions')).toBeInTheDocument();
   });
 
   it('renders color swatch with first letter of label', () => {
-    const { container } = render(<ConnectionCard {...defaultProps} />);
+    const { container } = render(<ConnectionCard {...defaultProps} />, { wrapper: Wrapper });
     const swatch = container.querySelector('[style*="background-color"]');
     expect(swatch).toHaveStyle({ backgroundColor: '#1DB954' });
     expect(swatch).toHaveTextContent('S');
@@ -58,7 +69,8 @@ describe('ConnectionCard', () => {
       <ConnectionCard
         {...defaultProps}
         typeConfig={makeTypeConfig({ icon: '🎵' })}
-      />
+      />,
+      { wrapper: Wrapper },
     );
     const swatch = container.querySelector('[style*="background-color"]');
     expect(swatch).toHaveTextContent('🎵');
@@ -67,13 +79,13 @@ describe('ConnectionCard', () => {
   // --- Empty state ---
 
   it('shows "Configure" button when no connections', () => {
-    render(<ConnectionCard {...defaultProps} connections={[]} />);
+    render(<ConnectionCard {...defaultProps} connections={[]} />, { wrapper: Wrapper });
     expect(screen.getByText('Configure')).toBeInTheDocument();
   });
 
   it('calls onAdd with type value when Configure is clicked', () => {
     const onAdd = vi.fn();
-    render(<ConnectionCard {...defaultProps} onAdd={onAdd} connections={[]} />);
+    render(<ConnectionCard {...defaultProps} onAdd={onAdd} connections={[]} />, { wrapper: Wrapper });
     fireEvent.click(screen.getByText('Configure'));
     expect(onAdd).toHaveBeenCalledWith('spotify');
   });
@@ -83,7 +95,8 @@ describe('ConnectionCard', () => {
       <ConnectionCard
         {...defaultProps}
         connections={[makeConnection()]}
-      />
+      />,
+      { wrapper: Wrapper },
     );
     expect(screen.queryByText('Configure')).not.toBeInTheDocument();
   });
@@ -95,7 +108,7 @@ describe('ConnectionCard', () => {
       makeConnection({ id: 1, name: 'Primary', isActive: true }),
       makeConnection({ id: 2, name: 'Secondary', isActive: false }),
     ];
-    render(<ConnectionCard {...defaultProps} connections={connections} />);
+    render(<ConnectionCard {...defaultProps} connections={connections} />, { wrapper: Wrapper });
 
     expect(screen.getByText('Primary')).toBeInTheDocument();
     expect(screen.getByText('Secondary')).toBeInTheDocument();
@@ -106,7 +119,7 @@ describe('ConnectionCard', () => {
   it('calls onTest with correct ID when Test button clicked', () => {
     const onTest = vi.fn();
     const conn = makeConnection({ id: 42 });
-    render(<ConnectionCard {...defaultProps} onTest={onTest} connections={[conn]} />);
+    render(<ConnectionCard {...defaultProps} onTest={onTest} connections={[conn]} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByTitle('Test connection'));
     expect(onTest).toHaveBeenCalledWith(42);
@@ -115,7 +128,7 @@ describe('ConnectionCard', () => {
   it('calls onEdit with correct ID when Edit button clicked', () => {
     const onEdit = vi.fn();
     const conn = makeConnection({ id: 7 });
-    render(<ConnectionCard {...defaultProps} onEdit={onEdit} connections={[conn]} />);
+    render(<ConnectionCard {...defaultProps} onEdit={onEdit} connections={[conn]} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByTitle('Edit'));
     expect(onEdit).toHaveBeenCalledWith(7);
@@ -124,7 +137,7 @@ describe('ConnectionCard', () => {
   it('calls onDelete with correct ID when Delete button clicked', () => {
     const onDelete = vi.fn();
     const conn = makeConnection({ id: 99 });
-    render(<ConnectionCard {...defaultProps} onDelete={onDelete} connections={[conn]} />);
+    render(<ConnectionCard {...defaultProps} onDelete={onDelete} connections={[conn]} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByTitle('Delete'));
     expect(onDelete).toHaveBeenCalledWith(99);
@@ -139,7 +152,8 @@ describe('ConnectionCard', () => {
         {...defaultProps}
         connections={[conn]}
         testingId={5}
-      />
+      />,
+      { wrapper: Wrapper },
     );
 
     const testBtn = screen.getByTitle('Test connection');
@@ -153,7 +167,8 @@ describe('ConnectionCard', () => {
         {...defaultProps}
         connections={[conn]}
         testingId={5}
-      />
+      />,
+      { wrapper: Wrapper },
     );
 
     const pulsingIcon = container.querySelector('.animate-pulse');
@@ -170,7 +185,8 @@ describe('ConnectionCard', () => {
         {...defaultProps}
         connections={connections}
         testingId={5}
-      />
+      />,
+      { wrapper: Wrapper },
     );
 
     const testButtons = screen.getAllByTitle('Test connection');
@@ -189,7 +205,8 @@ describe('ConnectionCard', () => {
         {...defaultProps}
         isAdmin={true}
         connections={[conn]}
-      />
+      />,
+      { wrapper: Wrapper },
     );
 
     expect(screen.getByText('Global')).toBeInTheDocument();
@@ -202,7 +219,8 @@ describe('ConnectionCard', () => {
         {...defaultProps}
         isAdmin={true}
         connections={[conn]}
-      />
+      />,
+      { wrapper: Wrapper },
     );
 
     expect(screen.getByText('Personal')).toBeInTheDocument();
@@ -218,7 +236,8 @@ describe('ConnectionCard', () => {
         {...defaultProps}
         isAdmin={false}
         connections={connections}
-      />
+      />,
+      { wrapper: Wrapper },
     );
 
     expect(screen.queryByText('Global')).not.toBeInTheDocument();
@@ -233,7 +252,7 @@ describe('ConnectionCard', () => {
       makeConnection({ id: 2, name: 'Bravo' }),
       makeConnection({ id: 3, name: 'Charlie' }),
     ];
-    render(<ConnectionCard {...defaultProps} connections={connections} />);
+    render(<ConnectionCard {...defaultProps} connections={connections} />, { wrapper: Wrapper });
 
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Bravo')).toBeInTheDocument();

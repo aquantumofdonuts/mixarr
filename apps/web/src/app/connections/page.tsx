@@ -3,47 +3,26 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Modal, ModalFooter } from '@/components/ui/modal';
 import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useConnections, useDeleteConnection, queryKeys } from '@/lib/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import Check from 'lucide-react/dist/esm/icons/check';
-import Edit from 'lucide-react/dist/esm/icons/edit';
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link';
 import Eye from 'lucide-react/dist/esm/icons/eye';
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off';
-import Library from 'lucide-react/dist/esm/icons/library';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-import Search from 'lucide-react/dist/esm/icons/search';
 import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2';
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
-import Unlink from 'lucide-react/dist/esm/icons/unlink';
 import X from 'lucide-react/dist/esm/icons/x';
-
-interface Connection {
-  id: number;
-  userId: number | null;
-  type: 'lidarr' | 'spotify' | 'lastfm' | 'tautulli' | 'jellyfin' | 'deezer' | 'tidal' | 'listenbrainz' | 'discogs' | 'slskd';
-  name: string;
-  isActive: boolean;
-  lastTest: string | null;
-  createdAt: string;
-  user?: { username: string; displayName: string } | null;
-}
-
-interface SpotifyAuthStatus {
-  authorized: boolean;
-  expired: boolean;
-  needsReauthorization: boolean;
-}
+import { ConnectionCard } from './components/ConnectionCard';
+import type { Connection } from './components/ConnectionCard';
 
 interface PlexUser {
   userId: number;
@@ -86,10 +65,6 @@ export default function ConnectionsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [spotifyAuthStatus, setSpotifyAuthStatus] = useState<Record<number, SpotifyAuthStatus>>({});
-  const [deezerAuthStatus, setDeezerAuthStatus] = useState<Record<number, SpotifyAuthStatus>>({});
-  const [tidalAuthStatus, setTidalAuthStatus] = useState<Record<number, SpotifyAuthStatus>>({});
-  const [authorizingId, setAuthorizingId] = useState<number | null>(null);
   const [baseUrl, setBaseUrl] = useState<string>('');
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   const { addToast } = useToast();
@@ -107,14 +82,6 @@ export default function ConnectionsPage() {
     localStorage.setItem('mixarr_welcome_dismissed', 'true');
   };
 
-  // Lidarr maintenance state
-  const [lidarrStats, setLidarrStats] = useState<Record<number, { 
-    total: number; 
-    needingRefresh: number; 
-    loading: boolean;
-    issueStats?: { noAlbums: number; noPoster: number; noOverview: number; noGenres: number };
-  }>>({});
-  const [refreshingLidarr, setRefreshingLidarr] = useState<number | null>(null);
   
   // Invalidate to trigger refetch
   const refetchConnections = () => {
@@ -181,173 +148,6 @@ export default function ConnectionsPage() {
     libraries: Array<{ libraryId: string; name: string; type: string }>;
   } | null>(null);
   const [jellyfinTested, setJellyfinTested] = useState(false);
-
-  // Fetch OAuth status when connections change
-  useEffect(() => {
-    if (connections.length > 0) {
-      const spotifyConnections = connections.filter(c => c.type === 'spotify');
-      for (const conn of spotifyConnections) {
-        fetchSpotifyAuthStatus(conn.id);
-      }
-      const deezerConnections = connections.filter(c => c.type === 'deezer');
-      for (const conn of deezerConnections) {
-        fetchDeezerAuthStatus(conn.id);
-      }
-      const tidalConnections = connections.filter(c => c.type === 'tidal');
-      for (const conn of tidalConnections) {
-        fetchTidalAuthStatus(conn.id);
-      }
-    }
-  }, [connections]);
-
-  const fetchSpotifyAuthStatus = async (connectionId: number) => {
-    const { data } = await api.get<SpotifyAuthStatus>(`/api/connections/${connectionId}/spotify/status`);
-    if (data) {
-      setSpotifyAuthStatus(prev => ({ ...prev, [connectionId]: data }));
-    }
-  };
-
-  const fetchDeezerAuthStatus = async (connectionId: number) => {
-    const { data } = await api.get<SpotifyAuthStatus>(`/api/connections/${connectionId}/deezer/status`);
-    if (data) {
-      setDeezerAuthStatus(prev => ({ ...prev, [connectionId]: data }));
-    }
-  };
-
-  const fetchTidalAuthStatus = async (connectionId: number) => {
-    const { data } = await api.get<SpotifyAuthStatus>(`/api/connections/${connectionId}/tidal/status`);
-    if (data) {
-      setTidalAuthStatus(prev => ({ ...prev, [connectionId]: data }));
-    }
-  };
-
-  const handleSpotifyAuthorize = async (connectionId: number) => {
-    setAuthorizingId(connectionId);
-    const { data, error } = await api.get<{ authUrl: string }>(`/api/connections/${connectionId}/spotify/auth`);
-    if (data?.authUrl) {
-      // Redirect to Spotify OAuth
-      window.location.href = data.authUrl;
-    } else {
-      addToast({ type: 'error', title: 'Failed to get authorization URL', message: error || undefined });
-      setAuthorizingId(null);
-    }
-  };
-
-  const handleSpotifyRevoke = async (connectionId: number) => {
-    if (!confirm('Revoke Spotify authorization? You will need to re-authorize to use this connection.')) return;
-    
-    const { error } = await api.post(`/api/connections/${connectionId}/spotify/revoke`);
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to revoke authorization' });
-    } else {
-      addToast({ type: 'success', title: 'Spotify authorization revoked' });
-      fetchSpotifyAuthStatus(connectionId);
-    }
-  };
-
-  const handleDeezerAuthorize = async (connectionId: number) => {
-    setAuthorizingId(connectionId);
-    const { data, error } = await api.get<{ authUrl: string }>(`/api/connections/${connectionId}/deezer/auth`);
-    if (data?.authUrl) {
-      window.location.href = data.authUrl;
-    } else {
-      addToast({ type: 'error', title: 'Failed to get authorization URL', message: error || undefined });
-      setAuthorizingId(null);
-    }
-  };
-
-  const handleDeezerRevoke = async (connectionId: number) => {
-    if (!confirm('Revoke Deezer authorization? You will need to re-authorize to use this connection.')) return;
-    
-    const { error } = await api.post(`/api/connections/${connectionId}/deezer/revoke`);
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to revoke authorization' });
-    } else {
-      addToast({ type: 'success', title: 'Deezer authorization revoked' });
-      fetchDeezerAuthStatus(connectionId);
-    }
-  };
-
-  const handleTidalAuthorize = async (connectionId: number) => {
-    setAuthorizingId(connectionId);
-    const { data, error } = await api.get<{ authUrl: string }>(`/api/connections/${connectionId}/tidal/auth`);
-    if (data?.authUrl) {
-      window.location.href = data.authUrl;
-    } else {
-      addToast({ type: 'error', title: 'Failed to get authorization URL', message: error || undefined });
-      setAuthorizingId(null);
-    }
-  };
-
-  const handleTidalRevoke = async (connectionId: number) => {
-    if (!confirm('Revoke TIDAL authorization? You will need to re-authorize to use this connection.')) return;
-    
-    const { error } = await api.post(`/api/connections/${connectionId}/tidal/revoke`);
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to revoke authorization' });
-    } else {
-      addToast({ type: 'success', title: 'TIDAL authorization revoked' });
-      fetchTidalAuthStatus(connectionId);
-    }
-  };
-
-  // Lidarr maintenance handlers
-  const fetchLidarrStats = async (connectionId: number) => {
-    setLidarrStats(prev => ({ 
-      ...prev, 
-      [connectionId]: { 
-        ...prev[connectionId], 
-        loading: true, 
-        total: prev[connectionId]?.total || 0, 
-        needingRefresh: prev[connectionId]?.needingRefresh || 0,
-        issueStats: prev[connectionId]?.issueStats,
-      } 
-    }));
-    
-    const { data, error } = await api.get<{ 
-      total: number; 
-      needingRefresh: number;
-      issueStats: { noAlbums: number; noPoster: number; noOverview: number; noGenres: number };
-    }>('/api/search/lidarr/artists');
-    
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to fetch library stats', message: error });
-      setLidarrStats(prev => ({ ...prev, [connectionId]: { ...prev[connectionId], loading: false, total: 0, needingRefresh: 0 } }));
-    } else if (data) {
-      setLidarrStats(prev => ({ 
-        ...prev, 
-        [connectionId]: { 
-          total: data.total, 
-          needingRefresh: data.needingRefresh, 
-          issueStats: data.issueStats,
-          loading: false 
-        } 
-      }));
-    }
-  };
-
-  const refreshLidarrArtistsByIssue = async (connectionId: number, issueType: string) => {
-    setRefreshingLidarr(connectionId);
-    
-    const { data, error } = await api.post<{ success: boolean; refreshed: number; message: string }>(
-      '/api/search/lidarr/artists/refresh-by-issue',
-      { issueType, limit: 50 }
-    );
-    
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to refresh artists', message: error });
-    } else if (data) {
-      addToast({ 
-        type: 'success', 
-        title: 'Refresh triggered', 
-        message: data.message
-      });
-      // Refresh stats after a delay to allow Lidarr to process
-      setTimeout(() => fetchLidarrStats(connectionId), 5000);
-    }
-    
-    setRefreshingLidarr(null);
-  };
 
   const fetchLidarrData = async (connectionId?: number) => {
     if (connectionId) {
@@ -520,21 +320,16 @@ export default function ConnectionsPage() {
 
     if (spotifyAuthorized) {
       addToast({ type: 'success', title: 'Spotify account authorized successfully!' });
-      // Refresh auth status for this connection
-      fetchSpotifyAuthStatus(Number(spotifyAuthorized));
-      // Clean up URL
       window.history.replaceState({}, '', '/connections');
     }
 
     if (deezerAuthorized) {
       addToast({ type: 'success', title: 'Deezer account authorized successfully!' });
-      fetchDeezerAuthStatus(Number(deezerAuthorized));
       window.history.replaceState({}, '', '/connections');
     }
 
     if (tidalAuthorized) {
       addToast({ type: 'success', title: 'TIDAL account authorized successfully!' });
-      fetchTidalAuthStatus(Number(tidalAuthorized));
       window.history.replaceState({}, '', '/connections');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -814,297 +609,23 @@ export default function ConnectionsPage() {
 
       {/* Connection Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {connectionTypes.map((type) => {
-          const typeConnections = connections.filter(c => c.type === type.value);
-          return (
-            <Card key={type.value}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <div 
-                    className="h-10 w-10 rounded flex items-center justify-center text-white font-bold"
-                    style={{ backgroundColor: type.color }}
-                  >
-                    {type.label[0]}
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">{type.label}</CardTitle>
-                    <CardDescription>{type.description}</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {typeConnections.length === 0 ? (
-                  <Button variant="outline" className="w-full" onClick={() => openModal(undefined, type.value as Connection['type'])}>
-                    <Plus className="h-4 w-4 mr-2" /> Configure
-                  </Button>
-                ) : (
-                  <div className="space-y-2">
-                    {typeConnections.map((conn) => (
-                      <div key={conn.id} className="p-3 rounded-lg border space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {conn.isActive ? (
-                              <Check className="h-4 w-4 text-green-500" />
-                            ) : (
-                              <X className="h-4 w-4 text-red-500" />
-                            )}
-                            <span className="font-medium">{conn.name}</span>
-                            {/* Show owner badge for admins */}
-                            {user?.role === 'admin' && (
-                              conn.userId === null ? (
-                                <Badge variant="secondary" className="text-xs">Global</Badge>
-                              ) : conn.user && conn.userId !== user.id ? (
-                                <Badge variant="outline" className="text-xs">{conn.user.displayName || conn.user.username}</Badge>
-                              ) : null
-                            )}
-                            {/* Show Spotify auth status */}
-                            {conn.type === 'spotify' && (
-                              spotifyAuthStatus[conn.id]?.authorized ? (
-                                <Badge variant="default" className="text-xs bg-green-600">Authorized</Badge>
-                              ) : (
-                                <Badge variant="destructive" className="text-xs">Not Authorized</Badge>
-                              )
-                            )}
-                            {/* Show Deezer auth status */}
-                            {conn.type === 'deezer' && (
-                              deezerAuthStatus[conn.id]?.authorized ? (
-                                <Badge variant="default" className="text-xs bg-green-600">Authorized</Badge>
-                              ) : (
-                                <Badge variant="destructive" className="text-xs">Not Authorized</Badge>
-                              )
-                            )}
-                            {/* Show TIDAL auth status */}
-                            {conn.type === 'tidal' && (
-                              tidalAuthStatus[conn.id]?.authorized ? (
-                                <Badge variant="default" className="text-xs bg-green-600">Authorized</Badge>
-                              ) : (
-                                <Badge variant="destructive" className="text-xs">Not Authorized</Badge>
-                              )
-                            )}
-                          </div>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleTest(conn.id)}
-                              disabled={testingId === conn.id}
-                              title="Test connection"
-                            >
-                              <TestTube2 className={`h-4 w-4 ${testingId === conn.id ? 'animate-pulse' : ''}`} />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => openModal(conn)} title="Edit">
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDelete(conn.id)} title="Delete">
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                        </div>
-                        {/* Spotify authorization button */}
-                        {conn.type === 'spotify' && (
-                          <div className="flex items-center gap-2">
-                            {!spotifyAuthStatus[conn.id]?.authorized || spotifyAuthStatus[conn.id]?.needsReauthorization ? (
-                              <Button
-                                size="sm"
-                                onClick={() => handleSpotifyAuthorize(conn.id)}
-                                disabled={authorizingId === conn.id}
-                                className="bg-[#1DB954] hover:bg-[#1ed760]"
-                              >
-                                <ExternalLink className="h-3 w-3 mr-1" />
-                                {spotifyAuthStatus[conn.id]?.expired ? 'Re-authorize Spotify' : 'Authorize Spotify'}
-                              </Button>
-                            ) : (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handlePreview(conn.id, 'spotify')}
-                                >
-                                  <Search className="h-3 w-3 mr-1" />
-                                  Preview
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleSpotifyRevoke(conn.id)}
-                                >
-                                  <Unlink className="h-3 w-3 mr-1" />
-                                  Revoke
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        )}
-                        {/* Lidarr maintenance (admin only) */}
-                        {conn.type === 'lidarr' && user?.role === 'admin' && (
-                          <div className="border-t pt-2 mt-2 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-muted-foreground">Library Maintenance</span>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => fetchLidarrStats(conn.id)}
-                                disabled={lidarrStats[conn.id]?.loading}
-                                className="h-6 px-2"
-                              >
-                                <RefreshCw className={`h-3 w-3 ${lidarrStats[conn.id]?.loading ? 'animate-spin' : ''}`} />
-                              </Button>
-                            </div>
-                            {lidarrStats[conn.id] && (
-                              <div className="text-xs space-y-2">
-                                <div className="flex items-center justify-between">
-                                  <span className="flex items-center gap-1">
-                                    <Library className="h-3 w-3" />
-                                    Total Artists
-                                  </span>
-                                  <span className="font-medium">{lidarrStats[conn.id].total}</span>
-                                </div>
-                                
-                                {/* Issue breakdown */}
-                                {lidarrStats[conn.id].issueStats && (
-                                  <div className="border rounded-md p-2 space-y-1 bg-muted/50">
-                                    <div className="flex items-center justify-between">
-                                      <span>No Albums</span>
-                                      <span className={lidarrStats[conn.id].issueStats!.noAlbums > 0 ? 'text-yellow-500 font-medium' : 'text-green-500'}>
-                                        {lidarrStats[conn.id].issueStats!.noAlbums}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                      <span>No Poster</span>
-                                      <span className={lidarrStats[conn.id].issueStats!.noPoster > 0 ? 'text-yellow-500 font-medium' : 'text-green-500'}>
-                                        {lidarrStats[conn.id].issueStats!.noPoster}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                      <span>No Bio</span>
-                                      <span className={lidarrStats[conn.id].issueStats!.noOverview > 0 ? 'text-yellow-500 font-medium' : 'text-green-500'}>
-                                        {lidarrStats[conn.id].issueStats!.noOverview}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                      <span>No Genres</span>
-                                      <span className={lidarrStats[conn.id].issueStats!.noGenres > 0 ? 'text-yellow-500 font-medium' : 'text-green-500'}>
-                                        {lidarrStats[conn.id].issueStats!.noGenres}
-                                      </span>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Refresh buttons */}
-                                {lidarrStats[conn.id].needingRefresh > 0 && (
-                                  <div className="space-y-1 pt-1">
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="w-full"
-                                      onClick={() => refreshLidarrArtistsByIssue(conn.id, 'any')}
-                                      disabled={refreshingLidarr === conn.id}
-                                    >
-                                      <RefreshCw className={`h-3 w-3 mr-1 ${refreshingLidarr === conn.id ? 'animate-spin' : ''}`} />
-                                      {refreshingLidarr === conn.id 
-                                        ? 'Refreshing...' 
-                                        : `Refresh All Issues (up to 50)`
-                                      }
-                                    </Button>
-                                    {lidarrStats[conn.id].issueStats?.noAlbums && lidarrStats[conn.id].issueStats!.noAlbums > 0 && (
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="w-full text-xs"
-                                        onClick={() => refreshLidarrArtistsByIssue(conn.id, 'no_albums')}
-                                        disabled={refreshingLidarr === conn.id}
-                                      >
-                                        Refresh {lidarrStats[conn.id].issueStats!.noAlbums} with No Albums
-                                      </Button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            {!lidarrStats[conn.id] && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="w-full"
-                                onClick={() => fetchLidarrStats(conn.id)}
-                              >
-                                <Library className="h-3 w-3 mr-1" />
-                                Check Library Status
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                        {/* Last.fm preview button */}
-                        {conn.type === 'lastfm' && (
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handlePreview(conn.id, 'lastfm')}
-                            >
-                              <Search className="h-3 w-3 mr-1" />
-                              Preview Artists
-                            </Button>
-                          </div>
-                        )}
-                        {/* Deezer authorization button */}
-                        {conn.type === 'deezer' && (
-                          <div className="flex items-center gap-2">
-                            {!deezerAuthStatus[conn.id]?.authorized || deezerAuthStatus[conn.id]?.needsReauthorization ? (
-                              <Button
-                                size="sm"
-                                onClick={() => handleDeezerAuthorize(conn.id)}
-                                disabled={authorizingId === conn.id}
-                                className="bg-[#FEAA2D] hover:bg-[#FFB84D] text-black"
-                              >
-                                <ExternalLink className="h-3 w-3 mr-1" />
-                                {deezerAuthStatus[conn.id]?.expired ? 'Re-authorize Deezer' : 'Authorize Deezer'}
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleDeezerRevoke(conn.id)}
-                              >
-                                <Unlink className="h-3 w-3 mr-1" />
-                                Revoke
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                        {/* TIDAL authorization button */}
-                        {conn.type === 'tidal' && (
-                          <div className="flex items-center gap-2">
-                            {!tidalAuthStatus[conn.id]?.authorized || tidalAuthStatus[conn.id]?.needsReauthorization ? (
-                              <Button
-                                size="sm"
-                                onClick={() => handleTidalAuthorize(conn.id)}
-                                disabled={authorizingId === conn.id}
-                                className="bg-[#00FFFF] hover:bg-[#33FFFF] text-black"
-                              >
-                                <ExternalLink className="h-3 w-3 mr-1" />
-                                {tidalAuthStatus[conn.id]?.expired ? 'Re-authorize TIDAL' : 'Authorize TIDAL'}
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleTidalRevoke(conn.id)}
-                              >
-                                <Unlink className="h-3 w-3 mr-1" />
-                                Revoke
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
+        {connectionTypes.map((type) => (
+          <ConnectionCard
+            key={type.value}
+            typeConfig={type}
+            connections={connections.filter(c => c.type === type.value)}
+            isAdmin={user?.role === 'admin'}
+            onAdd={(t) => openModal(undefined, t as Connection['type'])}
+            onEdit={(id) => {
+              const conn = connections.find(c => c.id === id);
+              if (conn) openModal(conn);
+            }}
+            onTest={(id) => handleTest(id)}
+            onDelete={(id) => handleDelete(id)}
+            testingId={testingId}
+            onPreview={(id, t) => handlePreview(id, t)}
+          />
+        ))}
       </div>
 
       {/* Add/Edit Modal */}
