@@ -51,6 +51,15 @@ export default function SearchPage() {
     }
   }, [addToast]);
 
+  const handleCloseSlskd = useCallback(() => {
+    setSlskdModalOpen(false);
+    setSlskdSearchArtist(null);
+  }, []);
+
+  const handleCloseLabel = useCallback(() => {
+    setSelectedLabel(null);
+  }, []);
+
   const showPagination = search.totalPages > 1 && ['album', 'label', 'year'].includes(search.searchType);
 
   return (
@@ -132,11 +141,11 @@ export default function SearchPage() {
         onSelect={artistAdd.handleAddWithMbid} onClose={artistAdd.clearMbidModal} />
       <LabelArtistsModal
         label={selectedLabel ? { name: selectedLabel.name, id: selectedLabel.id } : null}
-        onClose={() => setSelectedLabel(null)} />
+        onClose={handleCloseLabel} />
       {slskdSearchArtist && (
         <SlskdSearchModal isOpen={slskdModalOpen} artistName={slskdSearchArtist.name}
           artistImage={slskdSearchArtist.image}
-          onClose={() => { setSlskdModalOpen(false); setSlskdSearchArtist(null); }} />
+          onClose={handleCloseSlskd} />
       )}
     </>
   );

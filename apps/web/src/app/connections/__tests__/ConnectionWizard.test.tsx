@@ -17,7 +17,7 @@ const {
   mockTestConnection: vi.fn(),
   mockDeleteConnection: vi.fn(),
   mockUseAuth: vi.fn(() => ({
-    user: { id: 1, username: 'admin', displayName: 'Admin', role: 'admin' as const },
+    user: { id: 1, username: 'admin', displayName: 'Admin', role: 'admin' as 'admin' | 'user' },
     isLoading: false,
     isAuthenticated: true,
     setupRequired: false,

@@ -143,7 +143,7 @@ describe('useOAuthStatus', () => {
       await waitFor(() => expect(result.current.status).not.toBeNull());
 
       // Mock authorize with a deferred promise to observe loading state
-      let resolveAuth!: (value: unknown) => void;
+      let resolveAuth!: (value: any) => void;
       vi.mocked(api.get).mockReturnValueOnce(
         new Promise(resolve => { resolveAuth = resolve; })
       );
@@ -229,7 +229,7 @@ describe('useOAuthStatus', () => {
       await waitFor(() => expect(result.current.status).not.toBeNull());
 
       // Mock revoke with deferred promise
-      let resolveRevoke!: (value: unknown) => void;
+      let resolveRevoke!: (value: any) => void;
       vi.mocked(api.post).mockReturnValueOnce(
         new Promise(resolve => { resolveRevoke = resolve; })
       );

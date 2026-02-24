@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
 // Hoist mock so it's available inside vi.mock factory
@@ -24,7 +24,7 @@ import { useArtistAdd, isAlreadyExistsError } from '../hooks/useArtistAdd';
 import type { ArtistResult } from '../hooks/useSearch';
 
 describe('useArtistAdd', () => {
-  let mockSetResults: ReturnType<typeof vi.fn>;
+  let mockSetResults: Mock<(updater: (prev: any[]) => any[]) => void>;
 
   beforeEach(() => {
     vi.resetAllMocks();
