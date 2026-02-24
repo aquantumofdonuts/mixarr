@@ -6,11 +6,10 @@
  */
 
 import { registerStrategy } from './registry.js';
-import type {
-  SubscriptionStrategy,
-  StrategyContext,
-  SubscriptionStrategyResult,
-  ArtistToAdd,
+import {
+  artistResult,
+  type SubscriptionStrategy,
+  type StrategyContext,
 } from './types.js';
 import { LastfmService } from '../../services/lastfm.js';
 import { isLastFMConfig } from '../../types/connections.js';
@@ -38,10 +37,7 @@ function getLastfmUsername(context: StrategyContext): string {
   return conn.config.username;
 }
 
-/** Shorthand for a result with only artists. */
-function artistResult(artists: ArtistToAdd[]): SubscriptionStrategyResult {
-  return { artists, albums: [] };
-}
+
 
 // ---------------------------------------------------------------------------
 // Strategies

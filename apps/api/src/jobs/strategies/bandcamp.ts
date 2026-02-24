@@ -6,12 +6,14 @@
  */
 
 import { registerStrategy } from './registry.js';
-import type {
-  SubscriptionStrategy,
-  StrategyContext,
-  SubscriptionStrategyResult,
-  ArtistToAdd,
-  AlbumToAdd,
+import {
+  artistResult,
+  albumResult,
+  type SubscriptionStrategy,
+  type StrategyContext,
+  type SubscriptionStrategyResult,
+  type ArtistToAdd,
+  type AlbumToAdd,
 } from './types.js';
 import { BandcampService } from '../../services/bandcamp.js';
 
@@ -19,15 +21,7 @@ import { BandcampService } from '../../services/bandcamp.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Shorthand for a result with only artists. */
-function artistResult(artists: ArtistToAdd[]): SubscriptionStrategyResult {
-  return { artists, albums: [] };
-}
 
-/** Shorthand for a result with only albums. */
-function albumResult(albums: AlbumToAdd[]): SubscriptionStrategyResult {
-  return { artists: [], albums };
-}
 
 // ---------------------------------------------------------------------------
 // Strategies

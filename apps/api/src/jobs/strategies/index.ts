@@ -6,4 +6,6 @@ export type {
   SubscriptionStrategy,
 } from './types.js';
 
+export { artistResult, albumResult } from './types.js';
+
 export { registerStrategy, getStrategy, clearRegistry } from './registry.js';

@@ -12,11 +12,11 @@
  */
 
 import { registerStrategy } from './registry.js';
-import type {
-  SubscriptionStrategy,
-  StrategyContext,
-  SubscriptionStrategyResult,
-  ArtistToAdd,
+import {
+  artistResult,
+  type SubscriptionStrategy,
+  type StrategyContext,
+  type ArtistToAdd,
 } from './types.js';
 import { DeezerOAuthService } from '../../services/deezer-oauth.js';
 import {
@@ -60,10 +60,7 @@ function extractArtistsFromTracks(
   return Array.from(artistMap.values());
 }
 
-/** Shorthand for a result with only artists. */
-function artistResult(artists: ArtistToAdd[]): SubscriptionStrategyResult {
-  return { artists, albums: [] };
-}
+
 
 // ---------------------------------------------------------------------------
 // Authenticated strategies

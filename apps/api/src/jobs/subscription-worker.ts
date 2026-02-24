@@ -145,11 +145,12 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     };
 
     const strategy = getStrategy(subscription.type as SubscriptionType);
-    if (strategy) {
-      const result = await strategy.execute(strategyContext);
-      artists = result.artists;
-      albumsToAdd = result.albums;
+    if (!strategy) {
+      throw new Error(`No strategy registered for subscription type: ${subscription.type}`);
     }
+    const result = await strategy.execute(strategyContext);
+    artists = result.artists;
+    albumsToAdd = result.albums;
 
     await job.updateProgress({ phase: 'fetched', artistCount: artists.length });
 

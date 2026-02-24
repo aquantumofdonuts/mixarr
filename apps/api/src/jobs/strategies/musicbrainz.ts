@@ -5,22 +5,16 @@
  */
 
 import { registerStrategy } from './registry.js';
-import type {
-  SubscriptionStrategy,
-  StrategyContext,
-  SubscriptionStrategyResult,
-  AlbumToAdd,
+import {
+  albumResult,
+  type SubscriptionStrategy,
+  type StrategyContext,
+  type SubscriptionStrategyResult,
+  type AlbumToAdd,
 } from './types.js';
 import { MusicBrainzService } from '../../services/musicbrainz.js';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
-/** Shorthand for a result with only albums. */
-function albumResult(albums: AlbumToAdd[]): SubscriptionStrategyResult {
-  return { artists: [], albums };
-}
 
 // ---------------------------------------------------------------------------
 // Strategies

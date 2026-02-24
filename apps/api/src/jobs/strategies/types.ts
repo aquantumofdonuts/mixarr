@@ -50,3 +50,17 @@ export interface StrategyContext {
 export interface SubscriptionStrategy {
   execute(context: StrategyContext): Promise<SubscriptionStrategyResult>;
 }
+
+// ---------------------------------------------------------------------------
+// Result helpers — used by every strategy to build return values.
+// ---------------------------------------------------------------------------
+
+/** Shorthand for a result with only artists. */
+export function artistResult(artists: ArtistToAdd[]): SubscriptionStrategyResult {
+  return { artists, albums: [] };
+}
+
+/** Shorthand for a result with only albums. */
+export function albumResult(albums: AlbumToAdd[]): SubscriptionStrategyResult {
+  return { artists: [], albums };
+}

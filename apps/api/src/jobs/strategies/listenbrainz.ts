@@ -6,12 +6,12 @@
  */
 
 import { registerStrategy } from './registry.js';
-import type {
-  SubscriptionStrategy,
-  StrategyContext,
-  SubscriptionStrategyResult,
-  ArtistToAdd,
-  AlbumToAdd,
+import {
+  artistResult,
+  albumResult,
+  type SubscriptionStrategy,
+  type StrategyContext,
+  type ArtistToAdd,
 } from './types.js';
 import { ListenBrainzService, VALID_PERIODS, type ListenBrainzPeriod } from '../../services/listenbrainz.js';
 import { MusicBrainzService } from '../../services/musicbrainz.js';
@@ -34,15 +34,7 @@ function getListenBrainzService(context: StrategyContext): { service: ListenBrai
   return { service: new ListenBrainzService(username, conn.config.token), username };
 }
 
-/** Shorthand for a result with only artists. */
-function artistResult(artists: ArtistToAdd[]): SubscriptionStrategyResult {
-  return { artists, albums: [] };
-}
 
-/** Shorthand for a result with only albums. */
-function albumResult(albums: AlbumToAdd[]): SubscriptionStrategyResult {
-  return { artists: [], albums };
-}
 
 /** Extract unique artists by lowercase name from tracks with artist_name/artist_mbid. */
 function extractUniqueArtists(

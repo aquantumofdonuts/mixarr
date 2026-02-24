@@ -8,11 +8,11 @@
  */
 
 import { registerStrategy } from './registry.js';
-import type {
-  SubscriptionStrategy,
-  StrategyContext,
-  SubscriptionStrategyResult,
-  ArtistToAdd,
+import {
+  artistResult,
+  type SubscriptionStrategy,
+  type StrategyContext,
+  type SubscriptionStrategyResult,
 } from './types.js';
 import { AIService } from '../../services/ai.js';
 import { SpotifyService } from '../../services/spotify.js';
@@ -23,10 +23,7 @@ import { isSpotifyConfig, isLastFMConfig } from '../../types/connections.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Shorthand for a result with only artists. */
-function artistResult(artists: ArtistToAdd[]): SubscriptionStrategyResult {
-  return { artists, albums: [] };
-}
+
 
 // ---------------------------------------------------------------------------
 // Strategies

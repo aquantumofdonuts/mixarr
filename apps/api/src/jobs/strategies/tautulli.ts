@@ -8,9 +8,10 @@
  */
 
 import { registerStrategy } from './registry.js';
-import type {
-  SubscriptionStrategy,
-  ArtistToAdd,
+import {
+  artistResult,
+  type SubscriptionStrategy,
+  type ArtistToAdd,
 } from './types.js';
 import { LastfmService } from '../../services/lastfm.js';
 import { isLastFMConfig, isTautulliConfig } from '../../types/connections.js';
@@ -112,7 +113,7 @@ const tautulliSimilar: SubscriptionStrategy = {
       source: `tautulli-similar-${period}`,
     }));
 
-    return { artists, albums: [] };
+    return artistResult(artists);
   },
 };
 
