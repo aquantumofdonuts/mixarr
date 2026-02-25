@@ -366,7 +366,7 @@ This test requires a supertest-based test. Add a new test file `apps/api/tests/a
  * Connection Test Endpoint Auth Tests
  * 
  * Verifies SSRF protection: POST /api/connections/test requires
- * admin auth after setup (users exist), open during setup (no users).
+ * authentication after setup (users exist), open during setup (no users).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
@@ -441,10 +441,10 @@ describe('POST /api/connections/test — SSRF protection', () => {
     expect(res.status).toBe(401);
   });
 
-  it('should reject non-admin authenticated requests after setup', async () => {
+  it('should allow authenticated non-admin requests after setup', async () => {
     mockUserCount.mockResolvedValue(1);
     mockIsAuthenticated.mockReturnValue(true);
-    // Patch user onto request in the middleware above
+    // Patch user onto request as regular user
     app = express();
     app.use(express.json());
     app.use((req: any, _res, next) => {
@@ -457,9 +457,11 @@ describe('POST /api/connections/test — SSRF protection', () => {
 
     const res = await request(app)
       .post('/api/connections/test')
-      .send({ type: 'lidarr', url: 'http://localhost:5030', apiKey: 'test' });
+      .send({ type: 'spotify', clientId: 'abcdefghijklmnop', clientSecret: 'abcdefghijklmnop' });
 
-    expect(res.status).toBe(403);
+    // Regular users can test connections — should not get 401/403
+    expect(res.status).not.toBe(401);
+    expect(res.status).not.toBe(403);
   });
 
   it('should allow unauthenticated requests during setup (no users)', async () => {
@@ -489,15 +491,11 @@ Expected: First test FAILS — unauthenticated request is currently allowed.
 In `apps/api/src/routes/connections.ts`, add a `prisma` import reference (it's already imported as `default`). Inside the `POST /test` handler, add the auth check right after `try {` and before `const { type, ... } = req.body;`:
 
 ```typescript
-    // SSRF protection: require admin auth after setup (same pattern as POST /settings/base-url)
+    // SSRF protection: require authentication after setup (any logged-in user can test)
     const userCount = await prisma.user.count();
     if (userCount > 0) {
       if (!req.isAuthenticated()) {
         res.status(401).json({ success: false, error: 'Authentication required' });
-        return;
-      }
-      if (req.user?.role !== 'admin') {
-        res.status(403).json({ success: false, error: 'Admin access required' });
         return;
       }
     }
@@ -531,7 +529,7 @@ Expected: No errors.
 
 ```bash
 git add apps/api/src/routes/connections.ts apps/api/tests/api/connections-test-auth.test.ts
-git commit -m "fix(security): require admin auth for connection test endpoint after setup"
+git commit -m "fix(security): require authentication for connection test endpoint after setup"
 ```
 
 ---

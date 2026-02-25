@@ -108,7 +108,7 @@ if (data.config) {
 
 **Problem:** `POST /connections/test` is public — accepts URL + API key, makes HTTP request. SSRF vector.
 
-**Change:** Add inline auth check (same pattern as `POST /settings/base-url`):
+**Change:** Add inline auth check requiring any authenticated user (not admin-only, since regular users also test their own connections):
 ```typescript
 // Before the switch statement:
 const userCount = await prisma.user.count();
@@ -117,14 +117,10 @@ if (userCount > 0) {
     res.status(401).json({ success: false, error: 'Authentication required' });
     return;
   }
-  if (req.user?.role !== 'admin') {
-    res.status(403).json({ success: false, error: 'Admin access required' });
-    return;
-  }
 }
 ```
 
-**Trade-off:** During setup (0 users), endpoint remains open for the setup wizard. Window closes as soon as first user is created.
+**Trade-off:** During setup (0 users), endpoint remains open for the setup wizard. Window closes as soon as first user is created. Regular users can still test connections — only unauthenticated SSRF is blocked.
 
 ### Fix 7: Poll Job Path Validation
 
