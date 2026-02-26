@@ -278,10 +278,19 @@ connectionsRouter.get('/:id/spotify/callback', async (req, res) => {
   }
 });
 
-// Generic connection test endpoint (public - used during setup)
+// Generic connection test endpoint (public during setup, requires auth after)
 // Routes to the appropriate service based on connection type
 connectionsRouter.post('/test', validateBody(testConnectionSchema), async (req, res) => {
   try {
+    // SSRF protection: require authentication after setup (any logged-in user can test)
+    const userCount = await prisma.user.count();
+    if (userCount > 0) {
+      if (!req.isAuthenticated()) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+    }
+
     const { type, url, apiKey, clientId, clientSecret } = req.body;
 
     switch (type) {
