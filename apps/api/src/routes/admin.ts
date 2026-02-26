@@ -4,7 +4,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { createUserSchema, updateUserSchema } from '../schemas/user.js';
 import { parseIntParam } from '../utils/params.js';
-import bcrypt from 'bcryptjs';
+import { hashPassword } from '../auth/passport.js';
 import { createLogger } from '../lib/logger.js';
 
 const logger = createLogger('AdminRoute');
@@ -117,7 +117,7 @@ adminRouter.post('/users', validateBody(createUserSchema), async (req, res) => {
     }
 
     // Hash password
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
     const user = await prisma.user.create({
       data: {
@@ -187,7 +187,7 @@ adminRouter.put('/users/:id', validateBody(updateUserSchema), async (req, res) =
     if (role !== undefined) updateData.role = role;
     if (isActive !== undefined) updateData.isActive = isActive;
     if (password) {
-      updateData.passwordHash = await bcrypt.hash(password, 10);
+      updateData.passwordHash = await hashPassword(password);
     }
 
     const user = await prisma.user.update({
