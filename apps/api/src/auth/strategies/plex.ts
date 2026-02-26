@@ -6,6 +6,7 @@
  */
 
 import type { PrismaClient } from '@prisma/client';
+import { fetchWithTimeout } from '../../lib/fetch-with-timeout.js';
 
 export interface PlexConfig {
   restrictToServerId?: string;
@@ -39,7 +40,8 @@ export class PlexAuthService {
    * Create a Plex PIN and return the auth URL
    */
   async createAuthUrl(): Promise<{ pinId: number; authUrl: string }> {
-    const response = await fetch('https://plex.tv/api/v2/pins', {
+    const response = await fetchWithTimeout('https://plex.tv/api/v2/pins', {
+      timeout: 15_000,
       method: 'POST',
       headers: {
         'Accept': 'application/json',
@@ -70,7 +72,8 @@ export class PlexAuthService {
    */
   async handleCallback(pinId: number): Promise<{ user: PlexUser; authToken: string } | null> {
     // Poll for the auth token
-    const response = await fetch(`https://plex.tv/api/v2/pins/${pinId}`, {
+    const response = await fetchWithTimeout(`https://plex.tv/api/v2/pins/${pinId}`, {
+      timeout: 15_000,
       headers: {
         'Accept': 'application/json',
         'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
@@ -88,7 +91,8 @@ export class PlexAuthService {
     }
 
     // Get user info
-    const userResponse = await fetch('https://plex.tv/api/v2/user', {
+    const userResponse = await fetchWithTimeout('https://plex.tv/api/v2/user', {
+      timeout: 15_000,
       headers: {
         'Accept': 'application/json',
         'X-Plex-Token': pin.authToken,
