@@ -133,6 +133,44 @@ describe('Notifications API', () => {
       expect(response.body).toHaveLength(1);
       expect(response.body[0].name).toBe('Test Discord');
     });
+
+    it('should mask sensitive fields in channel config', async () => {
+      const { default: prisma } = await import('../../src/lib/db.js');
+      (prisma.notificationChannel.findMany as any).mockResolvedValue([
+        {
+          id: 1,
+          userId: 1,
+          type: 'discord',
+          name: 'My Discord',
+          config: { webhookUrl: 'https://discord.com/api/webhooks/123456/abcdef-secret-token' },
+          events: ['subscription.completed'],
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 2,
+          userId: 1,
+          type: 'telegram',
+          name: 'My Telegram',
+          config: { botToken: '123456:ABC-DEF-secret-token', chatId: '99999' },
+          events: ['subscription.failed'],
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+
+      const res = await request(app).get('/api/notifications/channels');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(2);
+      // Discord webhook URL should be masked
+      expect(res.body[0].config.webhookUrl).toBe('••••••••');
+      // Telegram bot token should be masked, chatId should be visible
+      expect(res.body[1].config.botToken).toBe('••••••••');
+      expect(res.body[1].config.chatId).toBe('99999');
+    });
   });
 
   describe('POST /api/notifications/channels', () => {

@@ -48,6 +48,29 @@ const VALID_EVENTS: NotificationEvent[] = [
   'enrichment.completed',
 ];
 
+/** Sentinel value for masked secrets — detected in PUT to preserve existing values */
+const SECRET_MASK = '••••••••';
+
+/** Keys containing secrets per channel type */
+const SENSITIVE_KEYS: Record<string, string[]> = {
+  discord: ['webhookUrl'],
+  telegram: ['botToken'],
+  pushover: ['appToken', 'userKey'],
+  email: ['password'],
+  webhook: ['headers'],
+};
+
+/** Mask sensitive fields in channel config for API responses */
+function sanitizeChannelConfig(type: string, config: Record<string, any>): Record<string, any> {
+  const sanitized = { ...config };
+  for (const key of SENSITIVE_KEYS[type] || []) {
+    if (sanitized[key] != null) {
+      sanitized[key] = SECRET_MASK;
+    }
+  }
+  return sanitized;
+}
+
 /**
  * GET /api/notifications/channels
  * List all notification channels for the current user
@@ -59,7 +82,10 @@ router.get('/channels', requireAuth, async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    res.json(channels);
+    res.json(channels.map(ch => ({
+      ...ch,
+      config: sanitizeChannelConfig(ch.type, ch.config as Record<string, any>),
+    })));
   } catch (error) {
     logger.error('Failed to fetch notification channels', {
       error: error instanceof Error ? error.message : String(error),
@@ -113,7 +139,10 @@ router.post('/channels', requireAuth, async (req: Request, res: Response) => {
       },
     });
 
-    res.status(201).json(channel);
+    res.status(201).json({
+      ...channel,
+      config: sanitizeChannelConfig(channel.type, channel.config as Record<string, any>),
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation failed', details: error.errors });
@@ -168,6 +197,16 @@ router.put('/channels/:id', requireAuth, async (req: Request, res: Response) => 
       }
     }
 
+    // Preserve secrets when frontend sends back masked values
+    if (data.config) {
+      const existingConfig = existing.config as Record<string, any>;
+      for (const [key, value] of Object.entries(data.config)) {
+        if (value === SECRET_MASK) {
+          data.config[key] = existingConfig[key];
+        }
+      }
+    }
+
     const channel = await prisma.notificationChannel.update({
       where: { id: channelId },
       data: {
@@ -178,7 +217,10 @@ router.put('/channels/:id', requireAuth, async (req: Request, res: Response) => 
       },
     });
 
-    res.json(channel);
+    res.json({
+      ...channel,
+      config: sanitizeChannelConfig(channel.type, channel.config as Record<string, any>),
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation failed', details: error.errors });
