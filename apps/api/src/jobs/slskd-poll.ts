@@ -1,7 +1,7 @@
 import path from 'path';
 import { prisma } from '../lib/db.js';
 import { SlskdService } from '../services/slskd.js';
-import { SlskdOrganizerService } from '../services/slskd-organizer.js';
+import { SlskdOrganizerService, isPathSafe } from '../services/slskd-organizer.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('SlskdPoll');
@@ -79,8 +79,19 @@ export async function pollSlskdDownloads(): Promise<void> {
       }
 
       if (slskdStatus.state === 'Completed') {
+        // Validate the constructed path stays within downloadDir (path traversal protection)
+        const relativePath = `${download.username}/${slskdStatus.directory}/${basename}`;
+        if (!isPathSafe(relativePath, downloadDir)) {
+          log.warn('Unsafe download path detected — possible path traversal', {
+            downloadId: download.id,
+            username: download.username,
+            directory: slskdStatus.directory,
+          });
+          continue;
+        }
+
         // Download finished - update path and trigger organization
-        const downloadPath = `${downloadDir}/${download.username}/${slskdStatus.directory}/${basename}`;
+        const downloadPath = path.resolve(downloadDir, relativePath);
 
         // Atomic status update - only update if still in expected state
         // This prevents race conditions where both webhook and poll job try to organize

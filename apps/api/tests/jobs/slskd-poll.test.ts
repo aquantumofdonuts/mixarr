@@ -29,12 +29,16 @@ vi.mock('../../src/services/slskd.js', () => ({
   },
 }));
 
-// Mock SlskdOrganizerService as a class
-vi.mock('../../src/services/slskd-organizer.js', () => ({
-  SlskdOrganizerService: class MockSlskdOrganizerService {
-    organizeFile = mockOrganizeFile;
-  },
-}));
+// Mock SlskdOrganizerService as a class, but keep real isPathSafe for path validation tests
+vi.mock('../../src/services/slskd-organizer.js', async () => {
+  const actual = await vi.importActual('../../src/services/slskd-organizer.js');
+  return {
+    ...(actual as any),
+    SlskdOrganizerService: class MockSlskdOrganizerService {
+      organizeFile = mockOrganizeFile;
+    },
+  };
+});
 
 // Mock logger to avoid console noise
 vi.mock('../../src/lib/logger.js', () => ({
@@ -282,6 +286,82 @@ describe('SlskdPollJob', () => {
 
       // Should not throw
       await expect(pollSlskdDownloads()).resolves.not.toThrow();
+    });
+
+    it('should skip downloads with path traversal in username', async () => {
+      const { pollSlskdDownloads } = await import('../../src/jobs/slskd-poll.js');
+
+      mockConnectionFindFirst.mockResolvedValue({
+        id: 'conn-1',
+        type: 'slskd',
+        enabled: true,
+        config: {
+          url: 'http://localhost:5030',
+          apiKey: 'test-key',
+          downloadDir: '/data/slskd/downloads',
+          musicLibraryDir: '/data/plex/music',
+        },
+      });
+
+      mockDownloadFindMany.mockResolvedValue([
+        { id: 1, username: '../../etc', filename: '/music/track.flac', status: 'pending' },
+      ]);
+
+      mockGetDownloads.mockResolvedValue([
+        {
+          username: '../../etc',
+          directories: [{
+            directory: 'cron.d',
+            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+          }],
+        },
+      ]);
+
+      mockDownloadUpdateMany.mockResolvedValue({ count: 0 });
+
+      await pollSlskdDownloads();
+
+      // Should NOT attempt to organize — path traversal detected
+      expect(mockDownloadUpdateMany).not.toHaveBeenCalled();
+      expect(mockOrganizeFile).not.toHaveBeenCalled();
+    });
+
+    it('should skip downloads with path traversal in directory', async () => {
+      const { pollSlskdDownloads } = await import('../../src/jobs/slskd-poll.js');
+
+      mockConnectionFindFirst.mockResolvedValue({
+        id: 'conn-1',
+        type: 'slskd',
+        enabled: true,
+        config: {
+          url: 'http://localhost:5030',
+          apiKey: 'test-key',
+          downloadDir: '/data/slskd/downloads',
+          musicLibraryDir: '/data/plex/music',
+        },
+      });
+
+      mockDownloadFindMany.mockResolvedValue([
+        { id: 1, username: 'normaluser', filename: '/music/track.flac', status: 'pending' },
+      ]);
+
+      mockGetDownloads.mockResolvedValue([
+        {
+          username: 'normaluser',
+          directories: [{
+            directory: '../../../etc/cron.d',
+            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+          }],
+        },
+      ]);
+
+      mockDownloadUpdateMany.mockResolvedValue({ count: 0 });
+
+      await pollSlskdDownloads();
+
+      // Should NOT attempt to organize — path traversal detected
+      expect(mockDownloadUpdateMany).not.toHaveBeenCalled();
+      expect(mockOrganizeFile).not.toHaveBeenCalled();
     });
   });
 });
