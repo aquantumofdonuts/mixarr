@@ -73,7 +73,7 @@ model SsoProvider {
   id        Int             @id @default(autoincrement())
   type      SsoProviderType @unique
   name      String          @db.VarChar(100)
-  config    Json            // Encrypted credentials, URLs, mappings
+  config    Json            // Credentials, URLs, mappings (stored as JSON)
   isEnabled Boolean         @default(false) @map("is_enabled")
   createdAt DateTime        @default(now()) @map("created_at")
   updatedAt DateTime        @updatedAt @map("updated_at")
@@ -108,7 +108,7 @@ model Connection {
   userId    Int?           @map("user_id")  // null = global connection (e.g., Lidarr)
   type      ConnectionType
   name      String         @db.VarChar(100)
-  config    Json           // Encrypted sensitive data
+  config    Json           // Sensitive data (stored as JSON)
   isActive  Boolean        @default(true) @map("is_active")
   lastTest  DateTime?      @map("last_test")
   createdAt DateTime       @default(now()) @map("created_at")
