@@ -25,4 +25,6 @@ export { OfflineIndicator } from './offline-indicator';
 
 export { Checkbox } from './checkbox';
 
+export { ConfirmDialog } from './confirm-dialog';
+
 export { Skeleton, SkeletonText, SkeletonCard } from './skeleton';
