@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { EmptyState } from '@/components/ui';
+import { EmptyState, Skeleton } from '@/components/ui';
 import { FeedCard } from './FeedCard';
 import Calendar from 'lucide-react/dist/esm/icons/calendar';
 import type { FeedItem } from '@/lib/hooks';
@@ -55,6 +55,19 @@ export function FeedGrid({
   }, [hasMore, isLoading, onLoadMore]);
 
   const router = useRouter();
+
+  // Skeleton loading state
+  if (isLoading && items.length === 0) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="aspect-square">
+            <Skeleton className="w-full h-full rounded-lg" />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   // Empty state
   if (items.length === 0 && !isLoading) {

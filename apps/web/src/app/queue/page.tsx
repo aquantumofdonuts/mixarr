@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { EmptyState } from '@/components/ui';
+import { EmptyState, Skeleton } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/layout/page-header';
@@ -190,11 +190,18 @@ export default function QueuePage() {
 
       {/* Items list */}
       {isLoading ? (
-        <Card>
-          <CardContent className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          </CardContent>
-        </Card>
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 p-4 rounded-lg border bg-card">
+              <Skeleton className="w-12 h-12 rounded-md" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-1/4" />
+                <Skeleton className="h-3 w-1/2" />
+              </div>
+              <Skeleton className="h-6 w-16 rounded-full" />
+            </div>
+          ))}
+        </div>
       ) : filteredItems.length === 0 ? (
         <EmptyState
           icon={Music2}

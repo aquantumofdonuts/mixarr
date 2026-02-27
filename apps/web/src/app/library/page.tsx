@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ConfirmDialog, Tabs, Tab } from '@/components/ui';
+import { ConfirmDialog, Tabs, Tab, Skeleton } from '@/components/ui';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
@@ -549,8 +549,19 @@ export default function LibraryPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+            <div className="space-y-2">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 py-3 px-4">
+                  <Skeleton className="w-10 h-10 rounded-md" />
+                  <Skeleton className="h-4 w-1/4" />
+                  <Skeleton className="h-4 w-12" />
+                  <div className="flex gap-2 ml-auto">
+                    <Skeleton className="w-5 h-5 rounded" />
+                    <Skeleton className="w-5 h-5 rounded" />
+                    <Skeleton className="w-5 h-5 rounded" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : filteredArtists.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
