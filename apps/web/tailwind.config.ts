@@ -58,7 +58,7 @@ const config: Config = {
         width: 'width',
       },
       animation: {
-        'fade-in': 'fadeIn 0.2s ease-out',
+        'fade-in': 'fadeIn 0.4s ease-out',
         'slide-in': 'slideIn 0.2s ease-out',
         'slide-out': 'slideOut 0.2s ease-in',
         'spin-slow': 'spin 2s linear infinite',
@@ -66,8 +66,8 @@ const config: Config = {
       },
       keyframes: {
         fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         slideIn: {
           '0%': { transform: 'translateX(-100%)' },

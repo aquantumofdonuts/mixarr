@@ -34,6 +34,8 @@ export interface FeedCardProps {
   tags?: string[] | null;
   listeners?: number | null;
   subscriptionName?: string | null;
+  /** Position index for staggered entrance animation */
+  index?: number;
 }
 
 export function FeedCard({
@@ -47,6 +49,7 @@ export function FeedCard({
   tags,
   listeners,
   subscriptionName,
+  index = 0,
 }: FeedCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isTouched, setIsTouched] = useState(false);
@@ -60,6 +63,10 @@ export function FeedCard({
   const hasSource = subscriptionName !== null && subscriptionName !== undefined;
 
   return (
+    <div
+      style={{ animationDelay: `${Math.min(index * 50, 500)}ms` }}
+      className="animate-fade-in opacity-0 [animation-fill-mode:forwards] motion-reduce:animate-none motion-reduce:opacity-100"
+    >
     <div
       className={cn(
         'relative group rounded-card overflow-hidden bg-card transition-all duration-300 hover:shadow-elevation-2',
@@ -172,6 +179,7 @@ export function FeedCard({
           </div>
         )}
       </div>
+    </div>
     </div>
   );
 }

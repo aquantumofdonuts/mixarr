@@ -51,7 +51,7 @@ export function ConnectionCard({
   onPreview,
 }: ConnectionCardProps) {
   return (
-    <Card>
+    <Card interactive>
       <CardHeader className="pb-3">
         <div className="flex items-center gap-3">
           <div

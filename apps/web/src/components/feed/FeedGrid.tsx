@@ -88,7 +88,7 @@ export function FeedGrid({
         data-testid="feed-grid"
         className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
       >
-        {items.map((item) => (
+        {items.map((item, i) => (
           <FeedCard
             key={item.id}
             id={item.id}
@@ -101,6 +101,7 @@ export function FeedGrid({
             tags={item.tags}
             listeners={item.listeners}
             subscriptionName={item.subscriptionName}
+            index={i}
           />
         ))}
       </div>
