@@ -70,10 +70,10 @@ const icons = {
 };
 
 const iconColors = {
-  success: 'text-green-500',
-  error: 'text-red-500',
-  warning: 'text-yellow-500',
-  info: 'text-blue-500',
+  success: 'text-status-success',
+  error: 'text-status-error',
+  warning: 'text-status-warning',
+  info: 'text-status-info',
 };
 
 function ToastContainer({
@@ -84,7 +84,7 @@ function ToastContainer({
   onRemove: (id: string) => void;
 }) {
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    <div className="fixed bottom-20 md:bottom-4 right-4 z-50 flex flex-col gap-2">
       {toasts.map((toast) => {
         const Icon = icons[toast.type];
         return (
