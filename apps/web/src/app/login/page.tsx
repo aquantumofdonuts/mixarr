@@ -12,6 +12,9 @@ import EyeOff from 'lucide-react/dist/esm/icons/eye-off';
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
 import LogIn from 'lucide-react/dist/esm/icons/log-in';
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
+import MonitorPlay from 'lucide-react/dist/esm/icons/monitor-play';
+import KeyRound from 'lucide-react/dist/esm/icons/key-round';
+import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
 
 function LoginPageContent() {
   const [username, setUsername] = useState('');
@@ -185,13 +188,13 @@ function LoginPageContent() {
                       </svg>
                     )}
                     {provider.type === 'plex' && (
-                      <span className="mr-2 text-lg">🟠</span>
+                      <MonitorPlay className="w-5 h-5 mr-2 text-orange-500" />
                     )}
                     {provider.type === 'ldap' && (
-                      <span className="mr-2 text-lg">🔑</span>
+                      <KeyRound className="w-5 h-5 mr-2" />
                     )}
                     {provider.type === 'saml' && (
-                      <span className="mr-2 text-lg">🔐</span>
+                      <ShieldCheck className="w-5 h-5 mr-2" />
                     )}
                     Login with {provider.name}
                   </Button>
