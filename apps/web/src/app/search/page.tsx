@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui';
 import { LoadingOverlay } from '@/components/ui/loading';
 import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
@@ -118,22 +118,18 @@ export default function SearchPage() {
         )}
 
         {!search.isSearching && search.results.length === 0 && search.query && (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <SearchIcon className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground">No results found</p>
-              <p className="text-sm text-muted-foreground mt-1">Try a different search term</p>
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={SearchIcon}
+            title="No results found"
+            description="Try a different search term"
+          />
         )}
         {!search.isSearching && !search.query && (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <SearchIcon className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground">Enter a search term</p>
-              <p className="text-sm text-muted-foreground mt-1">Search by artist, album, label, or year</p>
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={SearchIcon}
+            title="Enter a search term"
+            description="Search by artist, album, label, or year"
+          />
         )}
       </LoadingOverlay>
 

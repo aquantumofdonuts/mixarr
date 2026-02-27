@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { EmptyState } from '@/components/ui';
 import { FeedCard } from './FeedCard';
+import Calendar from 'lucide-react/dist/esm/icons/calendar';
 import type { FeedItem } from '@/lib/hooks';
 
 export interface FeedGridProps {
@@ -52,19 +54,17 @@ export function FeedGrid({
     };
   }, [hasMore, isLoading, onLoadMore]);
 
+  const router = useRouter();
+
   // Empty state
   if (items.length === 0 && !isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <p className="text-gray-400 text-lg mb-4">No recommendations yet</p>
-        <p className="text-gray-500 mb-6">Set up subscriptions to start discovering artists</p>
-        <Link
-          href="/subscriptions"
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
-        >
-          Set Up Subscriptions
-        </Link>
-      </div>
+      <EmptyState
+        icon={Calendar}
+        title="No recommendations yet"
+        description="Set up subscriptions to start discovering artists"
+        action={{ label: 'Set Up Subscriptions', onClick: () => router.push('/subscriptions') }}
+      />
     );
   }
 

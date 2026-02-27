@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/layout/page-header';
@@ -195,15 +196,11 @@ export default function QueuePage() {
           </CardContent>
         </Card>
       ) : filteredItems.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <Music2 className="h-12 w-12 text-muted-foreground/50 mb-4" />
-            <p className="text-muted-foreground">No {statusFilter} items in the queue</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Items are added when subscriptions run with &quot;queue&quot; result handling
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Music2}
+          title={`No ${statusFilter} items in the queue`}
+          description={'Items are added when subscriptions run with "queue" result handling'}
+        />
       ) : (
         <div className="space-y-2">
           {/* Select all header */}

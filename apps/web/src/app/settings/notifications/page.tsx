@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ConfirmDialog } from '@/components/ui';
+import { ConfirmDialog, EmptyState } from '@/components/ui';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
@@ -239,19 +239,12 @@ export default function NotificationsSettingsPage() {
         {loading ? (
           <div className="text-muted-foreground text-center py-12">Loading...</div>
         ) : channels.length === 0 ? (
-          <Card>
-            <CardContent className="text-center py-12">
-              <Bell className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-              <h3 className="text-lg font-medium mb-2">No Notification Channels</h3>
-              <p className="text-muted-foreground mb-4">
-                Add a notification channel to receive alerts about subscriptions, artist additions, and more.
-              </p>
-              <Button onClick={openAddModal}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Your First Channel
-              </Button>
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={Bell}
+            title="No Notification Channels"
+            description="Add a notification channel to receive alerts about subscriptions, artist additions, and more."
+            action={{ label: 'Add Your First Channel', onClick: openAddModal }}
+          />
         ) : (
           <div className="grid gap-4">
             {channels.map(channel => {

@@ -17,6 +17,12 @@ vi.mock('next/link', () => ({
   },
 }));
 
+// Mock Next.js navigation
+const mockPush = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+}));
+
 // Mock IntersectionObserver (jsdom doesn't support it)
 const mockObserve = vi.fn();
 const mockUnobserve = vi.fn();
@@ -103,7 +109,7 @@ describe('FeedGrid', () => {
 
     expect(screen.getByText(/No recommendations yet/)).toBeInTheDocument();
     expect(screen.getByText(/Set up subscriptions/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Set Up Subscriptions/i })).toHaveAttribute('href', '/subscriptions');
+    expect(screen.getByRole('button', { name: /Set Up Subscriptions/i })).toBeInTheDocument();
   });
 
   it('shows loading spinner when loading', () => {

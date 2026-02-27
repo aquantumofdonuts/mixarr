@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import { Loading } from '@/components/ui/loading';
 import { PageHeader } from '@/components/layout/page-header';
@@ -301,17 +302,13 @@ export default function DownloadsPage() {
       {isLoading ? (
         <Loading />
       ) : downloads.length === 0 ? (
-        <Card>
-          <CardContent className="p-8 text-center">
-            <Download className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-            <h3 className="text-lg font-semibold mb-2">No downloads</h3>
-            <p className="text-muted-foreground">
-              {statusFilter === 'all' 
-                ? 'Downloads from slskd will appear here.'
-                : `No ${statusFilter} downloads.`}
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Download}
+          title="No downloads"
+          description={statusFilter === 'all'
+            ? 'Downloads from slskd will appear here.'
+            : `No ${statusFilter} downloads.`}
+        />
       ) : (
         <div className="space-y-4">
           {downloads.map((download) => (
