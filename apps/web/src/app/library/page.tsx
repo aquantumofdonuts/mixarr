@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ConfirmDialog } from '@/components/ui';
+import { ConfirmDialog, Tabs, Tab } from '@/components/ui';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
@@ -443,30 +443,10 @@ export default function LibraryPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b">
-        <button
-          onClick={() => setActiveTab('health')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'health'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <AlertTriangle className="w-4 h-4 inline mr-2" />
-          Health Issues
-        </button>
-        <button
-          onClick={() => setActiveTab('duplicates')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'duplicates'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <Copy className="w-4 h-4 inline mr-2" />
-          Duplicates{duplicateCount > 0 ? ` (${duplicateCount})` : ''}
-        </button>
-      </div>
+      <Tabs value={activeTab} onChange={(v) => setActiveTab(v as TabType)} className="mb-6">
+        <Tab value="health" label="Health Issues" icon={<AlertTriangle className="w-4 h-4" />} />
+        <Tab value="duplicates" label="Duplicates" badge={duplicateCount > 0 ? duplicateCount : undefined} icon={<Copy className="w-4 h-4" />} />
+      </Tabs>
 
       <ConfirmDialog
         open={confirmFixAll}

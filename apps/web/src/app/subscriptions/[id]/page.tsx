@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, Tab } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { api } from '@/lib/api';
@@ -202,20 +203,10 @@ export default function SubscriptionDetailPage() {
       </PageHeader>
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6">
-        <Button
-          variant={activeTab === 'runs' ? 'default' : 'outline'}
-          onClick={() => { setActiveTab('runs'); setSelectedRun(null); }}
-        >
-          Run History ({runs.length})
-        </Button>
-        <Button
-          variant={activeTab === 'results' ? 'default' : 'outline'}
-          onClick={() => { setActiveTab('results'); setSelectedRun(null); }}
-        >
-          All Results ({Object.values(statusCounts).reduce((a, b) => a + b, 0)})
-        </Button>
-      </div>
+      <Tabs value={activeTab} onChange={(v) => { setActiveTab(v as 'runs' | 'results'); setSelectedRun(null); }} className="mb-6">
+        <Tab value="runs" label="Run History" badge={runs.length} />
+        <Tab value="results" label="All Results" badge={Object.values(statusCounts).reduce((a, b) => a + b, 0)} />
+      </Tabs>
 
       {activeTab === 'runs' && !selectedRun && (
         <div className="space-y-4">
