@@ -32,6 +32,12 @@ export const errorHandler: ErrorRequestHandler = (
     stack: err.stack,
   });
 
+  // Guard against sending a response when headers have already been sent
+  // (e.g., session save errors after the response was flushed)
+  if (res.headersSent) {
+    return;
+  }
+
   // Handle Zod validation errors
   if (err instanceof ZodError) {
     const response: ErrorResponse = {
