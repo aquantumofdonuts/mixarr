@@ -555,7 +555,7 @@ export function SubscriptionFormModal({
               <label className="text-sm font-medium">
                 Tag
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'tag') && (
-                  <span className="text-red-500 ml-1">*</span>
+                  <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
@@ -563,7 +563,7 @@ export function SubscriptionFormModal({
                 onChange={(e) => setForm({ ...form, tag: e.target.value })}
                 placeholder="e.g., rock, metal, jazz"
               />
-              {validationErrors.tag && <p className="text-xs text-red-600 mt-1">{validationErrors.tag}</p>}
+              {validationErrors.tag && <p className="text-xs text-destructive mt-1">{validationErrors.tag}</p>}
             </div>
           )}
 
@@ -573,7 +573,7 @@ export function SubscriptionFormModal({
               <label className="text-sm font-medium">
                 Playlist ID
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'playlistId') && (
-                  <span className="text-red-500 ml-1">*</span>
+                  <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
@@ -582,7 +582,7 @@ export function SubscriptionFormModal({
                 placeholder="Spotify playlist ID"
               />
               {validationErrors.playlistId && (
-                <p className="text-xs text-red-600 mt-1">{validationErrors.playlistId}</p>
+                <p className="text-xs text-destructive mt-1">{validationErrors.playlistId}</p>
               )}
             </div>
           )}
@@ -605,7 +605,7 @@ export function SubscriptionFormModal({
                 <label className="text-sm font-medium">
                   Playlist URL
                   {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'publicPlaylistUrl') && (
-                    <span className="text-red-500 ml-1">*</span>
+                    <span className="text-destructive ml-1">*</span>
                   )}
                 </label>
                 <Input
@@ -617,7 +617,7 @@ export function SubscriptionFormModal({
                   Paste any public Spotify playlist URL (no login required)
                 </p>
                 {validationErrors.publicPlaylistUrl && (
-                  <p className="text-xs text-red-600 mt-1">{validationErrors.publicPlaylistUrl}</p>
+                  <p className="text-xs text-destructive mt-1">{validationErrors.publicPlaylistUrl}</p>
                 )}
               </div>
               <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
@@ -626,7 +626,7 @@ export function SubscriptionFormModal({
                   id="discoverAlbums"
                   checked={form.discoverAlbums}
                   onChange={(e) => setForm({ ...form, discoverAlbums: e.target.checked })}
-                  className="h-4 w-4 rounded border-gray-300"
+                  className="h-4 w-4 rounded border-input"
                 />
                 <label htmlFor="discoverAlbums" className="text-sm">
                   <span className="font-medium">Discover Albums</span>
@@ -642,7 +642,7 @@ export function SubscriptionFormModal({
                     id="includeAllArtists"
                     checked={form.includeAllArtists}
                     onChange={(e) => setForm({ ...form, includeAllArtists: e.target.checked })}
-                    className="h-4 w-4 rounded border-gray-300"
+                    className="h-4 w-4 rounded border-input"
                   />
                   <label htmlFor="includeAllArtists" className="text-sm">
                     <span className="font-medium">Include Featured Artists</span>
@@ -661,7 +661,7 @@ export function SubscriptionFormModal({
               <label className="text-sm font-medium">
                 Playlist ID
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'playlistId') && (
-                  <span className="text-red-500 ml-1">*</span>
+                  <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
@@ -670,7 +670,7 @@ export function SubscriptionFormModal({
                 placeholder="Deezer playlist ID"
               />
               {validationErrors.playlistId && (
-                <p className="text-xs text-red-600 mt-1">{validationErrors.playlistId}</p>
+                <p className="text-xs text-destructive mt-1">{validationErrors.playlistId}</p>
               )}
             </div>
           )}
@@ -681,7 +681,7 @@ export function SubscriptionFormModal({
               <label className="text-sm font-medium">
                 Playlist ID
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'playlistId') && (
-                  <span className="text-red-500 ml-1">*</span>
+                  <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
@@ -690,7 +690,7 @@ export function SubscriptionFormModal({
                 placeholder="TIDAL playlist UUID"
               />
               {validationErrors.playlistId && (
-                <p className="text-xs text-red-600 mt-1">{validationErrors.playlistId}</p>
+                <p className="text-xs text-destructive mt-1">{validationErrors.playlistId}</p>
               )}
             </div>
           )}
@@ -756,7 +756,7 @@ export function SubscriptionFormModal({
               <label className="text-sm font-medium">
                 Playlist ID
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'listenbrainzPlaylistId') && (
-                  <span className="text-red-500 ml-1">*</span>
+                  <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
@@ -768,7 +768,7 @@ export function SubscriptionFormModal({
                 The playlist MBID from the ListenBrainz playlist URL.
               </p>
               {validationErrors.listenbrainzPlaylistId && (
-                <p className="text-xs text-red-600 mt-1">{validationErrors.listenbrainzPlaylistId}</p>
+                <p className="text-xs text-destructive mt-1">{validationErrors.listenbrainzPlaylistId}</p>
               )}
             </div>
           )}
@@ -780,7 +780,7 @@ export function SubscriptionFormModal({
                 <label className="text-sm font-medium">
                   Seed Artist{' '}
                   {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'listenbrainzSeedMbid') && (
-                    <span className="text-red-500">*</span>
+                    <span className="text-destructive">*</span>
                   )}
                 </label>
                 <div className="relative">
@@ -842,7 +842,7 @@ export function SubscriptionFormModal({
                   )}
 
                 {validationErrors.listenbrainzSeedMbid && (
-                  <p className="text-xs text-red-600 mt-1">{validationErrors.listenbrainzSeedMbid}</p>
+                  <p className="text-xs text-destructive mt-1">{validationErrors.listenbrainzSeedMbid}</p>
                 )}
               </div>
 
@@ -889,7 +889,7 @@ export function SubscriptionFormModal({
                 <label className="text-sm font-medium">
                   Label ID
                   {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'labelId') && (
-                    <span className="text-red-500 ml-1">*</span>
+                    <span className="text-destructive ml-1">*</span>
                   )}
                 </label>
                 <Input
@@ -900,7 +900,7 @@ export function SubscriptionFormModal({
                 <p className="text-xs text-muted-foreground mt-1">
                   Find the label ID from the Discogs URL: discogs.com/label/<strong>1234</strong>-Label-Name
                 </p>
-                {validationErrors.labelId && <p className="text-xs text-red-600 mt-1">{validationErrors.labelId}</p>}
+                {validationErrors.labelId && <p className="text-xs text-destructive mt-1">{validationErrors.labelId}</p>}
               </div>
               <div>
                 <label className="text-sm font-medium">Label Name (for display)</label>
@@ -919,7 +919,7 @@ export function SubscriptionFormModal({
               <label className="text-sm font-medium">
                 Style/Genre
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'discogsStyle') && (
-                  <span className="text-red-500 ml-1">*</span>
+                  <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Select
@@ -945,7 +945,7 @@ export function SubscriptionFormModal({
                 ]}
               />
               {validationErrors.discogsStyle && (
-                <p className="text-xs text-red-600 mt-1">{validationErrors.discogsStyle}</p>
+                <p className="text-xs text-destructive mt-1">{validationErrors.discogsStyle}</p>
               )}
             </div>
           )}
@@ -957,7 +957,7 @@ export function SubscriptionFormModal({
                 <label className="text-sm font-medium">
                   Tag
                   {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'bandcampTag') && (
-                    <span className="text-red-500 ml-1">*</span>
+                    <span className="text-destructive ml-1">*</span>
                   )}
                 </label>
                 <Input
@@ -967,7 +967,7 @@ export function SubscriptionFormModal({
                 />
                 <p className="text-xs text-muted-foreground mt-1">Browse tags at bandcamp.com/tags</p>
                 {validationErrors.bandcampTag && (
-                  <p className="text-xs text-red-600 mt-1">{validationErrors.bandcampTag}</p>
+                  <p className="text-xs text-destructive mt-1">{validationErrors.bandcampTag}</p>
                 )}
               </div>
               {form.type === 'bandcamp_tag' && (

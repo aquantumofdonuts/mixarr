@@ -270,7 +270,7 @@ export default function SettingsPage() {
                           }`}
                         >
                           <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            className={`inline-block h-4 w-4 transform rounded-full bg-foreground transition-transform ${
                               getValue(setting.key, setting.defaultValue) ? 'translate-x-6' : 'translate-x-1'
                             }`}
                           />

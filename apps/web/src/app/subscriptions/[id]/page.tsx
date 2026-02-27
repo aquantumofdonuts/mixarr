@@ -168,11 +168,11 @@ export default function SubscriptionDetailPage() {
       pending: 'bg-status-warning/20 text-status-warning',
       queued: 'bg-status-info/20 text-status-info',
       added: 'bg-status-success/20 text-status-success',
-      skipped: 'bg-gray-500/20 text-gray-500',
+      skipped: 'bg-muted-foreground/20 text-muted-foreground',
       failed: 'bg-status-error/20 text-status-error',
       rejected: 'bg-status-error/20 text-status-error',
     };
-    return <Badge className={colors[status] || 'bg-gray-500/20'}>{status}</Badge>;
+    return <Badge className={colors[status] || 'bg-muted-foreground/20'}>{status}</Badge>;
   };
 
   if (isLoading) {

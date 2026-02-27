@@ -324,7 +324,7 @@ export function SSOSettings() {
                     } ${!isSaved ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      className={`inline-block h-4 w-4 transform rounded-full bg-foreground transition-transform ${
                         isEnabled ? 'translate-x-6' : 'translate-x-1'
                       }`}
                     />
@@ -452,9 +452,9 @@ export function SSOSettings() {
         })}
 
         {/* Info Box */}
-        <div className="rounded-lg bg-blue-50 dark:bg-blue-950/50 p-4 text-sm">
-          <p className="font-medium text-blue-900 dark:text-blue-100">About Single Sign-On</p>
-          <p className="mt-1 text-blue-800 dark:text-blue-200">
+        <div className="rounded-lg bg-status-info/10 p-4 text-sm">
+          <p className="font-medium text-status-info">About Single Sign-On</p>
+          <p className="mt-1 text-status-info">
             SSO allows users to authenticate using external identity providers. Enable a provider and configure its settings to allow users to sign in with their existing credentials.
           </p>
         </div>

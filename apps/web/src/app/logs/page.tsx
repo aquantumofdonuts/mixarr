@@ -20,10 +20,10 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 
 const levelConfig = {
-  debug: { icon: Bug, color: 'text-gray-500', bg: 'bg-gray-500/10' },
-  info: { icon: Info, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-  warn: { icon: AlertTriangle, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
-  error: { icon: AlertCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
+  debug: { icon: Bug, color: 'text-muted-foreground', bg: 'bg-muted' },
+  info: { icon: Info, color: 'text-status-info', bg: 'bg-status-info/10' },
+  warn: { icon: AlertTriangle, color: 'text-status-warning', bg: 'bg-status-warning/10' },
+  error: { icon: AlertCircle, color: 'text-status-error', bg: 'bg-status-error/10' },
 };
 
 const levelOptions = [

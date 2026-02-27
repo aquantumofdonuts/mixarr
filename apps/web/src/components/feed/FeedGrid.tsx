@@ -97,7 +97,7 @@ export function FeedGrid({
         <div ref={sentinelRef} className="h-10 mt-4">
           {isLoading && (
             <div data-testid="loading-spinner" className="flex justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500" />
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
             </div>
           )}
         </div>

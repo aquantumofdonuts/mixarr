@@ -152,7 +152,7 @@ export function AISettings() {
               }`}
             >
               <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                className={`inline-block h-4 w-4 transform rounded-full bg-foreground transition-transform ${
                   settings.openaiEnabled ? 'translate-x-6' : 'translate-x-1'
                 }`}
               />
@@ -233,7 +233,7 @@ export function AISettings() {
               }`}
             >
               <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                className={`inline-block h-4 w-4 transform rounded-full bg-foreground transition-transform ${
                   settings.anthropicEnabled ? 'translate-x-6' : 'translate-x-1'
                 }`}
               />
@@ -269,9 +269,9 @@ export function AISettings() {
         </div>
 
         {/* Info */}
-        <div className="rounded-lg bg-blue-50 dark:bg-blue-950/50 p-4 text-sm">
-          <p className="font-medium text-blue-900 dark:text-blue-100">About AI Recommendations</p>
-          <p className="mt-1 text-blue-800 dark:text-blue-200">
+        <div className="rounded-lg bg-status-info/10 p-4 text-sm">
+          <p className="font-medium text-status-info">About AI Recommendations</p>
+          <p className="mt-1 text-status-info">
             AI recommendations analyze your library and listening patterns to suggest new artists.
             Configure AI recommendation strategy per-subscription when creating an AI Recommendations subscription.
           </p>

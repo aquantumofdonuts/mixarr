@@ -262,7 +262,7 @@ export default function NotificationsSettingsPage() {
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
                             channel.isActive 
                               ? 'bg-status-success/20 text-status-success' 
-                              : 'bg-gray-500/20 text-gray-500'
+                              : 'bg-muted-foreground/20 text-muted-foreground'
                           }`}>
                             {channel.isActive ? 'Active' : 'Inactive'}
                           </span>
