@@ -54,11 +54,11 @@ function getJobStatus(job: Job): 'completed' | 'failed' | 'active' | 'waiting' {
 function JobStatusBadge({ status }: { status: ReturnType<typeof getJobStatus> }) {
   switch (status) {
     case 'completed':
-      return <Badge variant="default" className="bg-green-600"><CheckCircle className="h-3 w-3 mr-1" />Completed</Badge>;
+      return <Badge variant="default" className="bg-status-success"><CheckCircle className="h-3 w-3 mr-1" />Completed</Badge>;
     case 'failed':
       return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Failed</Badge>;
     case 'active':
-      return <Badge variant="default" className="bg-blue-600"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Running</Badge>;
+      return <Badge variant="default" className="bg-status-info"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Running</Badge>;
     case 'waiting':
       return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Waiting</Badge>;
   }
@@ -218,7 +218,7 @@ export default function JobsPage() {
                       {status === 'completed' && job.returnvalue && (
                         <div className="text-sm mt-1">
                           {job.returnvalue.artistsFound !== undefined && (
-                            <span className="text-green-600">
+                            <span className="text-status-success">
                               Found: {job.returnvalue.artistsFound}, Added: {job.returnvalue.artistsAdded || 0}
                             </span>
                           )}

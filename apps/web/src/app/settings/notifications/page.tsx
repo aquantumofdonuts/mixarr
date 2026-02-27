@@ -261,7 +261,7 @@ export default function NotificationsSettingsPage() {
                           <h4 className="font-medium">{channel.name}</h4>
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
                             channel.isActive 
-                              ? 'bg-green-500/20 text-green-500' 
+                              ? 'bg-status-success/20 text-status-success' 
                               : 'bg-gray-500/20 text-gray-500'
                           }`}>
                             {channel.isActive ? 'Active' : 'Inactive'}

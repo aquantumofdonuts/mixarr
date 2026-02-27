@@ -156,21 +156,21 @@ export default function SubscriptionDetailPage() {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed': return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case 'failed': return <XCircle className="h-4 w-4 text-red-500" />;
-      case 'running': return <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />;
+      case 'completed': return <CheckCircle className="h-4 w-4 text-status-success" />;
+      case 'failed': return <XCircle className="h-4 w-4 text-status-error" />;
+      case 'running': return <RefreshCw className="h-4 w-4 text-status-info animate-spin" />;
       default: return <Clock className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
   const getResultStatusBadge = (status: string) => {
     const colors: Record<string, string> = {
-      pending: 'bg-yellow-500/20 text-yellow-500',
-      queued: 'bg-blue-500/20 text-blue-500',
-      added: 'bg-green-500/20 text-green-500',
+      pending: 'bg-status-warning/20 text-status-warning',
+      queued: 'bg-status-info/20 text-status-info',
+      added: 'bg-status-success/20 text-status-success',
       skipped: 'bg-gray-500/20 text-gray-500',
-      failed: 'bg-red-500/20 text-red-500',
-      rejected: 'bg-red-500/20 text-red-500',
+      failed: 'bg-status-error/20 text-status-error',
+      rejected: 'bg-status-error/20 text-status-error',
     };
     return <Badge className={colors[status] || 'bg-gray-500/20'}>{status}</Badge>;
   };
@@ -348,7 +348,7 @@ export default function SubscriptionDetailPage() {
                             {processingResultId === result.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                              <CheckCircle className="h-4 w-4 text-green-500" />
+                              <CheckCircle className="h-4 w-4 text-status-success" />
                             )}
                           </Button>
                           <Button 
@@ -357,7 +357,7 @@ export default function SubscriptionDetailPage() {
                             onClick={() => handleReject(result.id)}
                             disabled={processingResultId === result.id}
                           >
-                            <XCircle className="h-4 w-4 text-red-500" />
+                            <XCircle className="h-4 w-4 text-status-error" />
                           </Button>
                         </>
                       )}

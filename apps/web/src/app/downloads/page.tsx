@@ -50,7 +50,7 @@ function getStatusBadge(status: SlskdDownload['status']) {
     case 'pending':
       return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
     case 'downloading':
-      return <Badge variant="default" className="bg-blue-600"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Downloading</Badge>;
+      return <Badge variant="default" className="bg-status-info"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Downloading</Badge>;
     case 'completed':
       return <Badge variant="success"><CheckCircle className="h-3 w-3 mr-1" />Completed</Badge>;
     case 'failed':
