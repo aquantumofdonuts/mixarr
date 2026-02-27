@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -303,9 +304,9 @@ export function SlskdSearchModal({ isOpen, onClose, artistName, artistImage }: S
     >
       {/* Header with artist info */}
       <div className="flex items-center gap-4 mb-6">
-        <div className="w-16 h-16 rounded-lg overflow-hidden bg-muted flex items-center justify-center flex-shrink-0">
+        <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-muted flex items-center justify-center flex-shrink-0">
           {artistImage ? (
-            <img src={artistImage} alt={artistName} className="w-full h-full object-cover" />
+            <Image src={artistImage} alt={artistName} fill className="object-cover" unoptimized />
           ) : (
             <Music className="h-8 w-8 text-muted-foreground" />
           )}

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 import { Loading } from '@/components/ui/loading';
@@ -630,33 +631,21 @@ export default function DiscoverPage() {
                 <div className="grid grid-cols-1 gap-3 p-3 bg-muted/50 rounded-lg">
                   <div className="text-sm font-medium">Add Settings</div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <select
-                      className="px-3 py-2 rounded-md border bg-background text-sm"
-                      value={selectedQuality || ''}
+                    <Select
+                      value={String(selectedQuality || '')}
                       onChange={(e) => setSelectedQuality(Number(e.target.value))}
-                    >
-                      {profiles.qualityProfiles.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                    <select
-                      className="px-3 py-2 rounded-md border bg-background text-sm"
-                      value={selectedMetadata || ''}
+                      options={profiles.qualityProfiles.map(p => ({ value: String(p.id), label: p.name }))}
+                    />
+                    <Select
+                      value={String(selectedMetadata || '')}
                       onChange={(e) => setSelectedMetadata(Number(e.target.value))}
-                    >
-                      {profiles.metadataProfiles.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                    <select
-                      className="px-3 py-2 rounded-md border bg-background text-sm"
-                      value={selectedRootFolder || ''}
+                      options={profiles.metadataProfiles.map(p => ({ value: String(p.id), label: p.name }))}
+                    />
+                    <Select
+                      value={String(selectedRootFolder || '')}
                       onChange={(e) => setSelectedRootFolder(e.target.value)}
-                    >
-                      {profiles.rootFolders.map(p => (
-                        <option key={p.id} value={p.path}>{p.path}</option>
-                      ))}
-                    </select>
+                      options={profiles.rootFolders.map(p => ({ value: p.path, label: p.path }))}
+                    />
                   </div>
                 </div>
               )}
@@ -805,42 +794,30 @@ export default function DiscoverPage() {
         <div className="space-y-4 py-4">
           <div className="space-y-2">
             <label className="text-sm font-medium">Quality Profile</label>
-            <select
-              className="w-full border rounded-lg px-3 py-2 bg-background"
-              value={addProfiles.qualityProfileId}
+            <Select
+              value={String(addProfiles.qualityProfileId)}
               onChange={(e) => setAddProfiles(p => ({ ...p, qualityProfileId: Number(e.target.value) }))}
               disabled={isBulkAdding}
-            >
-              {profiles?.qualityProfiles.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+              options={profiles?.qualityProfiles.map(p => ({ value: String(p.id), label: p.name })) ?? []}
+            />
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Metadata Profile</label>
-            <select
-              className="w-full border rounded-lg px-3 py-2 bg-background"
-              value={addProfiles.metadataProfileId}
+            <Select
+              value={String(addProfiles.metadataProfileId)}
               onChange={(e) => setAddProfiles(p => ({ ...p, metadataProfileId: Number(e.target.value) }))}
               disabled={isBulkAdding}
-            >
-              {profiles?.metadataProfiles.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+              options={profiles?.metadataProfiles.map(p => ({ value: String(p.id), label: p.name })) ?? []}
+            />
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Root Folder</label>
-            <select
-              className="w-full border rounded-lg px-3 py-2 bg-background"
+            <Select
               value={addProfiles.rootFolderPath}
               onChange={(e) => setAddProfiles(p => ({ ...p, rootFolderPath: e.target.value }))}
               disabled={isBulkAdding}
-            >
-              {profiles?.rootFolders.map(f => (
-                <option key={f.path} value={f.path}>{f.path}</option>
-              ))}
-            </select>
+              options={profiles?.rootFolders.map(f => ({ value: f.path, label: f.path })) ?? []}
+            />
           </div>
           
           {isBulkAdding && (
