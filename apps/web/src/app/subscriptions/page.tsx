@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { useAuth } from '@/lib/auth';
@@ -47,6 +48,7 @@ export default function SubscriptionsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
   const [runningId, setRunningId] = useState<number | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<number | null>(null);
 
   // ============================================================================
   // Handlers
@@ -80,15 +82,16 @@ export default function SubscriptionsPage() {
     setShowModal(true);
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Delete this subscription?')) return;
-
+  const handleDeleteClick = (id: number) => setConfirmTarget(id);
+  const confirmDelete = async () => {
+    if (confirmTarget === null) return;
     try {
-      await deleteMutation.mutateAsync(id);
+      await deleteMutation.mutateAsync(confirmTarget);
       addToast({ type: 'success', title: 'Subscription deleted' });
     } catch {
       addToast({ type: 'error', title: 'Failed to delete subscription' });
     }
+    setConfirmTarget(null);
   };
 
   const handleSave = async (data: {
@@ -196,11 +199,21 @@ export default function SubscriptionsPage() {
               onRun={handleRun}
               onToggle={handleToggle}
               onEdit={handleEdit}
-              onDelete={handleDelete}
+              onDelete={handleDeleteClick}
             />
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={confirmDelete}
+        title="Delete subscription?"
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+      />
 
       {/* Form Modal */}
       <SubscriptionFormModal

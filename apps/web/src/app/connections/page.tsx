@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { useAuth } from '@/lib/auth';
@@ -32,6 +33,9 @@ export default function ConnectionsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [preselectedType, setPreselectedType] = useState<string | undefined>(undefined);
+
+  // Confirm dialog state
+  const [confirmTarget, setConfirmTarget] = useState<number | null>(null);
 
   // Welcome banner
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
@@ -113,9 +117,10 @@ export default function ConnectionsPage() {
     setPreselectedType(undefined);
   };
 
-  const handleDelete = (id: number) => {
-    if (!confirm('Delete this connection?')) return;
-    deleteConnection(id);
+  const handleDeleteClick = (id: number) => setConfirmTarget(id);
+  const confirmDelete = () => {
+    if (confirmTarget !== null) deleteConnection(confirmTarget);
+    setConfirmTarget(null);
   };
 
   // Derived state
@@ -179,12 +184,22 @@ export default function ConnectionsPage() {
               if (conn) openModal(conn);
             }}
             onTest={(id) => testConnection(id)}
-            onDelete={(id) => handleDelete(id)}
+            onDelete={(id) => handleDeleteClick(id)}
             testingId={testingId}
             onPreview={(id, t) => handlePreview(id, t)}
           />
         ))}
       </div>
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={confirmDelete}
+        title="Delete connection?"
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+      />
 
       {/* Connection Wizard */}
       <ConnectionWizard

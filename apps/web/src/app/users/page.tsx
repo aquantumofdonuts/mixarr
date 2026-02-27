@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui';
 import { Input } from '@/components/ui/input';
 import { Modal, ModalFooter } from '@/components/ui/modal';
 import { useToast } from '@/components/ui/toast';
@@ -50,6 +51,7 @@ export default function UsersPage() {
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
   const [createForm, setCreateForm] = useState({ username: '', password: '', displayName: '', email: '', role: 'user' as 'admin' | 'user' });
   const [editForm, setEditForm] = useState({ displayName: '', email: '', role: 'user' as 'admin' | 'user', isActive: true, password: '' });
+  const [confirmTarget, setConfirmTarget] = useState<number | null>(null);
 
   // Fetch users with React Query (only for admins)
   const { data: usersData, isLoading, isFetching } = useQuery({
@@ -133,17 +135,19 @@ export default function UsersPage() {
     }
   };
 
-  const handleDeleteUser = async (userId: number) => {
-    if (!confirm('Are you sure you want to delete this user? This will delete all their data.')) return;
-    
-    const { error } = await api.delete(`/api/admin/users/${userId}`);
-    
+  const handleDeleteClick = (userId: number) => setConfirmTarget(userId);
+  const confirmDelete = async () => {
+    if (confirmTarget === null) return;
+
+    const { error } = await api.delete(`/api/admin/users/${confirmTarget}`);
+
     if (error) {
       addToast({ type: 'error', title: 'Failed to delete user', message: error });
     } else {
       addToast({ type: 'success', title: 'User deleted' });
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
     }
+    setConfirmTarget(null);
   };
 
   const openEditModal = (u: UserData) => {
@@ -282,7 +286,7 @@ export default function UsersPage() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => handleDeleteUser(u.id)}
+                          onClick={() => handleDeleteClick(u.id)}
                           title="Delete user"
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
@@ -296,6 +300,16 @@ export default function UsersPage() {
           </CardContent>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={confirmDelete}
+        title="Delete user?"
+        description="This will permanently delete the user and all their data."
+        confirmLabel="Delete"
+        variant="destructive"
+      />
 
       {/* Change Password Modal */}
       <Modal

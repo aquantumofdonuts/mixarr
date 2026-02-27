@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
@@ -85,6 +86,7 @@ export default function LibraryPage() {
   const [isStartingFix, setIsStartingFix] = useState(false);
   const [isCancellingFix, setIsCancellingFix] = useState(false);
   const [fixingArtistId, setFixingArtistId] = useState<number | null>(null);
+  const [confirmFixAll, setConfirmFixAll] = useState(false);
 
   const handleDuplicateCountChange = useCallback((count: number) => {
     setDuplicateCount(count);
@@ -132,17 +134,14 @@ export default function LibraryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixJob?.status, fixJob?.jobId]);
 
-  const handleFixAll = async () => {
+  const handleFixAllClick = () => {
     const artistsWithIssues = artists.filter(a => a.needsRefresh).length;
     if (artistsWithIssues === 0) return;
+    setConfirmFixAll(true);
+  };
 
-    const confirmed = window.confirm(
-      `This will attempt to fix metadata for ${artistsWithIssues} artists with issues.\n\n` +
-      `This may take several minutes and will make requests to Lidarr.\n\n` +
-      `Continue?`
-    );
-    if (!confirmed) return;
-
+  const confirmFixAllAction = async () => {
+    setConfirmFixAll(false);
     setIsStartingFix(true);
     const { data, error } = await api.post<{ jobId: string | null; total: number; message?: string }>('/api/search/lidarr/artists/fix-all');
     
@@ -358,7 +357,7 @@ export default function LibraryPage() {
           ) : (
             <Button 
               variant="outline" 
-              onClick={handleFixAll} 
+              onClick={handleFixAllClick} 
               disabled={artistsNeedingFix === 0 || isStartingFix || isLoading}
             >
               <Wrench className={`h-4 w-4 mr-2 ${isStartingFix ? 'animate-spin' : ''}`} />
@@ -468,6 +467,16 @@ export default function LibraryPage() {
           Duplicates{duplicateCount > 0 ? ` (${duplicateCount})` : ''}
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmFixAll}
+        onClose={() => setConfirmFixAll(false)}
+        onConfirm={confirmFixAllAction}
+        title="Fix metadata?"
+        description={`This will attempt to fix metadata for ${artistsNeedingFix} artists with issues. This may take several minutes and will make requests to Lidarr.`}
+        confirmLabel="Fix Metadata"
+        variant="warning"
+      />
 
       {/* Tab Content */}
       {activeTab === 'duplicates' ? (

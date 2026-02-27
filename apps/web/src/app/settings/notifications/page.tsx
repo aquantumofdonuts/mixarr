@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
@@ -57,6 +58,7 @@ export default function NotificationsSettingsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingChannel, setEditingChannel] = useState<NotificationChannel | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<number | null>(null);
 
   // Form state
   const [form, setForm] = useState({
@@ -175,16 +177,18 @@ export default function NotificationsSettingsPage() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this notification channel?')) return;
-    
-    const { error } = await api.delete(`/api/notifications/channels/${id}`);
+  const handleDeleteClick = (id: number) => setConfirmTarget(id);
+  const confirmDelete = async () => {
+    if (confirmTarget === null) return;
+
+    const { error } = await api.delete(`/api/notifications/channels/${confirmTarget}`);
     if (error) {
       addToast({ type: 'error', title: 'Failed to delete channel', message: error });
     } else {
       addToast({ type: 'success', title: 'Channel deleted' });
       fetchChannels();
     }
+    setConfirmTarget(null);
   };
 
   const handleTest = async (id: number) => {
@@ -302,7 +306,7 @@ export default function NotificationsSettingsPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleDelete(channel.id)}
+                        onClick={() => handleDeleteClick(channel.id)}
                         className="text-destructive hover:text-destructive"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -315,6 +319,16 @@ export default function NotificationsSettingsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={confirmDelete}
+        title="Delete notification channel?"
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+      />
 
       {/* Add/Edit Modal */}
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingChannel ? 'Edit Channel' : 'Add Notification Channel'}>
