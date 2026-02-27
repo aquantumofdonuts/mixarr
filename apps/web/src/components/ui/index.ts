@@ -28,3 +28,4 @@ export { Checkbox } from './checkbox';
 export { ConfirmDialog } from './confirm-dialog';
 
 export { Skeleton, SkeletonText, SkeletonCard } from './skeleton';
+export { Tabs, Tab } from './tabs';
