@@ -1,4 +1,6 @@
 // UI Component exports
+export { BottomSheet } from './bottom-sheet';
+
 export { Button, buttonVariants } from './button';
 export type { ButtonProps } from './button';
 

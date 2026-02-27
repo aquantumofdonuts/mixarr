@@ -63,6 +63,7 @@ const config: Config = {
         'slide-out': 'slideOut 0.2s ease-in',
         'spin-slow': 'spin 2s linear infinite',
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'slide-up': 'slideUp 0.3s ease-out',
       },
       keyframes: {
         fadeIn: {
@@ -76,6 +77,10 @@ const config: Config = {
         slideOut: {
           '0%': { transform: 'translateX(0)' },
           '100%': { transform: 'translateX(-100%)' },
+        },
+        slideUp: {
+          '0%': { transform: 'translateY(100%)' },
+          '100%': { transform: 'translateY(0)' },
         },
       },
       fontFamily: {
