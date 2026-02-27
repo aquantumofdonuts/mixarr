@@ -192,6 +192,20 @@
   .font-display {
     @apply font-semibold tracking-tight;
   }
+
+  /* Status color text utilities */
+  .text-status-success {
+    color: hsl(var(--success));
+  }
+  .text-status-warning {
+    color: hsl(var(--warning));
+  }
+  .text-status-error {
+    color: hsl(var(--error));
+  }
+  .text-status-info {
+    color: hsl(var(--info, 210 60% 50%));
+  }
 }
 
 /* Reduced motion accessibility */
