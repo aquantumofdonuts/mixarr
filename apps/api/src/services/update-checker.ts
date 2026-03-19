@@ -48,7 +48,7 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     });
 
     if (!res.ok) {
-      log.debug(`GitHub API returned ${res.status}`);
+      log.warn(`GitHub API returned ${res.status}`);
       return null;
     }
 
@@ -66,11 +66,13 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
 
     if (info.available) {
       log.info(`🔔 Update available: v${latest} (current: v${VERSION}) — ${data.html_url}`);
+    } else {
+      log.debug(`Up to date (v${VERSION})`);
     }
 
     return info;
   } catch (err) {
-    log.debug('Update check failed', {
+    log.warn('Update check failed', {
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
@@ -92,11 +94,13 @@ export function stopUpdateChecker(): void {
   }
 }
 
-/** Read cached update status for the API endpoint */
+/** Read cached update status for the API endpoint — triggers a fresh check if cache is empty */
 export async function getUpdateStatus(): Promise<UpdateInfo | null> {
   try {
     const cached = await redis.get(REDIS_KEY);
-    return cached ? JSON.parse(cached) : null;
+    if (cached) return JSON.parse(cached);
+    // No cache — run a live check so the first API call after boot/expiry isn't empty
+    return await checkForUpdate();
   } catch {
     return null;
   }
