@@ -2,6 +2,7 @@ import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { redis } from '../lib/redis.js';
 import { getUpdateStatus } from '../services/update-checker.js';
+import { VERSION } from '../version.js';
 
 export const healthRouter = Router();
 
@@ -11,7 +12,7 @@ healthRouter.get('/live', async (_req, res) => {
   res.json({
     status: 'alive',
     timestamp: new Date().toISOString(),
-    version: process.env.npm_package_version || '2.1.1',
+    version: VERSION,
     update: update?.available ? { latest: update.latest, url: update.url } : null,
   });
 });
