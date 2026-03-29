@@ -41,9 +41,8 @@ COPY --from=builder /app/apps/api/dist ./dist
 COPY --from=builder /app/apps/api/package*.json ./
 COPY --from=builder /app/apps/api/prisma ./prisma
 
-# Copy node_modules (both root hoisted deps and api-specific deps)
+# Copy node_modules (npm workspaces hoists all deps to root)
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/api/node_modules ./node_modules
 
 # Generate Prisma client in production
 RUN npx prisma generate
