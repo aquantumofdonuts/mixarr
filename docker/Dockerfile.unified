@@ -346,7 +346,7 @@ fi
 # -----------------------------------------------------------------------------
 # Optionally disable Caddy (for external reverse proxy setups)
 # -----------------------------------------------------------------------------
-if [ "${DISABLE_CADDY}" = "true" ] || [ "${DISABLE_CADDY}" = "1" ]; then
+if [ -n "${DISABLE_CADDY}" ]; then
     echo "DISABLE_CADDY is set - disabling built-in Caddy reverse proxy"
     echo "Configure your external reverse proxy to forward to http://localhost:3000"
     sed -i '/\[program:caddy\]/,/stderr_logfile_maxbytes=0/{s/autostart=true/autostart=false/;s/autorestart=true/autorestart=false/}' /etc/supervisor/conf.d/supervisord.conf
@@ -380,8 +380,8 @@ export REDIS_URL="redis://127.0.0.1:6379"
 npx prisma db push --accept-data-loss || echo "Warning: Database migration had issues, continuing..."
 
 echo "=== Mixarr is starting up ==="
-if [ "${DISABLE_CADDY}" = "true" ] || [ "${DISABLE_CADDY}" = "1" ]; then
-    echo "Access the web interface at http://[your-ip]:3000"
+if [ -n "${DISABLE_CADDY}" ]; then
+    echo "Access the web interface at http://[your-ip]:3010"
 else
     echo "Access the web interface at https://[your-ip]:443"
 fi
