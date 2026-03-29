@@ -344,6 +344,15 @@ if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
 fi
 
 # -----------------------------------------------------------------------------
+# Optionally disable Caddy (for external reverse proxy setups)
+# -----------------------------------------------------------------------------
+if [ "${DISABLE_CADDY}" = "true" ] || [ "${DISABLE_CADDY}" = "1" ]; then
+    echo "DISABLE_CADDY is set - disabling built-in Caddy reverse proxy"
+    echo "Configure your external reverse proxy to forward to http://localhost:3000"
+    sed -i '/\[program:caddy\]/,/stderr_logfile_maxbytes=0/{s/autostart=true/autostart=false/;s/autorestart=true/autorestart=false/}' /etc/supervisor/conf.d/supervisord.conf
+fi
+
+# -----------------------------------------------------------------------------
 # Start all services via supervisor
 # -----------------------------------------------------------------------------
 echo "Starting all services..."
@@ -371,7 +380,11 @@ export REDIS_URL="redis://127.0.0.1:6379"
 npx prisma db push --accept-data-loss || echo "Warning: Database migration had issues, continuing..."
 
 echo "=== Mixarr is starting up ==="
-echo "Access the web interface at https://[your-ip]:443"
+if [ "${DISABLE_CADDY}" = "true" ] || [ "${DISABLE_CADDY}" = "1" ]; then
+    echo "Access the web interface at http://[your-ip]:3000"
+else
+    echo "Access the web interface at https://[your-ip]:443"
+fi
 
 # Keep container running
 wait $SUPERVISOR_PID
@@ -389,6 +402,7 @@ ENV MYSQL_PASSWORD=""
 ENV MYSQL_ROOT_PASSWORD=""
 ENV FRONTEND_URL=""
 ENV BASE_URL=""
+ENV DISABLE_CADDY=""
 
 # Expose ports
 EXPOSE 80 443 3010
