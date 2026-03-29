@@ -30,6 +30,7 @@ secrets.json
 # IDE
 .vscode/
 .idea/
+*.code-workspace
 
 # Dependencies
 node_modules/
