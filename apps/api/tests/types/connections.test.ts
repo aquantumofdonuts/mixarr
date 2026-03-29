@@ -17,6 +17,7 @@ import {
   isJellyfinConfig,
   isDiscogsConfig,
   getTypedConfig,
+  normalizeLidarrConfig,
 } from '../../src/types/connections';
 import { connectionTypes } from '../../src/schemas/connection';
 
@@ -551,5 +552,39 @@ describe('SlskdDownload model', () => {
     const maxProgress = 100;
     expect(minProgress).toBeGreaterThanOrEqual(0);
     expect(maxProgress).toBeLessThanOrEqual(100);
+  });
+});
+
+// =============================================================================
+// normalizeLidarrConfig — rootFolderPath normalization
+// =============================================================================
+
+describe('normalizeLidarrConfig', () => {
+  const baseConfig = {
+    url: 'http://localhost:8686',
+    apiKey: 'test-api-key',
+    qualityProfileId: 1,
+    metadataProfileId: 1,
+    monitorNewItems: 'all' as const,
+  };
+
+  it('preserves a valid rootFolderPath', () => {
+    const result = normalizeLidarrConfig({ ...baseConfig, rootFolderPath: '/music' });
+    expect(result.rootFolderPath).toBe('/music');
+  });
+
+  it('converts empty string rootFolderPath to undefined', () => {
+    const result = normalizeLidarrConfig({ ...baseConfig, rootFolderPath: '' });
+    expect(result.rootFolderPath).toBeUndefined();
+  });
+
+  it('converts whitespace-only rootFolderPath to undefined', () => {
+    const result = normalizeLidarrConfig({ ...baseConfig, rootFolderPath: '   ' });
+    expect(result.rootFolderPath).toBeUndefined();
+  });
+
+  it('leaves undefined rootFolderPath as undefined', () => {
+    const result = normalizeLidarrConfig({ ...baseConfig });
+    expect(result.rootFolderPath).toBeUndefined();
   });
 });
