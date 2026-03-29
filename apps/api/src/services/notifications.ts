@@ -11,6 +11,7 @@
 
 import prisma from '../lib/db.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
+import { validateServiceUrl } from '../lib/validate-service-url.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Notifications');
@@ -131,7 +132,8 @@ export class NotificationService {
   ): Promise<void> {
     const embed = this.formatDiscordEmbed(event, payload);
 
-    await fetchWithTimeout(config.webhookUrl, {
+    const validatedUrl = validateServiceUrl(config.webhookUrl, 'Discord webhook');
+    await fetchWithTimeout(validatedUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -157,7 +159,8 @@ export class NotificationService {
       ...payload,
     });
 
-    await fetchWithTimeout(config.url, {
+    const validatedUrl = validateServiceUrl(config.url, 'Webhook');
+    await fetchWithTimeout(validatedUrl, {
       method: config.method || 'POST',
       headers: {
         'Content-Type': 'application/json',
