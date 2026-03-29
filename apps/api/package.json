@@ -1,6 +1,6 @@
 {
   "name": "@mixarr/api",
-  "version": "1.0.0",
+  "version": "2.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -40,7 +40,8 @@
     "passport-google-oauth20": "^2.0.0",
     "passport-ldapauth": "^3.0.1",
     "passport-local": "^1.0.0",
-    "socket.io": "^4.8.1",
+    "socket.io": "^4.8.3",
+    "socket.io-parser": "4.2.6",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -54,8 +55,8 @@
     "@types/passport-google-oauth20": "^2.0.17",
     "@types/passport-local": "^1.0.38",
     "@types/supertest": "^6.0.3",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^9.1.0",
     "prisma": "^5.22.0",

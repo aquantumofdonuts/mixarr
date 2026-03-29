@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
+const pkg = require('./package.json');
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_APP_VERSION: pkg.version,
+  },
   reactStrictMode: true,
   transpilePackages: ['@mixarr/shared-types', '@mixarr/ui'],
   output: 'standalone',

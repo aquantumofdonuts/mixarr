@@ -1,9 +1,9 @@
-/**
- * Version and product information for Mixarr
- * Update VERSION when releasing new versions (keep in sync with CHANGELOG.md)
- */
+import { createRequire } from 'module';
 
-export const VERSION = '2.1.1';
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json') as { version: string };
+
+export const VERSION = pkg.version;
 export const LICENSE = 'GPL-3.0';
 export const PRODUCT = 'Mixarr';
 
