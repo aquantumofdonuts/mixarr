@@ -6,6 +6,7 @@
 
 import { rateLimit } from './rate-limiter.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
+import { validateServiceUrl } from '../lib/validate-service-url.js';
 
 export interface JellyfinConfig {
   jellyfinUrl: string;
@@ -188,7 +189,8 @@ export class JellyfinService {
   private async callApi<T>(config: JellyfinConfig, endpoint: string, params?: Record<string, string>): Promise<T> {
     await rateLimit('jellyfin');
 
-    const url = new URL(endpoint, config.jellyfinUrl);
+    const validatedBase = validateServiceUrl(config.jellyfinUrl, 'Jellyfin');
+    const url = new URL(endpoint, validatedBase);
     if (params) {
       for (const [key, value] of Object.entries(params)) {
         url.searchParams.set(key, value);

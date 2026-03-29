@@ -6,6 +6,7 @@
 
 import { rateLimit } from './rate-limiter.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
+import { validateServiceUrl } from '../lib/validate-service-url.js';
 
 export interface TautulliConfig {
   tautulliUrl: string;
@@ -226,7 +227,8 @@ export class TautulliService {
   ): Promise<TautulliResponse<T>> {
     await rateLimit('tautulli');
 
-    const url = new URL('/api/v2', config.tautulliUrl);
+    const validatedBase = validateServiceUrl(config.tautulliUrl, 'Tautulli');
+    const url = new URL('/api/v2', validatedBase);
     url.searchParams.set('apikey', config.tautulliApiKey);
     url.searchParams.set('cmd', cmd);
     
