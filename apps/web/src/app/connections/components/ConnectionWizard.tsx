@@ -149,6 +149,7 @@ export function ConnectionWizard({
 
       {step === 2 && selectedType && (
         <WizardStepConfigure
+          key={initialConfig ? 'config-loaded' : 'config-loading'}
           type={selectedType}
           connectionName={connectionName}
           onConnectionNameChange={setConnectionName}
