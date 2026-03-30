@@ -1,6 +1,6 @@
 {
   "name": "mixarr",
-  "version": "2.1.1",
+  "version": "2.1.3",
   "private": true,
   "description": "Music discovery and import tool for Lidarr",
   "workspaces": [

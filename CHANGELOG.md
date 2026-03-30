@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.1.3] - 2026-03-30
+
+### Fixed
+- **Docker build failure**: Removed broken `COPY --from=builder-api /app/apps/api/node_modules` line in `docker/Dockerfile.unified` — this path does not exist since npm workspaces hoists all dependencies to the root `node_modules`
+- **CI latest tag**: Fixed `latest` Docker tag not being published after the workflow trigger was changed from `release` events to tag pushes
+
+---
+
+## [v2.1.2] - 2026-03-30
+
+### Fixed
+- **Subscription worker error logging**: Error objects now serialize correctly — `message` and `stack` are logged instead of an empty `{}` object, making job failure diagnosis possible
+- **Lidarr auto-add silent failures**: Failed artist additions now log the Lidarr error message before marking the result as failed
+- **SSRF vulnerability** (CodeQL #50): Service URLs are now validated before HTTP requests to prevent server-side request forgery
+- **DISABLE_CADDY env var** (#42): Added support for disabling Caddy when using an external reverse proxy
+- **Lidarr form stale state** (#43): Connection form re-mounts when config loads during edit, preventing stale values
+- **rootFolderPath normalization** (#43): Empty `rootFolderPath` values are normalized to prevent fallback to the wrong Lidarr folder
+- **TypeScript build errors**: Resolved dependency version conflicts (pinned ioredis); fixes compilation failures introduced by transitive dep upgrades
+- **Update checker false positive**: Cache now invalidates correctly after upgrade, preventing stale "update available" banner
+- **Version constant**: Health endpoint now reads version from `VERSION` constant rather than `npm_package_version` env var
+
+### Changed
+- Version sourcing automated — `version.ts` and `constants.ts` derive values from `package.json` at build time
+
+---
+
 ## [v2.1.1] - 2026-03-18
 
 ### Added
@@ -362,6 +388,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[v2.1.2]: https://github.com/aquantumofdonuts/mixarr/compare/v2.1.1...v2.1.2
 [v2.1.1]: https://github.com/aquantumofdonuts/mixarr/compare/v2.1.0...v2.1.1
 [v2.1.0]: https://github.com/aquantumofdonuts/mixarr/compare/v2.0.0...v2.1.0
 [v2.0.0]: https://github.com/aquantumofdonuts/mixarr/compare/v1.2.1...v2.0.0
