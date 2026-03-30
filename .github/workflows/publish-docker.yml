@@ -114,7 +114,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
             type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' }}
 
@@ -228,7 +228,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=tag,suffix=-slim
-            type=raw,value=slim,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
+            type=raw,value=slim,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
             type=raw,value=${{ github.event.inputs.tag }}-slim,enable=${{ github.event_name == 'workflow_dispatch' }}
             type=raw,value=slim,enable=${{ github.event_name == 'workflow_dispatch' }}
 
