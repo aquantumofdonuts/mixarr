@@ -24,9 +24,9 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 - **Key packages:** bcryptjs, cookie-parser, cookie, cookie-signature, helmet, cors, express-rate-limit, concurrently, tsx
 - **Prisma:** Output dir is `backend/src/generated/prisma`, adapter pattern (`PrismaBetterSqlite3`), `prisma.config.ts` at root
 
-## Current State: Phase 4 COMPLETE ✅
+## Current State: Phase 7 COMPLETE ✅
 
-**22 commits on `main`, 238 tests passing, TypeScript compiles clean.**
+**35 commits on `main`, 253 backend tests passing, full frontend build clean (1858 modules).**
 
 ### Progress Summary
 | Phase | Status | Tests |
@@ -36,18 +36,25 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 | Phase 2: Lidarr Integration | ✅ Done | 84 |
 | Phase 3: Discovery Services | ✅ Done | 152 |
 | Phase 4: Subscription Engine | ✅ Done | 238 |
-| Phase 5: Review Queue | ⏳ Next | — |
-| Phases 6-9 | ⏳ Pending | — |
+| Phase 5: Review Queue | ✅ Done | 253 |
+| Phase 6: Frontend Core | ✅ Done | 253 (FE no unit tests) |
+| Phase 7: Frontend Discovery Pages | ✅ Done | 253 |
+| Phase 8: Notifications | ⏳ Next | — |
+| Phase 9: Polish & Deployment | ⏳ Pending | — |
 
-### Git Log (HEAD = c4a5ffa)
+### Git Log (HEAD = 7726fae)
 ```
-c4a5ffa feat: add review queue routes with bulk approve/reject and SkyHook integration
-c615401 feat: add cron-based subscription scheduler
-c31df0b feat: add subscription worker with FIFO queue and run engine
-d9bc829 feat: add subscription strategies for Spotify, Last.fm, MusicBrainz, Jellyfin, Tautulli
-53a49a7 feat: add subscription CRUD routes with Zod validation
-ce39018 feat: add search and discover routes
-(earlier commits: Phases 0-3)
+7726fae feat: wire Phase 7 routes and WebSocketProvider into app shell
+98a7968 feat: add Queue page with bulk approve/reject and real-time WebSocket updates
+b1eecda feat: add Library page with search, sort, and pagination
+433e872 feat: add Artist Detail page with similar artists and add-to-Lidarr action
+5542397 feat: add Search page with artist and tag search
+7a5dcb8 feat: add Discover page with genre filtering and ArtistCard/AlbumCard components
+dce3e6a feat: add WebSocket hook and context for real-time updates
+b8338c6 feat: add PWA manifest and service worker
+641cf41 feat: add settings page with connections, subscriptions, and user management
+ba15004 feat: add login and onboarding pages
+(earlier commits: Phases 0-5)
 ```
 
 ### Source Files in Place (Phase 5 additions)
@@ -97,6 +104,54 @@ frontend/public/
   icons/icon.svg        — Music note icon (copper on dark)
 vite.config.ts          — Updated: VitePWA plugin added (SW disabled in dev, NetworkFirst for /api/)
 ```
+
+### Source Files in Place (Phase 7 additions)
+```
+frontend/src/
+  hooks/
+    useDiscovery.ts     — useNewReleases, useTopArtists(tag?), useByTag(tag), useRecentlyPlayed.
+                          5-min staleTime; 400 errors (service not configured) handled gracefully.
+    useSearch.ts        — useSearch(query): enabled when query.length >= 2, 2-min staleTime,
+                          isTagSearch flag for '#'-prefixed queries.
+    useArtistDetail.ts  — useArtistDetail(mbid), useSimilarArtists(mbid), useAddArtist mutation.
+                          useSimilarArtists: 400 → empty array (not error).
+    useLibrary.ts       — useLibrary(filters): search/sort/page/limit params, 2-min staleTime.
+                          useLibraryStats(): 5-min staleTime.
+    useQueue.ts         — useQueue(status), useApproveItem, useRejectItem, useBulkQueueAction,
+                          useDeleteItem. All mutations invalidate ['queue'] on success.
+    useWebSocket.ts     — thin hook: useContext(WebSocketContext)
+  contexts/
+    WebSocketContext.tsx — WebSocketProvider: io(window.location.origin, { withCredentials:true }),
+                           tracks isConnected via connect/disconnect events, cleanup on unmount.
+                           Exports: WebSocketProvider, useWebSocketChannel(channel, event, callback).
+                           useWebSocketChannel uses useRef-stabilized callback to avoid re-subscription.
+  components/
+    ArtistCard.tsx      — Portrait card: image-as-background, copper hover shimmer, IN LIBRARY badge,
+                          fallback music note icon. Clicking → navigates to /artist/:mbid.
+    AlbumCard.tsx       — Square card: cover image, copper gradient placeholder, year from ISO date.
+    SimilarArtists.tsx  — Horizontal carousel using useSimilarArtists. "Configure Last.fm" note if 400.
+  pages/
+    Discover.tsx        — Sections: New Releases (horizontal AlbumCard scroll), Trending Artists grid,
+                          Explore by Genre (tag chips → artist grid), Recently Played (if jellyfin/tautulli).
+    Search.tsx          — Large search input, 400ms debounce → URL ?q= param, ArtistCard grid.
+                          Tag search (#jazz) gets teal badge. Result count shown.
+    ArtistDetail.tsx    — Hero (image/gradient), bio with HTML strip, Last.fm stats/tags, Add to Lidarr
+                          button (copper), SimilarArtists component, back button.
+    Library.tsx         — Stats bar, debounced search, sort dropdown (A-Z/Recently Added),
+                          ArtistCard grid, Prev/Next pagination.
+    Queue.tsx           — Status tabs (Pending/Approved/Rejected), multi-select checkboxes, bulk
+                          actions bar, per-row Approve/Reject/Delete. Real-time via useWebSocketChannel.
+  App.tsx               — Updated: imports all Phase 7 pages; / → redirects to /discover; all 5 placeholder
+                          routes now use real components; /artist/:mbid added.
+  main.tsx              — Updated: WebSocketProvider added (wraps App, inside ToastProvider).
+package.json            — socket.io-client added to dependencies.
+```
+
+### Design System Notes (Phase 7 additions)
+- `ArtistCard` and `AlbumCard` are purely presentational — no data fetching inside
+- WebSocket events: `queue:approved`, `queue:rejected`, `queue:bulk-approved`, `queue:bulk-rejected`
+- `socket.io-client` connects with `withCredentials: true` (uses signed session cookie)
+- Intermittent test isolation issue: parallel test files all create user named 'admin' in shared SQLite — causes occasional "Unique constraint failed" in stderr (pre-existing, not Phase 7 regression)
 
 ### Design System Notes (Phase 6)
 - **Theme:** "Listening Room" — warm dark (`#1c1b19`), rust/copper primary (`hsl(22,45%,54%)`), muted teal secondary
@@ -239,28 +294,15 @@ vite.config.ts          — VitePWA plugin added (SW disabled in dev, NetworkFir
 - **Library routes**: Look up user's Lidarr connection via `prisma.connection.findFirst({ where: { userId, type: 'lidarr', enabled: true } })`, parse `JSON.parse(conn.config)` → `{ url, apiKey }`, instantiate `new LidarrService(config)`. Returns 400 if no connection.
 - **analyzeLibraryHealth**: Detects `no_albums` (monitored + 0 albums), `unmonitored`, `no_metadata` (no overview + no images). Returns `LibraryStats` + `HealthIssue[]`.
 
-## Next Task: Phase 5 — Review Queue
+## Next Task: Phase 8 — Notifications
 
-### Task 5.1: Review Queue Routes
-**Files:** `backend/src/routes/queue.ts`, `backend/src/schemas/queue.ts`
-**Mount at:** `/api/queue`
-
-Routes:
-- `GET /api/queue` — list pending ReviewItems for current user
-- `POST /api/queue/:id/approve` — approve item (SkyHook warm → Lidarr addArtist → update status)
-- `POST /api/queue/:id/reject` — reject item (update status)
-- `POST /api/queue/bulk` — bulk approve/reject `{ ids: [...], action: 'approve'|'reject' }`
-- `DELETE /api/queue/:id` — remove item
-
-Approve flow: warm SkyHook cache → add artist to Lidarr → update ReviewItem → broadcast via WebSocket.
-Tests: approve/reject flow, bulk operations, user isolation.
-Commit: `"feat: add review queue routes with bulk approve/reject and SkyHook integration"`
+See the implementation plan at `/home/chris/Github/mixarr/docs/plans/2026-03-04-mixarr-lite-plan.md` for the full Phase 8 spec.
 
 ## How to Proceed
 1. Read this file fully
 2. Read the skills: `.github/skills/subagent-driven-development/SKILL.md`
-3. Dispatch a subagent for Task 5.1 (Review Queue Routes), verify it passes
-4. Then proceed to Phase 6 (Frontend Core) per the plan at `docs/plans/2026-03-04-mixarr-lite-plan.md`
+3. Read Phase 8 from the plan doc
+4. Dispatch subagents per task
 
 ### fetchWithTimeout Pattern
 ```typescript
