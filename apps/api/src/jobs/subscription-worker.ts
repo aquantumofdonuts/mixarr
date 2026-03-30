@@ -482,7 +482,9 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
               matchCount: sourcesArray.length,
             },
           });
-        } catch {
+        } catch (addErr) {
+          const addErrMsg = addErr instanceof Error ? addErr.message : String(addErr);
+          logger.warn(`Failed to add artist "${artist.name}" to Lidarr`, { error: addErrMsg });
           skipped++;
           await prisma.subscriptionResult.create({
             data: {
@@ -684,5 +686,7 @@ subscriptionWorker.on('completed', (job) => {
 });
 
 subscriptionWorker.on('failed', (job, error) => {
-  logger.error(`Subscription job ${job?.id} failed`, { error });
+  logger.error(`Subscription job ${job?.id} failed`, {
+    error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
+  });
 });
