@@ -26,7 +26,7 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 
 ## Current State: Phase 4 COMPLETE ✅
 
-**22 commits on `main`, 238 tests passing, TypeScript compiles clean.**
+**23 commits on `main`, 253 tests passing, TypeScript compiles clean.**
 
 ### Progress Summary
 | Phase | Status | Tests |
@@ -36,22 +36,31 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 | Phase 2: Lidarr Integration | ✅ Done | 84 |
 | Phase 3: Discovery Services | ✅ Done | 152 |
 | Phase 4: Subscription Engine | ✅ Done | 238 |
-| Phase 5: Review Queue | ⏳ Next | — |
+| Phase 5: Review Queue | ✅ Done | 253 |
 | Phases 6-9 | ⏳ Pending | — |
 
-### Git Log (HEAD = c615401)
+### Git Log (HEAD = c4a5ffa)
 ```
+c4a5ffa feat: add review queue routes with bulk approve/reject and SkyHook integration
 c615401 feat: add cron-based subscription scheduler
 c31df0b feat: add subscription worker with FIFO queue and run engine
 d9bc829 feat: add subscription strategies for Spotify, Last.fm, MusicBrainz, Jellyfin, Tautulli
 53a49a7 feat: add subscription CRUD routes with Zod validation
 ce39018 feat: add search and discover routes
-e12f56d feat: add Tautulli service
-3fd6f5d feat: add Jellyfin service
-41e2599 feat: add Deezer service
-c5b5955 feat: add MusicBrainz service
-3df4957 feat: add Last.fm service
-(earlier commits: Phases 0-2)
+(earlier commits: Phases 0-3)
+```
+
+### Source Files in Place (Phase 5 additions)
+```
+backend/src/
+  routes/
+    queue.ts            — 6 routes: GET /, GET /:id, POST /bulk, POST /:id/approve,
+                          POST /:id/reject, DELETE /:id.
+                          Approve flow: skyhookWarmer.warmArtist → LidarrService.addArtist →
+                          update status → broadcast('queue', 'approved', ...).
+                          Bulk: iterate all items, skip those without artistMbid.
+  schemas/
+    queue.ts            — bulkQueueActionSchema: { ids: number[], action: 'approve'|'reject' }
 ```
 
 ### Source Files in Place (Phase 4 additions)
@@ -148,28 +157,50 @@ Socket.IO attached to `httpServer` (not `app`), auth via signed cookie `mixarr_s
 - **Library routes**: Look up user's Lidarr connection via `prisma.connection.findFirst({ where: { userId, type: 'lidarr', enabled: true } })`, parse `JSON.parse(conn.config)` → `{ url, apiKey }`, instantiate `new LidarrService(config)`. Returns 400 if no connection.
 - **analyzeLibraryHealth**: Detects `no_albums` (monitored + 0 albums), `unmonitored`, `no_metadata` (no overview + no images). Returns `LibraryStats` + `HealthIssue[]`.
 
-## Next Task: Phase 5 — Review Queue
+## Next Task: Phase 6 — Frontend Core
 
-### Task 5.1: Review Queue Routes
-**Files:** `backend/src/routes/queue.ts`, `backend/src/schemas/queue.ts`
-**Mount at:** `/api/queue`
+Phase 6 has 5 tasks. All are frontend (Vite + React 19 + React Router 7 + TanStack Query 5 + Tailwind CSS 4).
 
-Routes:
-- `GET /api/queue` — list pending ReviewItems for current user
-- `POST /api/queue/:id/approve` — approve item (SkyHook warm → Lidarr addArtist → update status)
-- `POST /api/queue/:id/reject` — reject item (update status)
-- `POST /api/queue/bulk` — bulk approve/reject `{ ids: [...], action: 'approve'|'reject' }`
-- `DELETE /api/queue/:id` — remove item
+### Task 6.1: API Client & Auth Context
+**Files:** `frontend/src/utils/api.ts`, `frontend/src/contexts/AuthContext.tsx`, `frontend/src/hooks/useAuth.ts`
+- API client: fetch wrapper with base URL, credentials include, JSON parsing, error handling
+- Auth context: login/logout/me state, redirect to `/login` if unauthenticated
+- `useAuth` hook: expose `user`, `login()`, `logout()`, `isAdmin`
+Commit: `"feat: add API client and auth context"`
 
-Approve flow: warm SkyHook cache → add artist to Lidarr → update ReviewItem → broadcast via WebSocket.
-Tests: approve/reject flow, bulk operations, user isolation.
-Commit: `"feat: add review queue routes with bulk approve/reject and SkyHook integration"`
+### Task 6.2: Theme, Toast, & Layout
+**Files:** `frontend/src/contexts/ThemeContext.tsx`, `frontend/src/contexts/ToastContext.tsx`, `frontend/src/components/Layout.tsx`, `frontend/src/components/Sidebar.tsx`, `frontend/src/components/SearchBar.tsx`
+- Theme context: dark/light toggle (default dark, persist localStorage)
+- Toast context: success/error/info, auto-dismiss
+- Layout: sidebar + top bar + content area
+- Sidebar: nav items (Discover, Search, Library, Queue, Flow, Settings), active indicator, mobile hamburger
+- Tailwind dark theme based on Mixarr's color palette
+Commit: `"feat: add layout, sidebar, theme, and toast components"`
+
+### Task 6.3: Login & Onboarding Pages
+**Files:** `frontend/src/pages/Login.tsx`, `frontend/src/pages/Onboarding.tsx`
+- Login page: username/password form → `/api/auth/login`
+- Onboarding (when no users exist): Step 1 create admin → Step 2 Lidarr → Step 3 MusicBrainz email → Step 4 optional services
+Commit: `"feat: add login and onboarding pages"`
+
+### Task 6.4: Settings Page
+**Files:** `frontend/src/pages/Settings.tsx`, `frontend/src/components/ConnectionCard.tsx`, `frontend/src/components/SubscriptionModal.tsx`
+- Tabs: Connections, Subscriptions, Notifications, Users (admin), About
+- Connections: test/edit/delete, add new per type
+- Subscriptions: enable/disable, edit/delete, create modal with schedule + result handling
+Commit: `"feat: add settings page with connections, subscriptions, and user management"`
+
+### Task 6.5: PWA Manifest & Service Worker
+**Files:** `frontend/public/manifest.json`, icons, ServiceWorkerRegistration.tsx, useOffline.ts
+- vite-plugin-pwa for SW generation
+- Offline indicator component
+Commit: `"feat: add PWA manifest and service worker"`
 
 ## How to Proceed
 1. Read this file fully
 2. Read the skills: `.github/skills/subagent-driven-development/SKILL.md`
-3. Dispatch a subagent for Task 5.1 (Review Queue Routes), verify it passes
-4. Then proceed to Phase 6 (Frontend Core) per the plan at `docs/plans/2026-03-04-mixarr-lite-plan.md`
+3. Dispatch subagents for Tasks 6.1–6.5 sequentially (frontend tasks build on each other)
+4. After Phase 6, proceed to Phase 7 (Frontend Discovery Pages) per the plan
 
 ### fetchWithTimeout Pattern
 ```typescript
@@ -237,7 +268,7 @@ router.get('/', requireAuth, async (req, res) => {
 ```bash
 cd ~/Github/mixarr-lite
 npx tsc --noEmit        # must be clean
-npx vitest run          # 238 tests must pass + new tests
+npx vitest run          # 253 tests must pass + new tests
 ```
 
 ## Reference Sources (Read Only)
