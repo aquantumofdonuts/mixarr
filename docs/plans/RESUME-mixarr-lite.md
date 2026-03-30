@@ -26,7 +26,7 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 
 ## Current State: Phase 4 COMPLETE ✅
 
-**22 commits on `main`, 238 tests passing, TypeScript compiles clean.**
+**28 commits on `main`, 253 tests passing, TypeScript compiles clean.**
 
 ### Progress Summary
 | Phase | Status | Tests |
@@ -36,8 +36,9 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 | Phase 2: Lidarr Integration | ✅ Done | 84 |
 | Phase 3: Discovery Services | ✅ Done | 152 |
 | Phase 4: Subscription Engine | ✅ Done | 238 |
-| Phase 5: Review Queue | ⏳ Next | — |
-| Phases 6-9 | ⏳ Pending | — |
+| Phase 5: Review Queue | ✅ Done | 253 |
+| Phase 6: Frontend Core | ✅ Done | 253 (FE has no unit tests) |
+| Phases 7-9 | ⏳ Pending | — |
 
 ### Git Log (HEAD = c615401)
 ```
@@ -53,7 +54,49 @@ c5b5955 feat: add MusicBrainz service
 3df4957 feat: add Last.fm service
 (earlier commits: Phases 0-2)
 ```
+### Source Files in Place (Phase 6 additions)
+```
+frontend/src/
+  utils/
+    api.ts              — typed fetch wrapper: api.get/post/put/patch/delete, ApiError class
+  contexts/
+    AuthContext.tsx     — AuthProvider (wraps QueryClientProvider), login/logout, session restore on mount.
+                          Exports: AuthContext, AuthProvider, isApiError, AuthUser type.
+    ThemeContext.tsx    — ThemeProvider/useTheme, persists dark/light to localStorage, sets data-theme on <html>
+    ToastContext.tsx    — ToastProvider/useToast with toast.success/error/info/warning, 4s auto-dismiss
+  hooks/
+    useAuth.ts          — useAuth() → { user, isLoading, isAdmin, login, logout }
+    useOffline.ts       — useOffline() → boolean (navigator.onLine + online/offline events)
+  components/
+    Layout.tsx          — Flex shell: Sidebar (220px) + TopBar (SearchBar + theme toggle) + scrollable main
+    Sidebar.tsx         — Collapsible (220px↔56px), nav: Discover/Search/Library/Queue/Settings,
+                          active highlighting via useLocation, theme toggle, user logout
+    SearchBar.tsx       — Cmd/Ctrl+K focus, #tag encoding, clear button, navigates to /search?q=
+    ConnectionCard.tsx  — Connection card with type icon, toggle, test (spinner → ✓/✗), edit, delete
+    SubscriptionModal.tsx — Create/edit modal with type-aware subscription type dropdown,
+                            schedule, result handling, config fields
+    ServiceWorkerRegistration.tsx — OfflineIndicator (fixed banner when offline), SW registration
+  pages/
+    Login.tsx           — Centered card, auto-redirect if already authed or no users exist
+    Onboarding.tsx      — 4-step wizard: admin account → Lidarr → MusicBrainz email → finish
+    Settings.tsx        — Tabs: Connections, Subscriptions, Notifications, Users (admin), About
+  index.css             — "Listening Room" dark/light CSS variables (--background, --primary copper, etc.),
+                          DM Sans font (Google Fonts), scrollbar styling
+  App.tsx               — All 6 routes with ProtectedRoute → Layout guard, OfflineIndicator at root
+  main.tsx              — Providers: ThemeProvider → AuthProvider (contains QueryClientProvider) → ToastProvider
+frontend/public/
+  manifest.json         — PWA manifest (standalone, theme #bf7a56, SVG icon)
+  icons/icon.svg        — Music note icon (copper on dark)
+vite.config.ts          — Updated: VitePWA plugin added (SW disabled in dev, NetworkFirst for /api/)
+```
 
+### Design System Notes (Phase 6)
+- **Theme:** "Listening Room" — warm dark (`#1c1b19`), rust/copper primary (`hsl(22,45%,54%)`), muted teal secondary
+- **Font:** DM Sans (Google Fonts) — loaded via CSS @import
+- **CSS approach:** CSS custom properties (`--background`, `--primary`, etc.) in `:root`/`[data-theme=light]`;
+  Tailwind 4 for utilities, inline `style` props for themed colors
+- **Auth flow:** On app load, `AuthProvider` calls `/api/auth/me` to restore session.
+  Login page additionally checks `/api/users` — if empty → redirect to `/setup` (Onboarding).
 ### Source Files in Place (Phase 4 additions)
 ```
 backend/src/
@@ -142,34 +185,84 @@ prisma/
 
 Socket.IO attached to `httpServer` (not `app`), auth via signed cookie `mixarr_session`.
 
-### Key Implementation Details: Phase 2
+### Source Files in Place (Phase 6 additions)
+```
+frontend/src/
+  utils/
+    api.ts              — typed fetch wrapper: api.get/post/put/patch/delete, ApiError class
+  contexts/
+    AuthContext.tsx     — AuthProvider (wraps QueryClientProvider), login/logout, session restore on mount.
+                          Exports: AuthContext, AuthProvider, isApiError, AuthUser type.
+    ThemeContext.tsx    — ThemeProvider/useTheme, persists dark/light to localStorage, sets data-theme on <html>
+    ToastContext.tsx    — ToastProvider/useToast with toast.success/error/info/warning, 4s auto-dismiss
+  hooks/
+    useAuth.ts          — useAuth() → { user, isLoading, isAdmin, login, logout }
+    useOffline.ts       — useOffline() → boolean (navigator.onLine + online/offline events)
+  components/
+    Layout.tsx          — Flex shell: Sidebar (220px) + TopBar (SearchBar + theme toggle) + scrollable main
+    Sidebar.tsx         — Collapsible (220px→56px), nav: Discover/Search/Library/Queue/Settings,
+                          active highlighting via useLocation, theme toggle, user logout
+    SearchBar.tsx       — Cmd/Ctrl+K focus, #tag encoding, clear button, navigates to /search?q=
+    ConnectionCard.tsx  — Connection card with type icon, toggle, test (spinner → ✓/✗), edit, delete
+    SubscriptionModal.tsx — Create/edit modal: type-aware dropdown, schedule, result handling, config
+    ServiceWorkerRegistration.tsx — OfflineIndicator (fixed banner when offline), SW registration
+  pages/
+    Login.tsx           — Centered card, auto-redirect if already authed or no users exist
+    Onboarding.tsx      — 4-step wizard: admin account → Lidarr → MusicBrainz email → finish
+    Settings.tsx        — Tabs: Connections, Subscriptions, Notifications, Users (admin), About
+  index.css             — "Listening Room" dark/light CSS variables, DM Sans font, scrollbar styling
+  App.tsx               — All 6 routes with ProtectedRoute → Layout guard, OfflineIndicator at root
+  main.tsx              — ThemeProvider → AuthProvider (contains QueryClientProvider) → ToastProvider
+frontend/public/
+  manifest.json         — PWA manifest (standalone, theme #bf7a56, SVG icon)
+  icons/icon.svg        — Music note icon (copper on dark)
+vite.config.ts          — VitePWA plugin added (SW disabled in dev, NetworkFirst for /api/)
+```
+
+### Design System Notes (Phase 6)
+- **Theme:** "Listening Room" — warm dark (`#1c1b19`), rust/copper primary (`hsl(22,45%,54%)`), muted teal secondary
+- **Font:** DM Sans (Google Fonts) — loaded via CSS @import
+- **CSS approach:** CSS custom properties in `:root`/`[data-theme=light]`; Tailwind 4 utilities + inline `style` props for themed colors
+- **Auth flow:** AuthProvider calls `/api/auth/me` on mount. Login page checks `/api/users` — if empty → redirect to `/setup`.
+
+### Source Files in Place (Phase 5 additions)
 - **LidarrService**: Constructor `({ url, apiKey })`. Private `request<T>(path)` using `fetchWithTimeout` with `AbortSignal.timeout`. Methods: `testConnection`, `getArtists`, `getArtist`, `getArtistByMbid`, `searchArtist`, `lookupByMbid`, `addArtist`, `getAlbums`, `getRecentAlbums`, `getFutureAlbums`, `getQualityProfiles`, `getMetadataProfiles`, `getRootFolders`, `refreshArtist`
 - **SkyHookCacheWarmer**: Hits `https://api.lidarr.audio/api/v0.4/artist/{mbid}`. 404 → fail fast. 503/504 → exponential backoff (2s, 4s, 8s cap). UUID MBID validation. Singleton `skyhookWarmer` exported.
 - **Library routes**: Look up user's Lidarr connection via `prisma.connection.findFirst({ where: { userId, type: 'lidarr', enabled: true } })`, parse `JSON.parse(conn.config)` → `{ url, apiKey }`, instantiate `new LidarrService(config)`. Returns 400 if no connection.
 - **analyzeLibraryHealth**: Detects `no_albums` (monitored + 0 albums), `unmonitored`, `no_metadata` (no overview + no images). Returns `LibraryStats` + `HealthIssue[]`.
 
-## Next Task: Phase 5 — Review Queue
+## Next Task: Phase 7 — Frontend Discovery Pages
 
-### Task 5.1: Review Queue Routes
-**Files:** `backend/src/routes/queue.ts`, `backend/src/schemas/queue.ts`
-**Mount at:** `/api/queue`
+Phase 7 has 3 tasks. All are frontend.
 
-Routes:
-- `GET /api/queue` — list pending ReviewItems for current user
-- `POST /api/queue/:id/approve` — approve item (SkyHook warm → Lidarr addArtist → update status)
-- `POST /api/queue/:id/reject` — reject item (update status)
-- `POST /api/queue/bulk` — bulk approve/reject `{ ids: [...], action: 'approve'|'reject' }`
-- `DELETE /api/queue/:id` — remove item
+### Task 7.1: Discover Page
+**Files:** `frontend/src/pages/Discover.tsx`, `frontend/src/components/ArtistCard.tsx`, `frontend/src/components/AlbumCard.tsx`, `frontend/src/hooks/useDiscovery.ts`
+- `useDiscovery` hook: React Query data fetching from `/api/discover` endpoints
+- Discover page sections: New Releases, Top Artists, Similar Artists, by Tag, Recently Played
+- Artist cards: image (Deezer), name, genre tags, "Add to Lidarr" button
+- Album cards: cover, title, artist, release date
+Commit: `"feat: add discover page with artist and album cards"`
 
-Approve flow: warm SkyHook cache → add artist to Lidarr → update ReviewItem → broadcast via WebSocket.
-Tests: approve/reject flow, bulk operations, user isolation.
-Commit: `"feat: add review queue routes with bulk approve/reject and SkyHook integration"`
+### Task 7.2: Search Page
+**Files:** `frontend/src/pages/Search.tsx`, `frontend/src/hooks/useSearch.ts`
+- `GET /api/search/artists?q=` → debounced search
+- `GET /api/search/artist/:mbid` → detail view
+- Results grid: ArtistCard components, clickable for detail
+- Detail panel/modal: stats, similar artists, "Add to Lidarr" button
+- `#tag` search prefix routes to by-tag discover endpoint
+Commit: `"feat: add search page with artist detail view"`
+
+### Task 7.3: Library & Queue Pages
+**Files:** `frontend/src/pages/Library.tsx`, `frontend/src/pages/Queue.tsx`, `frontend/src/hooks/useLibrary.ts`, `frontend/src/hooks/useQueue.ts`
+- Library page: artist grid from Lidarr, health stats, upcoming releases
+- Queue page: list pending ReviewItems, approve/reject buttons, bulk select
+Commit: `"feat: add library and queue pages"`
 
 ## How to Proceed
 1. Read this file fully
 2. Read the skills: `.github/skills/subagent-driven-development/SKILL.md`
-3. Dispatch a subagent for Task 5.1 (Review Queue Routes), verify it passes
-4. Then proceed to Phase 6 (Frontend Core) per the plan at `docs/plans/2026-03-04-mixarr-lite-plan.md`
+3. Dispatch subagents for Tasks 7.1–7.3 sequentially (they share ArtistCard component)
+4. After Phase 7, proceed to Phase 8 per the plan at `docs/plans/2026-03-04-mixarr-lite-plan.md`
 
 ### fetchWithTimeout Pattern
 ```typescript
@@ -237,7 +330,7 @@ router.get('/', requireAuth, async (req, res) => {
 ```bash
 cd ~/Github/mixarr-lite
 npx tsc --noEmit        # must be clean
-npx vitest run          # 238 tests must pass + new tests
+npx vitest run          # 253 tests must pass (frontend has no unit tests)
 ```
 
 ## Reference Sources (Read Only)
