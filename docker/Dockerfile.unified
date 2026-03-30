@@ -78,10 +78,8 @@ COPY --from=builder-api /app/apps/api/dist /app/api/dist
 COPY --from=builder-api /app/apps/api/package*.json /app/api/
 COPY --from=builder-api /app/apps/api/prisma /app/api/prisma
 
-# Copy node_modules - both root hoisted deps AND api-specific deps
-# Order matters: api-specific deps should overlay root deps
+# Copy node_modules - npm workspaces hoists all deps to root
 COPY --from=builder-api /app/node_modules /app/api/node_modules
-COPY --from=builder-api /app/apps/api/node_modules /app/api/node_modules
 
 # Generate Prisma client in production
 WORKDIR /app/api
