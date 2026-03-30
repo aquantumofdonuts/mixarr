@@ -24,9 +24,9 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 - **Key packages:** bcryptjs, cookie-parser, cookie, cookie-signature, helmet, cors, express-rate-limit, concurrently, tsx
 - **Prisma:** Output dir is `backend/src/generated/prisma`, adapter pattern (`PrismaBetterSqlite3`), `prisma.config.ts` at root
 
-## Current State: Phase 2 COMPLETE ✅
+## Current State: Phase 4 COMPLETE ✅
 
-**14 commits on `main`, 84 tests passing, TypeScript compiles clean.**
+**22 commits on `main`, 238 tests passing, TypeScript compiles clean.**
 
 ### Progress Summary
 | Phase | Status | Tests |
@@ -34,31 +34,62 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 | Phase 0: Scaffold | ✅ Done | — |
 | Phase 1: Backend Foundation (auth, middleware, routes, WebSocket) | ✅ Done | 56 |
 | Phase 2: Lidarr Integration | ✅ Done | 84 |
-| Phase 3: Discovery Services | ⏳ Next | — |
-| Phases 4-9 | ⏳ Pending | — |
+| Phase 3: Discovery Services | ✅ Done | 152 |
+| Phase 4: Subscription Engine | ✅ Done | 238 |
+| Phase 5: Review Queue | ⏳ Next | — |
+| Phases 6-9 | ⏳ Pending | — |
 
-### Git Log (HEAD = b4950a0)
+### Git Log (HEAD = c615401)
 ```
-b4950a0 feat: add library health service and routes
-e117058 feat: add SkyHook cache warmer for reliable artist adds
-8cce017 feat: add Lidarr service with core artist and library methods
-cccdc11 feat: add connection management routes
-996a6c3 feat: add Socket.IO WebSocket server with auth
-022ff74 feat: add global and user settings routes
-13b0171 feat: add user management routes with Zod validation
-e5d2972 feat: add error handling, rate limiting, and request logging middleware
-77e6269 feat: add local auth with signed cookies and proxy header support
-39e5663 feat: add environment configuration and constants
-bf351c9 feat: add Prisma schema with SQLite and all 12 models
-da91981 feat: add Express server and Vite React SPA entry points
-9f2bdc8 chore: add TypeScript, Vite, and Tailwind configuration
-62c3df0 chore: initialize project
+c615401 feat: add cron-based subscription scheduler
+c31df0b feat: add subscription worker with FIFO queue and run engine
+d9bc829 feat: add subscription strategies for Spotify, Last.fm, MusicBrainz, Jellyfin, Tautulli
+53a49a7 feat: add subscription CRUD routes with Zod validation
+ce39018 feat: add search and discover routes
+e12f56d feat: add Tautulli service
+3fd6f5d feat: add Jellyfin service
+41e2599 feat: add Deezer service
+c5b5955 feat: add MusicBrainz service
+3df4957 feat: add Last.fm service
+(earlier commits: Phases 0-2)
 ```
 
-### Source Files in Place
+### Source Files in Place (Phase 4 additions)
 ```
 backend/src/
-  config/
+  jobs/
+    subscription-worker.ts  — SubscriptionWorker class, FIFO queue, runSubscription engine.
+                              Exported singleton: subscriptionWorker.
+                              Modes: auto (MusicBrainz MBID lookup → SkyHook warm → Lidarr add),
+                              queue (create ReviewItem), preview (log only).
+                              Stale run cleanup in init().
+    scheduler.ts            — SubscriptionScheduler class, isDue() helper.
+                              Checks enabled subscriptions every 60s, enqueues due ones.
+                              Schedules: manual (never), hourly, daily, weekly, monthly.
+                              Exported singleton: scheduler.
+    strategies/
+      types.ts              — StrategyContext, ArtistToAdd interfaces
+      registry.ts           — getStrategy(), registerStrategy()
+      spotify.ts            — spotify_followed, spotify_playlist strategies
+      lastfm.ts             — lastfm_loved, lastfm_charts strategies
+      musicbrainz.ts        — musicbrainz_similar strategy
+      jellyfin.ts           — jellyfin_library strategy
+      tautulli.ts           — tautulli_history strategy
+  routes/
+    subscriptions.ts        — Full CRUD + GET /:id/runs + GET /:id/runs/:runId +
+                              POST /:id/run (manual trigger → enqueues worker)
+  schemas/
+    subscriptions.ts        — Zod schemas for subscription create/update
+```
+
+### Server Startup Sequence
+```typescript
+const httpServer = createServer(app);
+setupWebSocket(httpServer);
+await subscriptionWorker.init(); // cleanup stale runs
+scheduler.start();               // start 60s polling loop
+httpServer.listen(env.PORT, ...);
+```
     constants.ts     — API URLs, rate limits, timeouts (MUSICBRAINZ_API_URL, LASTFM_API_URL,
                        DEEZER_API_URL, SKYHOOK_API_URL, FETCH_TIMEOUT_MS=60000,
                        SKYHOOK_RETRY_ATTEMPTS=3, SKYHOOK_RETRY_DELAY_MS=2000)
@@ -117,74 +148,28 @@ Socket.IO attached to `httpServer` (not `app`), auth via signed cookie `mixarr_s
 - **Library routes**: Look up user's Lidarr connection via `prisma.connection.findFirst({ where: { userId, type: 'lidarr', enabled: true } })`, parse `JSON.parse(conn.config)` → `{ url, apiKey }`, instantiate `new LidarrService(config)`. Returns 400 if no connection.
 - **analyzeLibraryHealth**: Detects `no_albums` (monitored + 0 albums), `unmonitored`, `no_metadata` (no overview + no images). Returns `LibraryStats` + `HealthIssue[]`.
 
-## Next Task: Phase 3 — Discovery Services
+## Next Task: Phase 5 — Review Queue
 
-### Task 3.1: Spotify Service
-**File:** `backend/src/services/spotify.ts`
-**Port from:** `/home/chris/Github/mixarr/apps/api/src/services/spotify.ts` (736 lines)
-- OAuth2 client credentials flow (no user OAuth needed — just `client_id` + `client_secret`)
-- Token caching with auto-refresh
-- Key methods: `searchArtists`, `getArtist`, `getArtistAlbums`, `getArtistTopTracks`, `getRelatedArtists`, `getNewReleases`, `getFeaturedPlaylists`
-- `SpotifyService` class, constructor `({ clientId, clientSecret })`
-- Config stored in Connection table as `{ clientId, clientSecret }`
+### Task 5.1: Review Queue Routes
+**Files:** `backend/src/routes/queue.ts`, `backend/src/schemas/queue.ts`
+**Mount at:** `/api/queue`
 
-### Task 3.2: Last.fm Service
-**File:** `backend/src/services/lastfm.ts`
-**Port from:** `/home/chris/Github/mixarr/apps/api/src/services/lastfm.ts` (638 lines)
-- API key only (no OAuth)
-- Key methods: `searchArtist`, `getArtistInfo`, `getSimilarArtists`, `getTopArtists`, `getTopArtistsByTag`, `getTopTags`, `getArtistTopAlbums`, `getUserTopArtists`
-- `LastfmService` class, constructor `({ apiKey })`
-- Base URL: `https://ws.audioscrobbler.com/2.0/`
+Routes:
+- `GET /api/queue` — list pending ReviewItems for current user
+- `POST /api/queue/:id/approve` — approve item (SkyHook warm → Lidarr addArtist → update status)
+- `POST /api/queue/:id/reject` — reject item (update status)
+- `POST /api/queue/bulk` — bulk approve/reject `{ ids: [...], action: 'approve'|'reject' }`
+- `DELETE /api/queue/:id` — remove item
 
-### Task 3.3: MusicBrainz Service
-**File:** `backend/src/services/musicbrainz.ts`
-**Port from:** `/home/chris/Github/mixarr/apps/api/src/services/musicbrainz.ts` (345 lines)
-- No auth required — but must set `User-Agent` header with `MUSICBRAINZ_CONTACT_EMAIL` from env
-- Rate limit: 1 request/second (`MUSICBRAINZ_RATE_LIMIT_MS`)
-- Key methods: `searchArtist`, `getArtist`, `getArtistReleaseGroups`, `getReleaseGroup`, `browseReleaseGroups`
-- Singleton export (shared rate limiter state)
+Approve flow: warm SkyHook cache → add artist to Lidarr → update ReviewItem → broadcast via WebSocket.
+Tests: approve/reject flow, bulk operations, user isolation.
+Commit: `"feat: add review queue routes with bulk approve/reject and SkyHook integration"`
 
-### Task 3.4: Deezer Service
-**File:** `backend/src/services/deezer.ts`
-**Port from:** `/home/chris/Github/mixarr/apps/api/src/services/deezer.ts` (303 lines)
-- No auth required
-- Used for: album artwork + 30s preview URLs only
-- Key methods: `searchArtist`, `getArtist`, `getArtistAlbums`, `getAlbum`
-- Singleton export
-
-### Task 3.5: Jellyfin Service
-**File:** `backend/src/services/jellyfin.ts`
-**Port from:** `/home/chris/Github/mixarr/apps/api/src/services/jellyfin.ts` (297 lines)
-- API key auth (`X-Emby-Token` header)
-- Key methods: `testConnection`, `getLibraries`, `getArtists`, `getAlbums`, `getRecentlyPlayed`, `getArtistById`
-- `JellyfinService` class, constructor `({ url, apiKey })`
-
-### Task 3.6: Tautulli Service
-**File:** `backend/src/services/tautulli.ts`
-**Port from:** `/home/chris/Github/mixarr/apps/api/src/services/tautulli.ts` (278 lines)
-- API key auth (`apikey` query param)
-- Key methods: `testConnection`, `getRecentlyPlayed`, `getMostPlayedArtists`, `getPlayHistory`
-- `TautulliService` class, constructor `({ url, apiKey })`
-
-### Task 3.7: Search + Discover Routes
-**Files:** `backend/src/routes/search.ts`, `backend/src/routes/discover.ts`
-**Mount at:** `/api/search`, `/api/discover`
-
-Search routes:
-- `GET /api/search/artists?q=` — searches MusicBrainz + Last.fm + Spotify (parallel), merges results
-- `GET /api/search/artist/:mbid` — unified artist detail (MusicBrainz + Lidarr in-library check + Deezer previews)
-
-Discover routes:
-- `GET /api/discover/new-releases` — Lidarr upcoming + Spotify new releases
-- `GET /api/discover/top-artists` — Last.fm top artists (global)
-- `GET /api/discover/similar/:mbid` — Last.fm similar artists
-- `GET /api/discover/by-tag/:tag` — Last.fm artists by genre tag
-- `GET /api/discover/recently-played` — Jellyfin and/or Tautulli recently played
-- `POST /api/library/add` — add artist to Lidarr (also warms SkyHook cache)
-
-Routes instantiate services from user's stored connections. Services with no per-user config (MusicBrainz, Deezer) use global singletons. Services with API keys (Spotify, Last.fm, Jellyfin, Tautulli) look up from user's Connection records.
-
-## Patterns to Follow
+## How to Proceed
+1. Read this file fully
+2. Read the skills: `.github/skills/subagent-driven-development/SKILL.md`
+3. Dispatch a subagent for Task 5.1 (Review Queue Routes), verify it passes
+4. Then proceed to Phase 6 (Frontend Core) per the plan at `docs/plans/2026-03-04-mixarr-lite-plan.md`
 
 ### fetchWithTimeout Pattern
 ```typescript
@@ -252,22 +237,11 @@ router.get('/', requireAuth, async (req, res) => {
 ```bash
 cd ~/Github/mixarr-lite
 npx tsc --noEmit        # must be clean
-npx vitest run          # 84 tests must pass + new tests
+npx vitest run          # 238 tests must pass + new tests
 ```
 
 ## Reference Sources (Read Only)
 ```
-Phase 3 reference — all in /home/chris/Github/mixarr/apps/api/src/services/:
-  spotify.ts        (736 lines)
-  lastfm.ts         (638 lines)
-  musicbrainz.ts    (345 lines)
-  deezer.ts         (303 lines)
-  jellyfin.ts       (297 lines)
-  tautulli.ts       (278 lines)
+/home/chris/Github/mixarr/apps/api/src/   — full reference implementation
+/home/chris/Github/mixarr/docs/plans/2026-03-04-mixarr-lite-plan.md  — full plan
 ```
-
-## How to Proceed
-1. Read this file fully
-2. Read the skills: `.github/skills/subagent-driven-development/SKILL.md`
-3. Dispatch a subagent for Task 3.1 (Spotify Service), verify it passes, then 3.2 through 3.7 in order
-4. After Phase 3, proceed to Phase 4 (Subscription Engine) per the plan at `docs/plans/2026-03-04-mixarr-lite-plan.md`
