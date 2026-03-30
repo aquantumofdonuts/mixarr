@@ -26,7 +26,7 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 
 ## Current State: Phase 4 COMPLETE ✅
 
-**23 commits on `main`, 253 tests passing, TypeScript compiles clean.**
+**22 commits on `main`, 238 tests passing, TypeScript compiles clean.**
 
 ### Progress Summary
 | Phase | Status | Tests |
@@ -36,7 +36,7 @@ A multi-root VS Code workspace file exists at `~/Github/mixarr-dev.code-workspac
 | Phase 2: Lidarr Integration | ✅ Done | 84 |
 | Phase 3: Discovery Services | ✅ Done | 152 |
 | Phase 4: Subscription Engine | ✅ Done | 238 |
-| Phase 5: Review Queue | ✅ Done | 253 |
+| Phase 5: Review Queue | ⏳ Next | — |
 | Phases 6-9 | ⏳ Pending | — |
 
 ### Git Log (HEAD = c4a5ffa)
@@ -62,7 +62,49 @@ backend/src/
   schemas/
     queue.ts            — bulkQueueActionSchema: { ids: number[], action: 'approve'|'reject' }
 ```
+### Source Files in Place (Phase 6 additions)
+```
+frontend/src/
+  utils/
+    api.ts              — typed fetch wrapper: api.get/post/put/patch/delete, ApiError class
+  contexts/
+    AuthContext.tsx     — AuthProvider (wraps QueryClientProvider), login/logout, session restore on mount.
+                          Exports: AuthContext, AuthProvider, isApiError, AuthUser type.
+    ThemeContext.tsx    — ThemeProvider/useTheme, persists dark/light to localStorage, sets data-theme on <html>
+    ToastContext.tsx    — ToastProvider/useToast with toast.success/error/info/warning, 4s auto-dismiss
+  hooks/
+    useAuth.ts          — useAuth() → { user, isLoading, isAdmin, login, logout }
+    useOffline.ts       — useOffline() → boolean (navigator.onLine + online/offline events)
+  components/
+    Layout.tsx          — Flex shell: Sidebar (220px) + TopBar (SearchBar + theme toggle) + scrollable main
+    Sidebar.tsx         — Collapsible (220px↔56px), nav: Discover/Search/Library/Queue/Settings,
+                          active highlighting via useLocation, theme toggle, user logout
+    SearchBar.tsx       — Cmd/Ctrl+K focus, #tag encoding, clear button, navigates to /search?q=
+    ConnectionCard.tsx  — Connection card with type icon, toggle, test (spinner → ✓/✗), edit, delete
+    SubscriptionModal.tsx — Create/edit modal with type-aware subscription type dropdown,
+                            schedule, result handling, config fields
+    ServiceWorkerRegistration.tsx — OfflineIndicator (fixed banner when offline), SW registration
+  pages/
+    Login.tsx           — Centered card, auto-redirect if already authed or no users exist
+    Onboarding.tsx      — 4-step wizard: admin account → Lidarr → MusicBrainz email → finish
+    Settings.tsx        — Tabs: Connections, Subscriptions, Notifications, Users (admin), About
+  index.css             — "Listening Room" dark/light CSS variables (--background, --primary copper, etc.),
+                          DM Sans font (Google Fonts), scrollbar styling
+  App.tsx               — All 6 routes with ProtectedRoute → Layout guard, OfflineIndicator at root
+  main.tsx              — Providers: ThemeProvider → AuthProvider (contains QueryClientProvider) → ToastProvider
+frontend/public/
+  manifest.json         — PWA manifest (standalone, theme #bf7a56, SVG icon)
+  icons/icon.svg        — Music note icon (copper on dark)
+vite.config.ts          — Updated: VitePWA plugin added (SW disabled in dev, NetworkFirst for /api/)
+```
 
+### Design System Notes (Phase 6)
+- **Theme:** "Listening Room" — warm dark (`#1c1b19`), rust/copper primary (`hsl(22,45%,54%)`), muted teal secondary
+- **Font:** DM Sans (Google Fonts) — loaded via CSS @import
+- **CSS approach:** CSS custom properties (`--background`, `--primary`, etc.) in `:root`/`[data-theme=light]`;
+  Tailwind 4 for utilities, inline `style` props for themed colors
+- **Auth flow:** On app load, `AuthProvider` calls `/api/auth/me` to restore session.
+  Login page additionally checks `/api/users` — if empty → redirect to `/setup` (Onboarding).
 ### Source Files in Place (Phase 4 additions)
 ```
 backend/src/
@@ -151,56 +193,74 @@ prisma/
 
 Socket.IO attached to `httpServer` (not `app`), auth via signed cookie `mixarr_session`.
 
-### Key Implementation Details: Phase 2
+### Source Files in Place (Phase 6 additions)
+```
+frontend/src/
+  utils/
+    api.ts              — typed fetch wrapper: api.get/post/put/patch/delete, ApiError class
+  contexts/
+    AuthContext.tsx     — AuthProvider (wraps QueryClientProvider), login/logout, session restore on mount.
+                          Exports: AuthContext, AuthProvider, isApiError, AuthUser type.
+    ThemeContext.tsx    — ThemeProvider/useTheme, persists dark/light to localStorage, sets data-theme on <html>
+    ToastContext.tsx    — ToastProvider/useToast with toast.success/error/info/warning, 4s auto-dismiss
+  hooks/
+    useAuth.ts          — useAuth() → { user, isLoading, isAdmin, login, logout }
+    useOffline.ts       — useOffline() → boolean (navigator.onLine + online/offline events)
+  components/
+    Layout.tsx          — Flex shell: Sidebar (220px) + TopBar (SearchBar + theme toggle) + scrollable main
+    Sidebar.tsx         — Collapsible (220px→56px), nav: Discover/Search/Library/Queue/Settings,
+                          active highlighting via useLocation, theme toggle, user logout
+    SearchBar.tsx       — Cmd/Ctrl+K focus, #tag encoding, clear button, navigates to /search?q=
+    ConnectionCard.tsx  — Connection card with type icon, toggle, test (spinner → ✓/✗), edit, delete
+    SubscriptionModal.tsx — Create/edit modal: type-aware dropdown, schedule, result handling, config
+    ServiceWorkerRegistration.tsx — OfflineIndicator (fixed banner when offline), SW registration
+  pages/
+    Login.tsx           — Centered card, auto-redirect if already authed or no users exist
+    Onboarding.tsx      — 4-step wizard: admin account → Lidarr → MusicBrainz email → finish
+    Settings.tsx        — Tabs: Connections, Subscriptions, Notifications, Users (admin), About
+  index.css             — "Listening Room" dark/light CSS variables, DM Sans font, scrollbar styling
+  App.tsx               — All 6 routes with ProtectedRoute → Layout guard, OfflineIndicator at root
+  main.tsx              — ThemeProvider → AuthProvider (contains QueryClientProvider) → ToastProvider
+frontend/public/
+  manifest.json         — PWA manifest (standalone, theme #bf7a56, SVG icon)
+  icons/icon.svg        — Music note icon (copper on dark)
+vite.config.ts          — VitePWA plugin added (SW disabled in dev, NetworkFirst for /api/)
+```
+
+### Design System Notes (Phase 6)
+- **Theme:** "Listening Room" — warm dark (`#1c1b19`), rust/copper primary (`hsl(22,45%,54%)`), muted teal secondary
+- **Font:** DM Sans (Google Fonts) — loaded via CSS @import
+- **CSS approach:** CSS custom properties in `:root`/`[data-theme=light]`; Tailwind 4 utilities + inline `style` props for themed colors
+- **Auth flow:** AuthProvider calls `/api/auth/me` on mount. Login page checks `/api/users` — if empty → redirect to `/setup`.
+
+### Source Files in Place (Phase 5 additions)
 - **LidarrService**: Constructor `({ url, apiKey })`. Private `request<T>(path)` using `fetchWithTimeout` with `AbortSignal.timeout`. Methods: `testConnection`, `getArtists`, `getArtist`, `getArtistByMbid`, `searchArtist`, `lookupByMbid`, `addArtist`, `getAlbums`, `getRecentAlbums`, `getFutureAlbums`, `getQualityProfiles`, `getMetadataProfiles`, `getRootFolders`, `refreshArtist`
 - **SkyHookCacheWarmer**: Hits `https://api.lidarr.audio/api/v0.4/artist/{mbid}`. 404 → fail fast. 503/504 → exponential backoff (2s, 4s, 8s cap). UUID MBID validation. Singleton `skyhookWarmer` exported.
 - **Library routes**: Look up user's Lidarr connection via `prisma.connection.findFirst({ where: { userId, type: 'lidarr', enabled: true } })`, parse `JSON.parse(conn.config)` → `{ url, apiKey }`, instantiate `new LidarrService(config)`. Returns 400 if no connection.
 - **analyzeLibraryHealth**: Detects `no_albums` (monitored + 0 albums), `unmonitored`, `no_metadata` (no overview + no images). Returns `LibraryStats` + `HealthIssue[]`.
 
-## Next Task: Phase 6 — Frontend Core
+## Next Task: Phase 5 — Review Queue
 
-Phase 6 has 5 tasks. All are frontend (Vite + React 19 + React Router 7 + TanStack Query 5 + Tailwind CSS 4).
+### Task 5.1: Review Queue Routes
+**Files:** `backend/src/routes/queue.ts`, `backend/src/schemas/queue.ts`
+**Mount at:** `/api/queue`
 
-### Task 6.1: API Client & Auth Context
-**Files:** `frontend/src/utils/api.ts`, `frontend/src/contexts/AuthContext.tsx`, `frontend/src/hooks/useAuth.ts`
-- API client: fetch wrapper with base URL, credentials include, JSON parsing, error handling
-- Auth context: login/logout/me state, redirect to `/login` if unauthenticated
-- `useAuth` hook: expose `user`, `login()`, `logout()`, `isAdmin`
-Commit: `"feat: add API client and auth context"`
+Routes:
+- `GET /api/queue` — list pending ReviewItems for current user
+- `POST /api/queue/:id/approve` — approve item (SkyHook warm → Lidarr addArtist → update status)
+- `POST /api/queue/:id/reject` — reject item (update status)
+- `POST /api/queue/bulk` — bulk approve/reject `{ ids: [...], action: 'approve'|'reject' }`
+- `DELETE /api/queue/:id` — remove item
 
-### Task 6.2: Theme, Toast, & Layout
-**Files:** `frontend/src/contexts/ThemeContext.tsx`, `frontend/src/contexts/ToastContext.tsx`, `frontend/src/components/Layout.tsx`, `frontend/src/components/Sidebar.tsx`, `frontend/src/components/SearchBar.tsx`
-- Theme context: dark/light toggle (default dark, persist localStorage)
-- Toast context: success/error/info, auto-dismiss
-- Layout: sidebar + top bar + content area
-- Sidebar: nav items (Discover, Search, Library, Queue, Flow, Settings), active indicator, mobile hamburger
-- Tailwind dark theme based on Mixarr's color palette
-Commit: `"feat: add layout, sidebar, theme, and toast components"`
-
-### Task 6.3: Login & Onboarding Pages
-**Files:** `frontend/src/pages/Login.tsx`, `frontend/src/pages/Onboarding.tsx`
-- Login page: username/password form → `/api/auth/login`
-- Onboarding (when no users exist): Step 1 create admin → Step 2 Lidarr → Step 3 MusicBrainz email → Step 4 optional services
-Commit: `"feat: add login and onboarding pages"`
-
-### Task 6.4: Settings Page
-**Files:** `frontend/src/pages/Settings.tsx`, `frontend/src/components/ConnectionCard.tsx`, `frontend/src/components/SubscriptionModal.tsx`
-- Tabs: Connections, Subscriptions, Notifications, Users (admin), About
-- Connections: test/edit/delete, add new per type
-- Subscriptions: enable/disable, edit/delete, create modal with schedule + result handling
-Commit: `"feat: add settings page with connections, subscriptions, and user management"`
-
-### Task 6.5: PWA Manifest & Service Worker
-**Files:** `frontend/public/manifest.json`, icons, ServiceWorkerRegistration.tsx, useOffline.ts
-- vite-plugin-pwa for SW generation
-- Offline indicator component
-Commit: `"feat: add PWA manifest and service worker"`
+Approve flow: warm SkyHook cache → add artist to Lidarr → update ReviewItem → broadcast via WebSocket.
+Tests: approve/reject flow, bulk operations, user isolation.
+Commit: `"feat: add review queue routes with bulk approve/reject and SkyHook integration"`
 
 ## How to Proceed
 1. Read this file fully
 2. Read the skills: `.github/skills/subagent-driven-development/SKILL.md`
-3. Dispatch subagents for Tasks 6.1–6.5 sequentially (frontend tasks build on each other)
-4. After Phase 6, proceed to Phase 7 (Frontend Discovery Pages) per the plan
+3. Dispatch a subagent for Task 5.1 (Review Queue Routes), verify it passes
+4. Then proceed to Phase 6 (Frontend Core) per the plan at `docs/plans/2026-03-04-mixarr-lite-plan.md`
 
 ### fetchWithTimeout Pattern
 ```typescript
@@ -268,7 +328,7 @@ router.get('/', requireAuth, async (req, res) => {
 ```bash
 cd ~/Github/mixarr-lite
 npx tsc --noEmit        # must be clean
-npx vitest run          # 253 tests must pass + new tests
+npx vitest run          # 238 tests must pass + new tests
 ```
 
 ## Reference Sources (Read Only)
