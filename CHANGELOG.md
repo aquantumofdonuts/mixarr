@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.1.4] - 2026-03-30
+
+### Fixed
+- **Slim image build failure**: Removed broken `COPY --from=prod-deps /app/apps/api/node_modules` line in `docker/Dockerfile.slim` — same root cause as v2.1.3 hotfix, missed in the slim image
+
+---
+
 ## [v2.1.3] - 2026-03-30
 
 ### Fixed

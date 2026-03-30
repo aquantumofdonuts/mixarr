@@ -90,11 +90,8 @@ COPY --from=builder-api --chown=node:node /app/apps/api/dist /app/api/dist
 COPY --from=builder-api --chown=node:node /app/apps/api/package*.json /app/api/
 COPY --from=builder-api --chown=node:node /app/apps/api/prisma /app/api/prisma
 
-# Copy production-only node_modules (pruned from full deps)
-# Root-level hoisted dependencies
+# Copy production-only node_modules - npm workspaces hoists all deps to root
 COPY --from=prod-deps --chown=node:node /app/node_modules /app/api/node_modules
-# API-specific dependencies (if any)
-COPY --from=prod-deps --chown=node:node /app/apps/api/node_modules /app/api/node_modules
 # Shared-types (built package required at runtime)
 COPY --from=prod-deps --chown=node:node /app/packages/shared-types /app/packages/shared-types
 
