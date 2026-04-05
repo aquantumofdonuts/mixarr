@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.1.5] - 2026-04-05
+
+### Fixed
+- **Wrong version displayed at startup**: `apps/api/package.json` and workspace packages were not committed as part of the v2.1.4 release tag due to `npm version --workspaces` leaving workspace files unstaged. The startup banner and `/health` endpoint now correctly report the image version.
+
+---
+
 ## [v2.1.4] - 2026-03-30
 
 ### Fixed
