@@ -17,15 +17,14 @@ import { createLogger } from './logger.js';
 
 const logger = createLogger('NetworkPreflight');
 
-const PROBE_HOST = process.env.IPV6_PROBE_HOST || 'musicbrainz.org';
 const PROBE_PORT = 443;
 const PROBE_TIMEOUT_MS = 1500;
 
-async function ipv6EgressWorks(): Promise<boolean> {
+async function ipv6EgressWorks(host: string): Promise<boolean> {
   let address: string;
   try {
     address = await new Promise<string>((resolve, reject) => {
-      dns.lookup(PROBE_HOST, { family: 6 }, (err, addr) => err ? reject(err) : resolve(addr));
+      dns.lookup(host, { family: 6 }, (err, addr) => err ? reject(err) : resolve(addr));
     });
   } catch {
     return false;
@@ -42,10 +41,11 @@ async function ipv6EgressWorks(): Promise<boolean> {
 export async function applyNetworkPreflight(): Promise<void> {
   if (process.env.MIXARR_SKIP_NETWORK_PREFLIGHT === '1') return;
 
-  const v6Works = await ipv6EgressWorks();
+  const host = process.env.IPV6_PROBE_HOST || 'musicbrainz.org';
+  const v6Works = await ipv6EgressWorks(host);
   if (v6Works) return;
 
-  logger.warn(`IPv6 egress to ${PROBE_HOST} unavailable — preferring IPv4 for outbound fetches`);
+  logger.warn(`IPv6 egress to ${host} unavailable — preferring IPv4 for outbound fetches`);
   dns.setDefaultResultOrder('ipv4first');
   net.setDefaultAutoSelectFamily(false);
 }
