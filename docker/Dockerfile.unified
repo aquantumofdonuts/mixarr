@@ -258,11 +258,33 @@ chown -R mixarr:mixarr /app
 
 # -----------------------------------------------------------------------------
 # Auto-generate database credentials if not provided
+# Credentials are persisted to /data/.mixarr_credentials so they survive
+# container restarts without the user needing to set MYSQL_PASSWORD explicitly.
 # -----------------------------------------------------------------------------
+CREDS_FILE="/data/.mixarr_credentials"
+CREDS_FILE_IS_NEW=0
+
 if [ -z "$MYSQL_PASSWORD" ]; then
-  export MYSQL_PASSWORD=$(openssl rand -hex 16)
-  echo "Generated random MYSQL_PASSWORD"
-  echo "Set MYSQL_PASSWORD env var explicitly for persistent credentials."
+  if [ -f "$CREDS_FILE" ]; then
+    chmod 600 "$CREDS_FILE"
+    export MYSQL_PASSWORD=$(grep '^MYSQL_PASSWORD=' "$CREDS_FILE" | cut -d= -f2-)
+    if [ -z "$MYSQL_PASSWORD" ]; then
+      echo "WARNING: $CREDS_FILE is malformed or missing key; regenerating credentials"
+      export MYSQL_PASSWORD=$(openssl rand -hex 16)
+      printf 'MYSQL_PASSWORD=%s\n' "$MYSQL_PASSWORD" > "$CREDS_FILE"
+      chmod 600 "$CREDS_FILE"
+      CREDS_FILE_IS_NEW=1
+    else
+      echo "Restored MYSQL_PASSWORD from $CREDS_FILE"
+    fi
+  else
+    export MYSQL_PASSWORD=$(openssl rand -hex 16)
+    printf 'MYSQL_PASSWORD=%s\n' "$MYSQL_PASSWORD" > "$CREDS_FILE"
+    chmod 600 "$CREDS_FILE"
+    CREDS_FILE_IS_NEW=1
+    echo "Generated random MYSQL_PASSWORD (persisted to $CREDS_FILE)"
+    echo "Set MYSQL_PASSWORD env var explicitly only to override or rotate the persisted password."
+  fi
 fi
 
 if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
@@ -308,6 +330,42 @@ EOSQL
     mysqladmin -u root shutdown
     sleep 2
     echo "MariaDB initialized successfully"
+else
+    # DB already exists. If the creds file was just created this run, the
+    # stored password may differ from what MariaDB has (e.g. existing users
+    # who never set MYSQL_PASSWORD explicitly and are upgrading from a version
+    # that did not persist credentials). Reset the MariaDB user password to
+    # match so the connection succeeds without data loss.
+    if [ "$CREDS_FILE_IS_NEW" = "1" ]; then
+        echo "Migrating database credentials to persisted creds file..."
+        # Start MariaDB temporarily to rotate the password
+        /usr/bin/mysqld_safe --datadir=/data/mysql &
+        MIGRATE_PID=$!
+        DB_READY=0
+        for i in $(seq 1 30); do
+            if mysqladmin ping -h 127.0.0.1 --silent 2>/dev/null; then
+                DB_READY=1
+                break
+            fi
+            sleep 1
+        done
+        if [ "$DB_READY" != "1" ]; then
+            echo "ERROR: MariaDB did not become reachable for credential migration" >&2
+            exit 1
+        fi
+        if ! mysql -u root -e \
+            "ALTER USER 'mixarr'@'127.0.0.1' IDENTIFIED BY '${MYSQL_PASSWORD}'; \
+             ALTER USER 'mixarr'@'localhost' IDENTIFIED BY '${MYSQL_PASSWORD}'; \
+             FLUSH PRIVILEGES;"; then
+            echo "ERROR: Credential migration failed; database credentials were not rotated" >&2
+            mysqladmin -u root shutdown >/dev/null 2>&1 || true
+            sleep 2
+            exit 1
+        fi
+        mysqladmin -u root shutdown
+        sleep 2
+        echo "Credential migration complete"
+    fi
 fi
 
 # -----------------------------------------------------------------------------
