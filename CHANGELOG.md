@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.2.0] - 2026-04-30
+
+### Added
+- **DISABLE_CADDY env var** (#42): Set `DISABLE_CADDY=true` to bypass the built-in Caddy reverse proxy in the unified container — intended for users who want to front Mixarr with an external reverse proxy (e.g. nginx, Traefik, Caddy on the host)
+
+### Fixed
+- **SSRF vulnerability** (CodeQL #50): Service URLs (Lidarr, Navidrome, slskd) are now validated before HTTP requests to prevent server-side request forgery
+- **Lidarr form stale state** (#43): Connection form re-mounts when saved config loads during an edit, preventing stale field values from the previous session
+- **rootFolderPath normalization** (#43): Empty `rootFolderPath` values are normalized to prevent automatic fallback to the wrong Lidarr folder
+- **Subscription worker error logging**: Error objects now serialize `message` and `stack` correctly instead of logging an empty `{}`
+- **TypeScript build errors**: Pinned `ioredis` to resolve transitive dependency version conflicts that broke compilation
+- **Update checker cache**: Falls back to a live GitHub check when the cache is empty after upgrade; stale "update available" banner no longer appears post-upgrade; upgrade errors logged at `warn` instead of `error`
+- **Version constant**: Health endpoint and startup banner now read the version from the `VERSION` constant rather than the `npm_package_version` environment variable
+
+### Changed
+- Version sourcing automated — `version.ts` and `constants.ts` derive values from `package.json` at build time; no more manual constant updates on release
+
+---
+
 ## [v2.1.5] - 2026-04-05
 
 ### Fixed
