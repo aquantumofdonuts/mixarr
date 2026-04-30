@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.1.6] - 2026-04-30
+
+### Fixed
+- **Unified container restart auth failure** (issue #51): Auto-generated `MYSQL_PASSWORD` was regenerated on every container restart but MariaDB retained the original password from first boot, causing _"Authentication failed against database server at `127.0.0.1`"_ on every `docker compose down && docker compose up`. The generated password is now persisted to `/data/.mixarr_credentials` (mode 600) and restored on subsequent starts. Existing installs upgrading from this version perform a one-time password rotation via `ALTER USER` so the database remains accessible without data loss. Users who set `MYSQL_PASSWORD` explicitly are unaffected. Affects unified image only.
+
+---
+
 ## [v2.1.5] - 2026-04-05
 
 ### Fixed
