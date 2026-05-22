@@ -36,6 +36,7 @@
     "helmet": "^8.0.0",
     "ioredis": "^5.4.1",
     "openai": "^4.73.0",
+    "openid-client": "^5.7.1",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "passport-ldapauth": "^3.0.1",

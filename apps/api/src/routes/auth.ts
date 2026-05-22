@@ -10,6 +10,7 @@ import { createGoogleStrategy } from '../auth/strategies/google.js';
 import { createLdapStrategy } from '../auth/strategies/ldap.js';
 import { createSamlStrategy } from '../auth/strategies/saml.js';
 import { PlexAuthService } from '../auth/strategies/plex.js';
+import { createOidcStrategy } from '../auth/strategies/oidc.js';
 import { createLogger } from '../lib/logger.js';
 
 const logger = createLogger('AuthRoute');
@@ -26,7 +27,7 @@ authRouter.get('/setup-required', async (_req, res) => {
       prisma.user.count(),
       prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } }),
     ]);
-    res.json({ 
+    res.json({
       setupRequired: !setupCompleted?.value,
       adminExists: userCount > 0,
       baseUrlExists: !!baseUrl?.value,
@@ -52,14 +53,14 @@ authRouter.post('/complete-setup', async (_req, res) => {
       res.status(400).json({ error: 'Setup already completed' });
       return;
     }
-    
+
     // Safety check 2: Must have at least one admin user
     const userCount = await prisma.user.count();
     if (userCount === 0) {
       res.status(400).json({ error: 'No admin user exists' });
       return;
     }
-    
+
     // Safety check 3: Base URL must be configured
     const baseUrl = await prisma.globalSetting.findUnique({
       where: { key: 'baseUrl' },
@@ -68,7 +69,7 @@ authRouter.post('/complete-setup', async (_req, res) => {
       res.status(400).json({ error: 'Base URL not configured' });
       return;
     }
-    
+
     await prisma.globalSetting.upsert({
       where: { key: 'setupCompleted' },
       create: { key: 'setupCompleted', value: true },
@@ -102,7 +103,7 @@ authRouter.get('/sso/google', async (req, res, next) => {
     const provider = await prisma.ssoProvider.findUnique({
       where: { type: 'google' },
     });
-    
+
     if (!provider?.isEnabled) {
       res.status(400).json({ error: 'Google authentication is not available' });
       return;
@@ -111,7 +112,7 @@ authRouter.get('/sso/google', async (req, res, next) => {
     const config = provider.config as { clientId: string; clientSecret: string; allowedDomains?: string };
     const baseUrlSetting = await prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
     const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
-    
+
     // Register strategy dynamically
     passport.use('google-sso', createGoogleStrategy({
       clientId: config.clientId,
@@ -153,7 +154,7 @@ authRouter.post('/sso/ldap', loginLimiter, async (req, res, next) => {
     const provider = await prisma.ssoProvider.findUnique({
       where: { type: 'ldap' },
     });
-    
+
     if (!provider?.isEnabled) {
       res.status(400).json({ error: 'LDAP authentication is not available' });
       return;
@@ -168,7 +169,7 @@ authRouter.post('/sso/ldap', loginLimiter, async (req, res, next) => {
       emailAttribute: string;
       displayNameAttribute?: string;
     };
-    
+
     passport.use('ldap-sso', createLdapStrategy(config, prisma));
 
     passport.authenticate('ldap-sso', (err: Error | null, user: Express.User | false, info: { message?: string }) => {
@@ -197,7 +198,7 @@ authRouter.get('/sso/saml', async (req, res, next) => {
   const provider = await prisma.ssoProvider.findUnique({
     where: { type: 'saml' },
   });
-  
+
   if (!provider?.isEnabled) {
     res.status(400).json({ error: 'SAML authentication is not available' });
     return;
@@ -210,10 +211,10 @@ authRouter.get('/sso/saml', async (req, res, next) => {
     emailAttribute?: string;
     displayNameAttribute?: string;
   };
-  
+
   const baseUrlSetting = await prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
   const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
-  
+
   // Type assertion required: passport-saml's Strategy type doesn't match passport's expected type
   passport.use('saml-sso', createSamlStrategy({
     callbackUrl: `${baseUrl}/api/auth/sso/saml/callback`,
@@ -247,6 +248,71 @@ authRouter.post('/sso/saml/callback', (req, res, next) => {
   })(req, res, next);
 });
 
+authRouter.get('/sso/oidc', async (req, res, next) => {
+  try {
+    const provider = await prisma.ssoProvider.findUnique({
+      where: { type: 'oidc' },
+    });
+
+    if (!provider?.isEnabled) {
+      res.status(400).json({ error: 'OIDC authentication is not available' });
+      return;
+    }
+
+    const config = provider.config as {
+      issuerUrl: string;
+      clientId: string;
+      clientSecret: string;
+      scopes?: string;
+      allowedDomains?: string;
+      emailAttribute?: string;
+      displayNameAttribute?: string;
+      usernameAttribute?: string;
+    };
+
+    const baseUrlSetting = await prisma.globalSetting.findUnique({ where: { key: 'baseUrl' } });
+    const baseUrl = (baseUrlSetting?.value as string) || 'http://localhost:3010';
+
+    const strategy = await createOidcStrategy({
+      issuerUrl: config.issuerUrl,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      callbackUrl: `${baseUrl}/api/auth/sso/oidc/callback`,
+      scopes: config.scopes,
+      allowedDomains: config.allowedDomains?.split(',').map((d: string) => d.trim()).filter(Boolean),
+      emailAttribute: config.emailAttribute,
+      displayNameAttribute: config.displayNameAttribute,
+      usernameAttribute: config.usernameAttribute,
+    }, prisma);
+
+    passport.use('oidc-sso', strategy as unknown as passport.Strategy);
+
+    passport.authenticate('oidc-sso')(req, res, next);
+  } catch (error) {
+    logger.error('OIDC initiation error', { error });
+    res.redirect('/login?error=oidc_init_failed');
+  }
+});
+
+authRouter.get('/sso/oidc/callback', (req, res, next) => {
+  passport.authenticate('oidc-sso', (err: Error | null, user: Express.User | false, info: { message?: string }) => {
+    if (err) {
+      logger.error('OIDC auth error', { error: err });
+      return res.redirect('/login?error=auth_failed');
+    }
+    if (!user) {
+      const msg = encodeURIComponent(info?.message || 'Authentication failed');
+      return res.redirect(`/login?error=${msg}`);
+    }
+    req.logIn(user, (loginErr) => {
+      if (loginErr) {
+        return res.redirect('/login?error=login_failed');
+      }
+      return res.redirect('/');
+    });
+  })(req, res, next);
+});
+
 // Store Plex PINs temporarily (in production, use Redis/session)
 const plexPins = new Map<number, number>(); // pinId -> timestamp
 
@@ -255,7 +321,7 @@ authRouter.get('/sso/plex', async (req, res) => {
   const provider = await prisma.ssoProvider.findUnique({
     where: { type: 'plex' },
   });
-  
+
   if (!provider?.isEnabled) {
     res.status(400).json({ error: 'Plex authentication is not available' });
     return;
@@ -273,10 +339,10 @@ authRouter.get('/sso/plex', async (req, res) => {
   try {
     const { pinId, authUrl } = await plexService.createAuthUrl();
     plexPins.set(pinId, Date.now());
-    
+
     // Store pinId in session for callback
     req.session.plexPinId = pinId;
-    
+
     res.redirect(authUrl);
   } catch (error) {
     logger.error('Plex auth error', { error });
@@ -287,7 +353,7 @@ authRouter.get('/sso/plex', async (req, res) => {
 // Plex - callback
 authRouter.get('/sso/plex/callback', async (req, res) => {
   const pinId = req.session.plexPinId;
-  
+
   if (!pinId) {
     return res.redirect('/login?error=missing_plex_pin');
   }
@@ -295,7 +361,7 @@ authRouter.get('/sso/plex/callback', async (req, res) => {
   const provider = await prisma.ssoProvider.findUnique({
     where: { type: 'plex' },
   });
-  
+
   if (!provider?.isEnabled) {
     return res.redirect('/login?error=plex_not_available');
   }
@@ -311,13 +377,13 @@ authRouter.get('/sso/plex/callback', async (req, res) => {
 
   try {
     const plexAuth = await plexService.handleCallback(pinId);
-    
+
     if (!plexAuth) {
       return res.redirect('/login?error=plex_auth_failed');
     }
 
     const result = await plexService.authenticateUser(plexAuth.user);
-    
+
     if (!result.success || !result.user) {
       const msg = encodeURIComponent(result.error || 'Authentication failed');
       return res.redirect(`/login?error=${msg}`);
@@ -349,14 +415,14 @@ authRouter.post('/setup', setupLimiter, async (req, res) => {
     }
 
     const { username, password, displayName } = req.body;
-    
+
     if (!username || !password) {
       res.status(400).json({ error: 'Username and password required' });
       return;
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    
+
     const user = await prisma.user.create({
       data: {
         username,
@@ -372,7 +438,7 @@ authRouter.post('/setup', setupLimiter, async (req, res) => {
         logger.error('Auto-login after setup failed', { error: loginErr });
         // Still return success - user can manually login
       }
-      
+
       res.json({
         success: true,
         user: {
@@ -435,7 +501,7 @@ authRouter.get('/me', async (req, res) => {
     where: { key: 'setupCompleted' },
   });
   const setupRequired = !setupCompleted?.value;
-  
+
   if (req.isAuthenticated() && req.user) {
     res.json({ user: req.user, setupRequired });
   } else {
@@ -471,7 +537,7 @@ authRouter.get('/users', requireAuth, requireAdmin, async (_req, res) => {
 authRouter.post('/users', requireAuth, requireAdmin, createUserLimiter, async (req, res) => {
   try {
     const { username, password, displayName, role } = req.body;
-    
+
     if (!username || !password) {
       res.status(400).json({ error: 'Username and password required' });
       return;
@@ -484,7 +550,7 @@ authRouter.post('/users', requireAuth, requireAdmin, createUserLimiter, async (r
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    
+
     const user = await prisma.user.create({
       data: {
         username,
@@ -521,14 +587,14 @@ authRouter.post('/users/:id/reset-password', requireAuth, requireAdmin, async (r
       return;
     }
     const { newPassword } = req.body;
-    
+
     if (!newPassword) {
       res.status(400).json({ error: 'New password required' });
       return;
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    
+
     await prisma.user.update({
       where: { id },
       data: { passwordHash },
@@ -552,7 +618,7 @@ authRouter.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
       res.status(400).json({ error: 'Invalid user ID' });
       return;
     }
-    
+
     // Prevent deleting yourself
     if (req.user?.id === id) {
       res.status(400).json({ error: 'Cannot delete your own account' });
@@ -602,7 +668,7 @@ authRouter.delete('/users/:userId/identities/:identityId', requireAuth, requireA
   try {
     const userId = parseIntParam(req.params.userId);
     const identityId = parseIntParam(req.params.identityId);
-    
+
     if (userId === null || identityId === null) {
       res.status(400).json({ error: 'Invalid ID' });
       return;
