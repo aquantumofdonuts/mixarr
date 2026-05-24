@@ -64,8 +64,8 @@ export async function createOidcStrategy(
         }
 
         if (config.allowedDomains?.length) {
-          const domain = email.split('@')[1];
-          if (!config.allowedDomains.includes(domain)) {
+          const domain = email.split('@')[1]?.toLowerCase();
+          if (!domain || !config.allowedDomains.includes(domain)) {
             return done(null, false, { message: 'Email domain not allowed' });
           }
         }

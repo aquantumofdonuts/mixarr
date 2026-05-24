@@ -279,7 +279,7 @@ authRouter.get('/sso/oidc', async (req, res, next) => {
       clientSecret: config.clientSecret,
       callbackUrl: `${baseUrl}/api/auth/sso/oidc/callback`,
       scopes: config.scopes,
-      allowedDomains: config.allowedDomains?.split(',').map((d: string) => d.trim()).filter(Boolean),
+      allowedDomains: config.allowedDomains?.split(',').map((d: string) => d.trim().toLowerCase()).filter(Boolean),
       emailAttribute: config.emailAttribute,
       displayNameAttribute: config.displayNameAttribute,
       usernameAttribute: config.usernameAttribute,
