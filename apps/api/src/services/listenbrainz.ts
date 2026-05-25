@@ -193,16 +193,17 @@ export const VALID_PERIODS: ListenBrainzPeriod[] = ['week', 'month', 'quarter', 
 export class ListenBrainzService {
   private username: string;
   private token?: string;
-  private baseUrl = 'https://api.listenbrainz.org';
+  private baseUrl: string;
   private timeoutMs: number;
 
-  constructor(username: string, token?: string, timeoutMs: number = DEFAULT_TIMEOUT_MS) {
+  constructor(username: string, token?: string, timeoutMs?: number, baseUrl?: string) {
     if (!username || username.trim() === '') {
       throw new Error('ListenBrainz username is required');
     }
     this.username = username.trim();
     this.token = token;
-    this.timeoutMs = timeoutMs;
+    this.timeoutMs = timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.baseUrl = baseUrl ? baseUrl.replace(/\/$/, '') : 'https://api.listenbrainz.org';
   }
 
   /**

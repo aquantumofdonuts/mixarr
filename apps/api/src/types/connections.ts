@@ -98,6 +98,7 @@ export function isTidalConfig(config: unknown): config is TidalConnectionConfig 
 export interface ListenBrainzConnectionConfig {
   username: string;
   token?: string;
+  url?: string;
   [key: string]: JsonValue | undefined;
 }
 
