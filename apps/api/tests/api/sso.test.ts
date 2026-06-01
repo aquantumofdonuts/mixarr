@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { validateLdapConfig, validateSamlConfig, validateGoogleConfig, validatePlexConfig, validateSsoConfig } from '../../src/types/sso.js';
+import { validateLdapConfig, validateSamlConfig, validateGoogleConfig, validatePlexConfig, validateOidcConfig, validateSsoConfig } from '../../src/types/sso.js';
 import { createMockPrisma, resetIdCounter } from '../utils/fixtures.js';
 import { SsoProviderService } from '../../src/services/sso-provider.js';
 import {
@@ -88,6 +88,32 @@ describe('SSO Config Validation', () => {
     });
   });
 
+  describe('validateOidcConfig', () => {
+    it('should accept valid OIDC config', () => {
+      const config = {
+        issuerUrl: 'https://idp.example.com',
+        clientId: 'oidc-client-id',
+        clientSecret: 'oidc-client-secret',
+      };
+      expect(() => validateOidcConfig(config)).not.toThrow();
+    });
+
+    it('should reject OIDC config missing issuerUrl', () => {
+      const config = { clientId: 'id', clientSecret: 'secret' };
+      expect(() => validateOidcConfig(config)).toThrow('issuerUrl is required');
+    });
+
+    it('should reject OIDC config missing clientId', () => {
+      const config = { issuerUrl: 'https://idp.example.com', clientSecret: 'secret' };
+      expect(() => validateOidcConfig(config)).toThrow('clientId is required');
+    });
+
+    it('should reject OIDC config missing clientSecret', () => {
+      const config = { issuerUrl: 'https://idp.example.com', clientId: 'id' };
+      expect(() => validateOidcConfig(config)).toThrow('clientSecret is required');
+    });
+  });
+
   describe('validateSsoConfig', () => {
     it('should validate google config through dispatcher', () => {
       const config = {
@@ -95,6 +121,15 @@ describe('SSO Config Validation', () => {
         clientSecret: 'client-secret',
       };
       expect(() => validateSsoConfig('google', config)).not.toThrow();
+    });
+
+    it('should validate oidc config through dispatcher', () => {
+      const config = {
+        issuerUrl: 'https://idp.example.com',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+      };
+      expect(() => validateSsoConfig('oidc', config)).not.toThrow();
     });
 
     it('should throw for unknown provider type', () => {

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // Valid SSO provider types
-export const SSO_PROVIDER_TYPES = ['ldap', 'saml', 'google', 'plex'] as const;
+export const SSO_PROVIDER_TYPES = ['ldap', 'saml', 'google', 'plex', 'oidc'] as const;
 
 export type SsoProviderTypeEnum = (typeof SSO_PROVIDER_TYPES)[number];
 
@@ -61,6 +61,17 @@ export const samlConfigSchema = z
 
 export const plexConfigSchema = z.object({
   restrictToServerId: z.string().optional(),
+});
+
+export const oidcConfigSchema = z.object({
+  issuerUrl: z.string().min(1, 'issuerUrl is required'),
+  clientId: z.string().min(1, 'clientId is required'),
+  clientSecret: z.string().min(1, 'clientSecret is required'),
+  scopes: z.string().optional(),
+  allowedDomains: z.array(z.string()).optional(),
+  emailAttribute: z.string().optional(),
+  displayNameAttribute: z.string().optional(),
+  usernameAttribute: z.string().optional(),
 });
 
 // Exported inferred types

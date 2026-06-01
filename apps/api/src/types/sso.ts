@@ -32,7 +32,18 @@ export interface PlexConfig {
   restrictToServerId?: string;
 }
 
-export type SsoConfig = LdapConfig | SamlConfig | GoogleConfig | PlexConfig;
+export interface OidcConfig {
+  issuerUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scopes?: string;
+  allowedDomains?: string[];
+  emailAttribute?: string;
+  displayNameAttribute?: string;
+  usernameAttribute?: string;
+}
+
+export type SsoConfig = LdapConfig | SamlConfig | GoogleConfig | PlexConfig | OidcConfig;
 
 export function validateLdapConfig(config: unknown): asserts config is LdapConfig {
   const c = config as Record<string, unknown>;
@@ -81,6 +92,19 @@ export function validatePlexConfig(_config: unknown): asserts _config is PlexCon
   return;
 }
 
+export function validateOidcConfig(config: unknown): asserts config is OidcConfig {
+  const c = config as Record<string, unknown>;
+  if (!c.issuerUrl || typeof c.issuerUrl !== 'string') {
+    throw new Error('issuerUrl is required');
+  }
+  if (!c.clientId || typeof c.clientId !== 'string') {
+    throw new Error('clientId is required');
+  }
+  if (!c.clientSecret || typeof c.clientSecret !== 'string') {
+    throw new Error('clientSecret is required');
+  }
+}
+
 export function validateSsoConfig(type: string, config: unknown): void {
   switch (type) {
     case 'ldap':
@@ -94,6 +118,9 @@ export function validateSsoConfig(type: string, config: unknown): void {
       break;
     case 'plex':
       validatePlexConfig(config);
+      break;
+    case 'oidc':
+      validateOidcConfig(config);
       break;
     default:
       throw new Error(`Unknown SSO provider type: ${type}`);

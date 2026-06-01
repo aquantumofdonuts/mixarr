@@ -187,6 +187,42 @@ ssoRouter.post('/providers/:type/test', validateParams(ssoProviderTypeParamsSche
           return;
         }
       }
+      case 'oidc': {
+        const issuerUrl = config.issuerUrl || '';
+        const clientId = config.clientId || '';
+        const clientSecret = config.clientSecret || '';
+
+        if (!issuerUrl || !clientId || !clientSecret) {
+          res.json({ success: false, message: 'OIDC requires issuerUrl, clientId, and clientSecret' });
+          return;
+        }
+
+        const discoveryUrl = issuerUrl.endsWith('/')
+          ? `${issuerUrl}.well-known/openid-configuration`
+          : `${issuerUrl}/.well-known/openid-configuration`;
+
+        try {
+          const response = await fetchWithTimeout(discoveryUrl, { timeout: 10_000 });
+          if (!response.ok) {
+            res.json({ success: false, message: `Failed to fetch discovery document: HTTP ${response.status}` });
+            return;
+          }
+          const doc = await response.json() as { issuer?: string; authorization_endpoint?: string; token_endpoint?: string };
+          if (!doc.issuer || !doc.authorization_endpoint || !doc.token_endpoint) {
+            res.json({ success: false, message: 'Discovery document missing required fields (issuer, authorization_endpoint, token_endpoint)' });
+            return;
+          }
+          res.json({ success: true, message: `OIDC discovery successful (issuer: ${doc.issuer})` });
+          return;
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            res.json({ success: false, message: 'Timeout: Failed to fetch discovery document within 10 seconds' });
+            return;
+          }
+          res.json({ success: false, message: `Failed to fetch discovery document: ${error instanceof Error ? error.message : 'Unknown error'}` });
+          return;
+        }
+      }
       case 'ldap': {
         const ldap = await import('ldapjs');
         const url = config.serverUrl || '';

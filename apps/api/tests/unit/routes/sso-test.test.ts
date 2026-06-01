@@ -229,6 +229,122 @@ describe('SSO Test Connection', () => {
       });
     });
 
+    describe('OIDC provider', () => {
+      it('should return error when required fields missing', async () => {
+        globalThis.__ssoTestMockResult = {
+          id: 1,
+          type: 'oidc',
+          name: 'OIDC',
+          config: { issuerUrl: 'https://idp.example.com' },
+          isEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const response = await request(app)
+          .post('/api/sso/providers/oidc/test')
+          .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(false);
+        expect(response.body.message).toContain('issuerUrl, clientId, and clientSecret');
+      });
+
+      it('should return success when discovery document is valid', async () => {
+        globalThis.__ssoTestMockResult = {
+          id: 1,
+          type: 'oidc',
+          name: 'OIDC',
+          config: {
+            issuerUrl: 'https://idp.example.com',
+            clientId: 'oidc-client',
+            clientSecret: 'oidc-secret',
+          },
+          isEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            issuer: 'https://idp.example.com',
+            authorization_endpoint: 'https://idp.example.com/auth',
+            token_endpoint: 'https://idp.example.com/token',
+          }),
+        });
+
+        const response = await request(app)
+          .post('/api/sso/providers/oidc/test')
+          .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.message).toContain('discovery successful');
+      });
+
+      it('should return error when discovery document missing required fields', async () => {
+        globalThis.__ssoTestMockResult = {
+          id: 1,
+          type: 'oidc',
+          name: 'OIDC',
+          config: {
+            issuerUrl: 'https://idp.example.com',
+            clientId: 'oidc-client',
+            clientSecret: 'oidc-secret',
+          },
+          isEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ issuer: 'https://idp.example.com' }),
+        });
+
+        const response = await request(app)
+          .post('/api/sso/providers/oidc/test')
+          .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(false);
+        expect(response.body.message).toContain('missing required fields');
+      });
+
+      it('should return error when discovery endpoint returns non-200', async () => {
+        globalThis.__ssoTestMockResult = {
+          id: 1,
+          type: 'oidc',
+          name: 'OIDC',
+          config: {
+            issuerUrl: 'https://idp.example.com',
+            clientId: 'oidc-client',
+            clientSecret: 'oidc-secret',
+          },
+          isEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({}),
+        });
+
+        const response = await request(app)
+          .post('/api/sso/providers/oidc/test')
+          .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(false);
+        expect(response.body.message).toContain('HTTP 404');
+      });
+    });
+
     describe('LDAP provider', () => {
       it('should return success when LDAP bind succeeds', async () => {
         globalThis.__ssoTestMockResult = {
