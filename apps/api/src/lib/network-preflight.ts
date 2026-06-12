@@ -34,7 +34,7 @@ async function ipv6EgressWorks(host: string): Promise<boolean> {
     const sock = net.connect({ host: address, port: PROBE_PORT, family: 6 });
     const timer = setTimeout(() => { sock.destroy(); resolve(false); }, PROBE_TIMEOUT_MS);
     sock.once('connect', () => { clearTimeout(timer); sock.destroy(); resolve(true); });
-    sock.once('error',   () => { clearTimeout(timer); resolve(false); });
+    sock.once('error',   () => { clearTimeout(timer); sock.destroy(); resolve(false); });
   });
 }
 
