@@ -64,11 +64,11 @@ export const plexConfigSchema = z.object({
 });
 
 export const oidcConfigSchema = z.object({
-  issuerUrl: z.string().min(1, 'issuerUrl is required'),
+  issuerUrl: z.string().min(1, 'issuerUrl is required').url('issuerUrl must be a valid URL').startsWith('https://', 'issuerUrl must use HTTPS'),
   clientId: z.string().min(1, 'clientId is required'),
   clientSecret: z.string().min(1, 'clientSecret is required'),
   scopes: z.string().optional(),
-  allowedDomains: z.array(z.string()).optional(),
+  allowedDomains: z.string().optional(), // comma-separated; stored and submitted as a plain string
   emailAttribute: z.string().optional(),
   displayNameAttribute: z.string().optional(),
   usernameAttribute: z.string().optional(),

@@ -6,6 +6,14 @@ const DEFAULT_EMAIL_ATTRIBUTE = 'email';
 const DEFAULT_DISPLAY_NAME_ATTRIBUTE = 'name';
 const DEFAULT_USERNAME_ATTRIBUTE = 'preferred_username';
 
+// Cache discovered OIDC clients to avoid a network round-trip on every login attempt.
+// Keyed by issuerUrl::clientId so separate providers don't share an entry.
+const discoveryCache = new Map<string, { client: Client; issuerIdentifier: string }>();
+
+export function clearOidcDiscoveryCache(): void {
+  discoveryCache.clear();
+}
+
 export interface OidcConfig {
   issuerUrl: string;
   clientId: string;
@@ -21,18 +29,28 @@ export interface OidcConfig {
 type OidcUser = Express.User | false;
 type DoneCallback = (err: unknown, user?: OidcUser, info?: { message?: string }) => void;
 
-export async function createOidcStrategy(
-  config: OidcConfig,
-  prisma: PrismaClient
-): Promise<OpenIDStrategy<OidcUser, Client>> {
-  const issuer = await Issuer.discover(config.issuerUrl);
+async function getOidcClient(config: OidcConfig): Promise<{ client: Client; issuerIdentifier: string }> {
+  const cacheKey = `${config.issuerUrl}::${config.clientId}`;
+  const cached = discoveryCache.get(cacheKey);
+  if (cached) return cached;
 
+  const issuer = await Issuer.discover(config.issuerUrl);
   const client = new issuer.Client({
     client_id: config.clientId,
     client_secret: config.clientSecret,
     redirect_uris: [config.callbackUrl],
     response_types: ['code'],
   });
+  const entry = { client, issuerIdentifier: issuer.metadata.issuer as string };
+  discoveryCache.set(cacheKey, entry);
+  return entry;
+}
+
+export async function createOidcStrategy(
+  config: OidcConfig,
+  prisma: PrismaClient
+): Promise<OpenIDStrategy<OidcUser, Client>> {
+  const { client, issuerIdentifier } = await getOidcClient(config);
 
   const emailAttribute = config.emailAttribute || DEFAULT_EMAIL_ATTRIBUTE;
   const displayNameAttribute = config.displayNameAttribute || DEFAULT_DISPLAY_NAME_ATTRIBUTE;
@@ -61,6 +79,12 @@ export async function createOidcStrategy(
         }
         if (!sub) {
           return done(null, false, { message: 'No subject identifier in OIDC profile' });
+        }
+
+        // Reject tokens where the IdP has explicitly flagged the email as unverified.
+        // If the claim is absent the IdP is not making a statement either way, so we allow it.
+        if (claims.email_verified === false) {
+          return done(null, false, { message: 'Email address has not been verified by the identity provider' });
         }
 
         if (config.allowedDomains?.length) {
@@ -103,7 +127,7 @@ export async function createOidcStrategy(
             metadata: {
               displayName,
               picture,
-              issuer: issuer.metadata.issuer,
+              issuer: issuerIdentifier,
             },
           },
           update: {
@@ -112,7 +136,7 @@ export async function createOidcStrategy(
             metadata: {
               displayName,
               picture,
-              issuer: issuer.metadata.issuer,
+              issuer: issuerIdentifier,
             },
           },
         });

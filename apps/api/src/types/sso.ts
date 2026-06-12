@@ -37,7 +37,7 @@ export interface OidcConfig {
   clientId: string;
   clientSecret: string;
   scopes?: string;
-  allowedDomains?: string[];
+  allowedDomains?: string; // comma-separated; stored and submitted as a plain string
   emailAttribute?: string;
   displayNameAttribute?: string;
   usernameAttribute?: string;
@@ -96,6 +96,15 @@ export function validateOidcConfig(config: unknown): asserts config is OidcConfi
   const c = config as Record<string, unknown>;
   if (!c.issuerUrl || typeof c.issuerUrl !== 'string') {
     throw new Error('issuerUrl is required');
+  }
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(c.issuerUrl);
+  } catch {
+    throw new Error('issuerUrl must be a valid URL');
+  }
+  if (parsedUrl.protocol !== 'https:') {
+    throw new Error('issuerUrl must use HTTPS');
   }
   if (!c.clientId || typeof c.clientId !== 'string') {
     throw new Error('clientId is required');

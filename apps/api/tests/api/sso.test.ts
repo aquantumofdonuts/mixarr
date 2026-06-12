@@ -112,6 +112,16 @@ describe('SSO Config Validation', () => {
       const config = { issuerUrl: 'https://idp.example.com', clientId: 'id' };
       expect(() => validateOidcConfig(config)).toThrow('clientSecret is required');
     });
+
+    it('should reject OIDC config with invalid issuerUrl', () => {
+      const config = { issuerUrl: 'not-a-url', clientId: 'id', clientSecret: 'secret' };
+      expect(() => validateOidcConfig(config)).toThrow('issuerUrl must be a valid URL');
+    });
+
+    it('should reject OIDC config with non-HTTPS issuerUrl', () => {
+      const config = { issuerUrl: 'http://idp.example.com', clientId: 'id', clientSecret: 'secret' };
+      expect(() => validateOidcConfig(config)).toThrow('issuerUrl must use HTTPS');
+    });
   });
 
   describe('validateSsoConfig', () => {
