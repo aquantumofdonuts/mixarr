@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import Check from 'lucide-react/dist/esm/icons/check';
 import X from 'lucide-react/dist/esm/icons/x';
@@ -53,6 +53,12 @@ export function FeedCard({
 }: FeedCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isTouched, setIsTouched] = useState(false);
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Clear any pending touch-hover timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(touchTimerRef.current);
+  }, []);
 
   const showOverlay = status === 'added' || status === 'dismissed';
   const overlayText = status === 'added' ? 'Added' : status === 'dismissed' ? 'Dismissed' : '';
@@ -75,7 +81,10 @@ export function FeedCard({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onTouchStart={() => setIsTouched(true)}
-      onTouchEnd={() => setTimeout(() => setIsTouched(false), 3000)}
+      onTouchEnd={() => {
+        clearTimeout(touchTimerRef.current);
+        touchTimerRef.current = setTimeout(() => setIsTouched(false), 3000);
+      }}
     >
       {/* Image */}
       <div className="aspect-square relative">

@@ -18,6 +18,15 @@ import { CacheService, CACHE_MISS_SENTINEL, CACHE_TTLS, CACHE_KEYS } from './cac
 
 const log = createLogger('FeedService');
 
+/** Max parallel external API calls (Deezer/Last.fm) during enrichment. */
+const ENRICHMENT_CONCURRENCY = 5;
+
+/**
+ * Safety bound on how many result rows are aggregated per feed request.
+ * Newest rows win; anything older than the cap ages out of the feed.
+ */
+const MAX_AGGREGATION_ROWS = 5000;
+
 /**
  * Error thrown when a feed item is not found
  */
@@ -107,6 +116,12 @@ export class FeedService {
   private lidarrConfig?: LidarrConnectionConfig;
   private cacheService: CacheService | null;
 
+  /**
+   * Promise for the most recent background Lidarr add kicked off by approve().
+   * Never rejects. Exposed so tests (and shutdown hooks) can await completion.
+   */
+  pendingLidarrAdd: Promise<void> | null = null;
+
   constructor(
     prismaInstance?: PrismaClient,
     lidarrService?: LidarrService,
@@ -179,6 +194,28 @@ export class FeedService {
   }
 
   /**
+   * Run an async mapper over items with a bounded number of workers,
+   * preserving result order. Keeps enrichment from firing one external
+   * API call per feed item simultaneously.
+   */
+  private async mapWithConcurrency<T, R>(
+    items: T[],
+    limit: number,
+    fn: (item: T) => Promise<R>
+  ): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    let nextIndex = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (nextIndex < items.length) {
+        const i = nextIndex++;
+        results[i] = await fn(items[i]);
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
+
+  /**
    * Enrich feed items with images from Deezer for items missing imageUrl.
    * Uses Redis cache to avoid redundant Deezer API calls.
    * Flow per item: cache check → API call (if miss) → cache store
@@ -189,8 +226,8 @@ export class FeedService {
       return items;
     }
 
-    // Fetch images in parallel (with cache)
-    const imagePromises = itemsNeedingImages.map(async (item) => {
+    // Fetch images with bounded concurrency (with cache)
+    const results = await this.mapWithConcurrency(itemsNeedingImages, ENRICHMENT_CONCURRENCY, async (item) => {
       const normalizedName = this.normalizeName(item.artistName);
       const cacheKey = CACHE_KEYS.deezerImage(normalizedName);
 
@@ -226,7 +263,6 @@ export class FeedService {
       }
     });
 
-    const results = await Promise.all(imagePromises);
     const imageMap = new Map(results.map((r) => [r.id, r.imageUrl]));
 
     // Update items with fetched images
@@ -265,8 +301,8 @@ export class FeedService {
       return items;
     }
 
-    // Fetch stats in parallel
-    const statsPromises = itemsNeedingEnrichment.map(async (item) => {
+    // Fetch stats with bounded concurrency
+    const results = await this.mapWithConcurrency(itemsNeedingEnrichment, ENRICHMENT_CONCURRENCY, async (item) => {
       const normalizedName = this.normalizeName(item.artistName);
       const cacheKey = CACHE_KEYS.lastfmStats(normalizedName);
 
@@ -299,7 +335,6 @@ export class FeedService {
       }
     });
 
-    const results = await Promise.all(statsPromises);
     const statsMap = new Map(results.map((r) => [r.id, r.stats]));
 
     // Update items with fetched stats
@@ -336,6 +371,8 @@ export class FeedService {
   ): Promise<void> {
     const beforeMap = new Map(before.map(item => [item.id, item]));
 
+    const writes: Promise<unknown>[] = [];
+
     for (const afterItem of after) {
       const beforeItem = beforeMap.get(afterItem.id);
       if (!beforeItem) continue;
@@ -359,18 +396,22 @@ export class FeedService {
 
       if (Object.keys(data).length === 0) continue;
 
-      try {
-        await this.prismaClient.subscriptionResult.updateMany({
-          where: { id: { in: afterItem.linkedResultIds } },
-          data,
-        });
-      } catch (error) {
-        log.warn('Enrichment write-back failed', {
-          artistName: afterItem.artistName,
-          error: (error as Error).message,
-        });
-      }
+      writes.push(
+        this.prismaClient.subscriptionResult
+          .updateMany({
+            where: { id: { in: afterItem.linkedResultIds } },
+            data,
+          })
+          .catch((error: unknown) => {
+            log.warn('Enrichment write-back failed', {
+              artistName: afterItem.artistName,
+              error: (error as Error).message,
+            });
+          })
+      );
     }
+
+    await Promise.all(writes);
   }
 
   /**
@@ -588,13 +629,17 @@ export class FeedService {
       ? ['pending', 'queued', 'added', 'rejected']
       : ['pending', 'queued'];
 
-    // Fetch all matching results (artist type only for MVP)
+    // Fetch matching results (artist type only for MVP), newest first,
+    // bounded so a single request can never pull an unbounded result set
+    // into memory.
     const results = await this.prismaClient.subscriptionResult.findMany({
       where: {
         subscriptionId: { in: subscriptionIds },
         itemType: 'artist',
         status: { in: statusFilter },
       },
+      orderBy: { createdAt: 'desc' },
+      take: MAX_AGGREGATION_ROWS,
       select: {
         id: true,
         name: true,
@@ -653,20 +698,21 @@ export class FeedService {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const addedToday = await this.prismaClient.subscriptionResult.count({
-      where: {
-        subscriptionId: { in: subscriptionIds },
-        status: 'added',
-        processedAt: { gte: today },
-      },
-    });
-
-    const pending = await this.prismaClient.subscriptionResult.count({
-      where: {
-        subscriptionId: { in: subscriptionIds },
-        status: { in: ['pending', 'queued'] },
-      },
-    });
+    const [addedToday, pending] = await Promise.all([
+      this.prismaClient.subscriptionResult.count({
+        where: {
+          subscriptionId: { in: subscriptionIds },
+          status: 'added',
+          processedAt: { gte: today },
+        },
+      }),
+      this.prismaClient.subscriptionResult.count({
+        where: {
+          subscriptionId: { in: subscriptionIds },
+          status: { in: ['pending', 'queued'] },
+        },
+      }),
+    ]);
 
     return {
       items: enrichedItems,
@@ -733,55 +779,65 @@ export class FeedService {
       });
     });
 
-    // Add to Lidarr (non-blocking) - happens after transaction completes
+    // Add to Lidarr in the background after the transaction completes —
+    // the HTTP response must not wait on Lidarr round-trips.
     if (artistMbid && this.lidarrService) {
-      try {
-        // Get config values, fetching defaults from Lidarr if not configured
-        let qpId = this.lidarrConfig?.qualityProfileId;
-        let mpId = this.lidarrConfig?.metadataProfileId;
-        let rfPath = this.lidarrConfig?.rootFolderPath;
-
-        // Fetch defaults for any missing config (same pattern as search.ts)
-        if (!qpId) {
-          const profiles = await this.lidarrService.getQualityProfiles();
-          qpId = profiles[0]?.id;
-        }
-        if (!mpId) {
-          const profiles = await this.lidarrService.getMetadataProfiles();
-          mpId = profiles[0]?.id;
-        }
-        if (!rfPath) {
-          const folders = await this.lidarrService.getRootFolders();
-          rfPath = folders[0]?.path;
-        }
-
-        if (!qpId || !mpId || !rfPath) {
-          log.warn(`Cannot add artist to Lidarr - missing configuration: qualityProfileId=${qpId || 'missing'}, metadataProfileId=${mpId || 'missing'}, rootFolderPath=${rfPath || 'missing'}`);
-        } else {
-          log.info(`Adding artist to Lidarr: ${artistName} (${artistMbid}) with config: qualityProfileId=${qpId}, metadataProfileId=${mpId}, rootFolderPath=${rfPath}`);
-          // Use addArtistWithCacheWarm like all other add operations in the codebase
-          await this.lidarrService.addArtistWithCacheWarm(
-            artistMbid,
-            qpId,
-            mpId,
-            rfPath,
-            true,  // monitored
-            true,  // searchForMissingAlbums
-            false, // waitForRefresh (deprecated)
-            this.lidarrConfig?.monitorOption || 'all',
-            this.lidarrConfig?.monitorNewItems || 'all'
-          );
-          log.info(`Successfully added artist to Lidarr: ${artistName} (${artistMbid})`);
-        }
-      } catch (error) {
-        // Non-blocking - Lidarr failure shouldn't fail the approve action
-        log.warn(`Failed to add artist to Lidarr: ${artistMbid}`, error);
-      }
+      this.pendingLidarrAdd = this.addToLidarrInBackground(artistName, artistMbid);
     } else if (!artistMbid) {
       log.debug(`Skipping Lidarr add for ${artistName}: no MBID available`);
     }
 
     return { artistName };
+  }
+
+  /**
+   * Add an approved artist to Lidarr, fetching profile defaults as needed.
+   * Runs detached from the approve() response; never throws.
+   */
+  private async addToLidarrInBackground(artistName: string, artistMbid: string): Promise<void> {
+    if (!this.lidarrService) return;
+    try {
+      // Get config values, fetching defaults from Lidarr if not configured
+      let qpId = this.lidarrConfig?.qualityProfileId;
+      let mpId = this.lidarrConfig?.metadataProfileId;
+      let rfPath = this.lidarrConfig?.rootFolderPath;
+
+      // Fetch defaults for any missing config (same pattern as search.ts)
+      if (!qpId) {
+        const profiles = await this.lidarrService.getQualityProfiles();
+        qpId = profiles[0]?.id;
+      }
+      if (!mpId) {
+        const profiles = await this.lidarrService.getMetadataProfiles();
+        mpId = profiles[0]?.id;
+      }
+      if (!rfPath) {
+        const folders = await this.lidarrService.getRootFolders();
+        rfPath = folders[0]?.path;
+      }
+
+      if (!qpId || !mpId || !rfPath) {
+        log.warn(`Cannot add artist to Lidarr - missing configuration: qualityProfileId=${qpId || 'missing'}, metadataProfileId=${mpId || 'missing'}, rootFolderPath=${rfPath || 'missing'}`);
+      } else {
+        log.info(`Adding artist to Lidarr: ${artistName} (${artistMbid}) with config: qualityProfileId=${qpId}, metadataProfileId=${mpId}, rootFolderPath=${rfPath}`);
+        // Use addArtistWithCacheWarm like all other add operations in the codebase
+        await this.lidarrService.addArtistWithCacheWarm(
+          artistMbid,
+          qpId,
+          mpId,
+          rfPath,
+          true,  // monitored
+          true,  // searchForMissingAlbums
+          false, // waitForRefresh (deprecated)
+          this.lidarrConfig?.monitorOption || 'all',
+          this.lidarrConfig?.monitorNewItems || 'all'
+        );
+        log.info(`Successfully added artist to Lidarr: ${artistName} (${artistMbid})`);
+      }
+    } catch (error) {
+      // Lidarr failure shouldn't fail the approve action
+      log.warn(`Failed to add artist to Lidarr: ${artistMbid}`, error);
+    }
   }
 
   /**

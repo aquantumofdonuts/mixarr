@@ -37,7 +37,9 @@ export default function QueuePage() {
   const [slskdSearchArtist, setSlskdSearchArtist] = useState<{ name: string; image?: string } | null>(null);
 
   // React Query hooks with caching
-  const { data: items = [], isLoading } = useReviewQueue(statusFilter, itemTypeFilter);
+  const { data: queueData, isLoading } = useReviewQueue(statusFilter, itemTypeFilter);
+  const items = queueData?.items ?? [];
+  const totalItems = queueData?.total ?? items.length;
   const updateMutation = useUpdateReviewItem();
   const bulkUpdateMutation = useBulkUpdateReview();
 
@@ -210,6 +212,13 @@ export default function QueuePage() {
         />
       ) : (
         <div className="space-y-2">
+          {/* Truncation notice when the queue exceeds the page size */}
+          {totalItems > items.length && (
+            <p className="text-sm text-muted-foreground px-4">
+              Showing the {items.length} most recent of {totalItems} items — approve or reject items to see more.
+            </p>
+          )}
+
           {/* Select all header */}
           {statusFilter === 'pending' && filteredItems.length > 0 && (
             <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 rounded-container">

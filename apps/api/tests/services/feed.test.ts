@@ -685,6 +685,8 @@ describe('FeedService', () => {
         mockLidarrConfig as any
       );
       await service.approve('feed-1', 1);
+      // Lidarr add is detached from the approve response; wait for it
+      await service.pendingLidarrAdd;
 
       expect(addArtistWithCacheWarm).toHaveBeenCalledWith(
         'abc-123',
@@ -728,6 +730,7 @@ describe('FeedService', () => {
 
       // Should not throw - Lidarr failure is non-blocking
       await expect(service.approve('feed-1', 1)).resolves.toEqual({ artistName: 'Test Artist' });
+      await service.pendingLidarrAdd;
       expect(addArtistWithCacheWarm).toHaveBeenCalled();
     });
 
@@ -809,6 +812,7 @@ describe('FeedService', () => {
         incompleteConfig as any
       );
       await service.approve('feed-1', 1);
+      await service.pendingLidarrAdd;
 
       // Should not call Lidarr due to incomplete config
       expect(addArtistWithCacheWarm).not.toHaveBeenCalled();

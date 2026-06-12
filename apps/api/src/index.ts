@@ -31,6 +31,7 @@ import { correlationMiddleware } from './middleware/correlation.js';
 import type { AuthenticatedSocket, SessionIncomingMessage, SocketSessionResponse } from './types/socket.js';
 import { apiLimiter } from './middleware/rate-limiter.js';
 import { initializeScheduler } from './jobs/scheduler.js';
+import { setupJobEventBroadcasting } from './jobs/queue.js';
 import { redis } from './lib/redis.js';
 import slskdRouter, { cleanupQueueEvents } from './routes/slskd.js';
 import { applyNetworkPreflight } from './lib/network-preflight.js';
@@ -201,21 +202,44 @@ if (process.env.NODE_ENV !== 'test') {
 
   httpServer.listen(PORT, () => {
     log.info(`API server running on port ${PORT}`);
-    
+
     // Initialize job scheduler
     initializeScheduler();
+
+    // Broadcast BullMQ job lifecycle events to connected Socket.IO clients
+    setupJobEventBroadcasting(io);
   });
 }
 
 // Graceful shutdown
+const SHUTDOWN_GRACE_MS = 10_000;
+
 const gracefulShutdown = async (signal: string) => {
   log.info(`Received ${signal}, shutting down gracefully...`);
-  
-  // Stop accepting new connections
-  httpServer.close(() => {
-    log.info('HTTP server closed');
+
+  // Hard deadline: if cleanup hangs, force-exit. unref() so this timer
+  // doesn't keep the process alive once cleanup finishes.
+  const forceExit = setTimeout(() => {
+    log.warn(`Shutdown grace period (${SHUTDOWN_GRACE_MS}ms) exceeded, forcing exit`);
+    process.exit(1);
+  }, SHUTDOWN_GRACE_MS);
+  forceExit.unref();
+
+  // Stop accepting new connections and wait for in-flight requests to drain
+  await new Promise<void>((resolve) => {
+    httpServer.close((err) => {
+      if (err) {
+        log.warn('HTTP server close error', { error: err.message });
+      } else {
+        log.info('HTTP server closed');
+      }
+      resolve();
+    });
+    // Sockets without active requests (e.g. keep-alive) would otherwise
+    // hold close() open indefinitely
+    httpServer.closeIdleConnections?.();
   });
-  
+
   // Close slskd QueueEvents connection
   try {
     await cleanupQueueEvents();
@@ -249,11 +273,9 @@ const gracefulShutdown = async (signal: string) => {
     });
   }
   
-  // Give time for cleanup
-  setTimeout(() => {
-    log.info('Shutdown complete');
-    process.exit(0);
-  }, 1000);
+  clearTimeout(forceExit);
+  log.info('Shutdown complete');
+  process.exit(0);
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

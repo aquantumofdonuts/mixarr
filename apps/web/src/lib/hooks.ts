@@ -40,7 +40,7 @@ export const queryKeys = {
   // Discover
   library: (params: Record<string, string | number>) => ['discover', 'library', params] as const,
   profiles: ['discover', 'profiles'] as const,
-  recommendations: (artistIds: string[]) => ['discover', 'recommendations', artistIds] as const,
+  recommendations: ['discover', 'recommendations'] as const,
   
   // Search
   searchArtists: (query: string) => ['search', 'artists', query] as const,
@@ -121,11 +121,13 @@ export function useApproveFeedItem() {
       // Cancel any outgoing refetches to prevent race condition
       await queryClient.cancelQueries({ queryKey: queryKeys.feed });
 
-      // Snapshot current cache for rollback
-      const previousData = queryClient.getQueryData(queryKeys.feed);
+      // Snapshot every feed query for rollback. Feed queries are keyed
+      // ['feed', limit], so prefix-matching setQueriesData/getQueriesData
+      // must be used here — exact-key setQueryData(['feed']) would miss them.
+      const previousData = queryClient.getQueriesData({ queryKey: queryKeys.feed });
 
       // Optimistic update - mark item as 'added'
-      queryClient.setQueryData(queryKeys.feed, (old: any) => {
+      queryClient.setQueriesData({ queryKey: queryKeys.feed }, (old: any) => {
         if (!old?.pages) return old;
         return {
           ...old,
@@ -145,9 +147,9 @@ export function useApproveFeedItem() {
       return { previousData };
     },
     onError: (_err, _id, context) => {
-      // Rollback to snapshot on error
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKeys.feed, context.previousData);
+      // Rollback each snapshotted query on error
+      for (const [key, data] of context?.previousData ?? []) {
+        queryClient.setQueryData(key, data);
       }
     },
     onSettled: () => {
@@ -171,9 +173,10 @@ export function useDismissFeedItem() {
     },
     onMutate: async (id) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.feed });
-      const previousData = queryClient.getQueryData(queryKeys.feed);
+      // Prefix-match all ['feed', limit] queries — see useApproveFeedItem
+      const previousData = queryClient.getQueriesData({ queryKey: queryKeys.feed });
 
-      queryClient.setQueryData(queryKeys.feed, (old: any) => {
+      queryClient.setQueriesData({ queryKey: queryKeys.feed }, (old: any) => {
         if (!old?.pages) return old;
         return {
           ...old,
@@ -193,8 +196,8 @@ export function useDismissFeedItem() {
       return { previousData };
     },
     onError: (_err, _id, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKeys.feed, context.previousData);
+      for (const [key, data] of context?.previousData ?? []) {
+        queryClient.setQueryData(key, data);
       }
     },
     onSettled: () => {
@@ -436,13 +439,14 @@ export function useReviewQueue(status: 'pending' | 'approved' | 'rejected', item
   return useQuery({
     queryKey: queryKeys.reviewQueue(status, itemType),
     queryFn: async () => {
-      const params = new URLSearchParams({ status, limit: '100' });
+      // 500 is the API's max page size; total lets the UI show truncation
+      const params = new URLSearchParams({ status, limit: '500' });
       if (itemType) params.append('itemType', itemType);
-      const { data, error } = await api.get<{ items: ReviewItem[] }>(
+      const { data, error } = await api.get<{ items: ReviewItem[]; total: number }>(
         `/api/imports/review/queue?${params.toString()}`
       );
       if (error) throw new Error(error);
-      return data!.items;
+      return { items: data!.items, total: data!.total ?? data!.items.length };
     },
     staleTime: 30 * 1000,
   });
@@ -652,17 +656,24 @@ export function useDeleteUser() {
 
 // Discover Hooks
 
-interface LibraryArtist {
+export interface LibraryArtist {
   id: number;
   name: string;
   foreignArtistId: string;
   monitored: boolean;
 }
 
-interface Profiles {
+export interface Profiles {
   qualityProfiles: Array<{ id: number; name: string }>;
   metadataProfiles: Array<{ id: number; name: string }>;
   rootFolders: Array<{ id: number; path: string }>;
+  defaults?: {
+    qualityProfileId?: number;
+    metadataProfileId?: number;
+    rootFolderPath?: string;
+    monitorOption?: string;
+    searchOnAdd?: boolean;
+  };
 }
 
 export function useLibrary(params: { page: number; limit: number; search?: string }) {

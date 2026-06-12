@@ -28,6 +28,14 @@ export function useWebSocket(
   const attemptRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
 
+  // Keep the latest callbacks in a ref so `connect` never depends on
+  // caller-provided function identity — inline callbacks would otherwise
+  // tear down and reopen the socket on every render.
+  const callbacksRef = useRef({ onMessage, onConnect, onDisconnect });
+  useEffect(() => {
+    callbacksRef.current = { onMessage, onConnect, onDisconnect };
+  });
+
   const connect = useCallback(() => {
     if (!url) return;
 
@@ -37,32 +45,35 @@ export function useWebSocket(
       ws.onopen = () => {
         setIsConnected(true);
         attemptRef.current = 0;
-        onConnect?.();
+        callbacksRef.current.onConnect?.();
       };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           setLastMessage(data);
-          onMessage?.(data);
+          callbacksRef.current.onMessage?.(data);
         } catch {
           // Non-JSON message
           setLastMessage(event.data);
-          onMessage?.(event.data);
+          callbacksRef.current.onMessage?.(event.data);
         }
       };
 
       ws.onclose = () => {
         setIsConnected(false);
         wsRef.current = null;
-        onDisconnect?.();
+        callbacksRef.current.onDisconnect?.();
 
-        // Attempt reconnection
+        // Attempt reconnection with exponential backoff + jitter so a
+        // server restart doesn't trigger a synchronized client stampede
         if (attemptRef.current < reconnectAttempts) {
           attemptRef.current++;
+          const base = Math.min(reconnectInterval * 2 ** (attemptRef.current - 1), 30_000);
+          const delay = base * (0.5 + Math.random() * 0.5);
           reconnectTimeoutRef.current = setTimeout(() => {
             connect();
-          }, reconnectInterval);
+          }, delay);
         }
       };
 
@@ -74,7 +85,7 @@ export function useWebSocket(
     } catch (error) {
       console.error('WebSocket connection error:', error);
     }
-  }, [url, onMessage, onConnect, onDisconnect, reconnectAttempts, reconnectInterval]);
+  }, [url, reconnectAttempts, reconnectInterval]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {

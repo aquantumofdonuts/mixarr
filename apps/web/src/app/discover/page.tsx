@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,6 @@ import { useToast } from '@/components/ui/toast';
 import { Skeleton } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/modal';
 import { PageHeader } from '@/components/layout/page-header';
-import { ReleaseTypeFilter, useReleaseTypeFilter } from '@/components/ReleaseTypeFilter';
 import { GenrePills } from '@/components/GenrePills';
 import { SlskdSearchModal } from '@/components/slskd/SearchModal';
 import { api } from '@/lib/api';
@@ -21,7 +20,6 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up';
 import Download from 'lucide-react/dist/esm/icons/download';
-import Filter from 'lucide-react/dist/esm/icons/filter';
 import Library from 'lucide-react/dist/esm/icons/library';
 import Music2 from 'lucide-react/dist/esm/icons/music-2';
 import Plus from 'lucide-react/dist/esm/icons/plus';
@@ -31,16 +29,9 @@ import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
 import Square from 'lucide-react/dist/esm/icons/square';
 import X from 'lucide-react/dist/esm/icons/x';
 import { LastfmIcon, MusicBrainzIcon } from '@/components/ExternalLinks';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { useHasLidarr } from '@/lib/hooks';
-
-interface LibraryArtist {
-  id: number;
-  name: string;
-  foreignArtistId: string;
-  monitored: boolean;
-}
+import { useHasLidarr, useLibrary, useProfiles, queryKeys } from '@/lib/hooks';
 
 interface Recommendation {
   name: string;
@@ -53,52 +44,39 @@ interface Recommendation {
   genres?: string[];
 }
 
-interface Profiles {
-  qualityProfiles: Array<{ id: number; name: string }>;
-  metadataProfiles: Array<{ id: number; name: string }>;
-  rootFolders: Array<{ id: number; path: string }>;
-  defaults?: {
-    qualityProfileId?: number;
-    metadataProfileId?: number;
-    rootFolderPath?: string;
-    monitorOption?: string;
-    searchOnAdd?: boolean;
-  };
+interface RecommendationsResponse {
+  recommendations: Recommendation[];
+  seedArtists: string[];
+  total: number;
 }
 
 export default function DiscoverPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { data: hasLidarr, isLoading: lidarrLoading } = useHasLidarr();
   const [selectedArtists, setSelectedArtists] = useState<Set<string>>(new Set());
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [selectedRecs, setSelectedRecs] = useState<Set<string>>(new Set());
-  const [showFilters, setShowFilters] = useState(false);
-  const { types: releaseTypes, setTypes: setReleaseTypes } = useReleaseTypeFilter();
   const [selectedQuality, setSelectedQuality] = useState<number | null>(null);
   const [selectedMetadata, setSelectedMetadata] = useState<number | null>(null);
   const [selectedRootFolder, setSelectedRootFolder] = useState<string | null>(null);
   const [showSelectedPanel, setShowSelectedPanel] = useState(false);
   const [showBulkAddModal, setShowBulkAddModal] = useState(false);
   const [isBulkAdding, setIsBulkAdding] = useState(false);
+  const [isCancellingBulk, setIsCancellingBulk] = useState(false);
+  const bulkCancelRef = useRef(false);
   const [bulkAddProgress, setBulkAddProgress] = useState({ current: 0, total: 0, failed: 0 });
-  const [addProfiles, setAddProfiles] = useState({
-    qualityProfileId: 0,
-    metadataProfileId: 0,
-    rootFolderPath: ''
-  });
-  
-  const [isLoadingRecs, setIsLoadingRecs] = useState(false);
+
   const [addingArtist, setAddingArtist] = useState<string | null>(null);
-  
+
   // slskd Search state
   const [slskdModalOpen, setSlskdModalOpen] = useState(false);
   const [slskdSearchArtist, setSlskdSearchArtist] = useState<{ name: string; image?: string } | null>(null);
-  
+
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
-  const limit = 500;
-  
+  const limit = 100;
+
   const { addToast } = useToast();
 
   // Debounce search query
@@ -110,73 +88,70 @@ export default function DiscoverPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Fetch library with React Query
-  const { data: libraryData, isLoading: isLoadingLibrary } = useQuery({
-    queryKey: ['discover', 'library', page, debouncedSearch],
-    queryFn: async () => {
-      const params = new URLSearchParams({
-        page: page.toString(),
-        limit: limit.toString(),
-      });
-      if (debouncedSearch) {
-        params.set('search', debouncedSearch);
-      }
-      const { data, error } = await api.get<{
-        artists: LibraryArtist[];
-        pagination: { page: number; limit: number; total: number; totalPages: number };
-      }>(`/api/discover/library?${params}`);
-      if (error) throw new Error(error);
-      return data;
-    },
-    staleTime: 60 * 1000, // Library data is fairly stable
+  // Fetch library via the shared hook (keyed under queryKeys.library)
+  const { data: libraryData, isLoading: isLoadingLibrary } = useLibrary({
+    page,
+    limit,
+    search: debouncedSearch || undefined,
   });
   const libraryArtists = libraryData?.artists ?? [];
   const totalPages = libraryData?.pagination?.totalPages ?? 1;
   const total = libraryData?.pagination?.total ?? 0;
 
-  // Fetch profiles with React Query
-  const { data: profiles } = useQuery({
-    queryKey: ['discover', 'profiles'],
-    queryFn: async () => {
-      const { data, error } = await api.get<Profiles>('/api/discover/profiles');
-      if (error) throw new Error(error);
-      return data;
-    },
-    staleTime: 5 * 60 * 1000, // Profiles rarely change
-  });
+  // Fetch profiles via the shared hook
+  const { data: profiles } = useProfiles();
 
-  // Initialize profile selections when profiles load - use connection defaults if available
+  // Recommendations live in the React Query cache so they survive
+  // navigation; fetched on demand via refetch (enabled: false).
+  const {
+    data: recsData,
+    isFetching: isLoadingRecs,
+    refetch: refetchRecs,
+  } = useQuery<RecommendationsResponse>({
+    queryKey: queryKeys.recommendations,
+    queryFn: async () => {
+      const { data, error } = await api.post<RecommendationsResponse>('/api/discover/similar', {
+        artistNames: Array.from(selectedArtists),
+        limit: 50,
+      });
+      if (error) throw new Error(error);
+      return data!;
+    },
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+    retry: false,
+  });
+  const recommendations = recsData?.recommendations ?? [];
+
+  /** Patch cached recommendations (e.g. mark an artist as added). */
+  const updateRecommendations = (update: (recs: Recommendation[]) => Recommendation[]) => {
+    queryClient.setQueryData<RecommendationsResponse>(queryKeys.recommendations, (old) =>
+      old ? { ...old, recommendations: update(old.recommendations) } : old
+    );
+  };
+
+  // Initialize profile selections when profiles load - use connection
+  // defaults if available, falling back to the first option. Functional
+  // updates keep this effect dependent on `profiles` alone.
   useEffect(() => {
-    if (profiles) {
-      // Use connection defaults, fall back to first available
-      if (profiles.qualityProfiles.length > 0 && selectedQuality === null) {
-        const defaultId = profiles.defaults?.qualityProfileId;
-        // Check if default exists in the profiles list
-        const validDefault = defaultId && profiles.qualityProfiles.some(p => p.id === defaultId);
-        setSelectedQuality(validDefault ? defaultId : profiles.qualityProfiles[0].id);
-      }
-      if (profiles.metadataProfiles.length > 0 && selectedMetadata === null) {
-        const defaultId = profiles.defaults?.metadataProfileId;
-        const validDefault = defaultId && profiles.metadataProfiles.some(p => p.id === defaultId);
-        setSelectedMetadata(validDefault ? defaultId : profiles.metadataProfiles[0].id);
-      }
-      if (profiles.rootFolders.length > 0 && selectedRootFolder === null) {
-        const defaultPath = profiles.defaults?.rootFolderPath;
-        const validDefault = defaultPath && profiles.rootFolders.some(f => f.path === defaultPath);
-        setSelectedRootFolder(validDefault ? defaultPath : profiles.rootFolders[0].path);
-      }
-      if (addProfiles.qualityProfileId === 0) {
-        const defaultQuality = profiles.defaults?.qualityProfileId || profiles.qualityProfiles[0]?.id || 0;
-        const defaultMetadata = profiles.defaults?.metadataProfileId || profiles.metadataProfiles[0]?.id || 0;
-        const defaultRoot = profiles.defaults?.rootFolderPath || profiles.rootFolders[0]?.path || '';
-        setAddProfiles({
-          qualityProfileId: defaultQuality,
-          metadataProfileId: defaultMetadata,
-          rootFolderPath: defaultRoot
-        });
-      }
+    if (!profiles) return;
+    if (profiles.qualityProfiles.length > 0) {
+      const defaultId = profiles.defaults?.qualityProfileId;
+      const validDefault = defaultId && profiles.qualityProfiles.some(p => p.id === defaultId);
+      setSelectedQuality(prev => prev ?? (validDefault ? defaultId : profiles.qualityProfiles[0].id));
     }
-  }, [profiles, selectedQuality, selectedMetadata, selectedRootFolder, addProfiles.qualityProfileId]);
+    if (profiles.metadataProfiles.length > 0) {
+      const defaultId = profiles.defaults?.metadataProfileId;
+      const validDefault = defaultId && profiles.metadataProfiles.some(p => p.id === defaultId);
+      setSelectedMetadata(prev => prev ?? (validDefault ? defaultId : profiles.metadataProfiles[0].id));
+    }
+    if (profiles.rootFolders.length > 0) {
+      const defaultPath = profiles.defaults?.rootFolderPath;
+      const validDefault = defaultPath && profiles.rootFolders.some(f => f.path === defaultPath);
+      setSelectedRootFolder(prev => prev ?? (validDefault ? defaultPath : profiles.rootFolders[0].path));
+    }
+  }, [profiles]);
 
   const toggleArtist = (name: string) => {
     const newSelected = new Set(selectedArtists);
@@ -210,33 +185,21 @@ export default function DiscoverPage() {
       return;
     }
 
-    setIsLoadingRecs(true);
-    setRecommendations([]);
+    const result = await refetchRecs();
 
-    const { data, error } = await api.post<{
-      recommendations: Recommendation[];
-      seedArtists: string[];
-      total: number;
-    }>('/api/discover/similar', {
-      artistNames: Array.from(selectedArtists),
-      limit: 50,
-    });
-
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to get recommendations', message: error });
-    } else if (data) {
-      setRecommendations(data.recommendations);
-      if (data.recommendations.length === 0) {
+    if (result.error) {
+      addToast({ type: 'error', title: 'Failed to get recommendations', message: result.error.message });
+    } else if (result.data) {
+      if (result.data.recommendations.length === 0) {
         addToast({ type: 'info', title: 'No new recommendations found' });
       } else {
-        addToast({ 
-          type: 'success', 
-          title: `Found ${data.recommendations.length} recommendations`,
-          message: `Based on ${data.seedArtists.length} selected artists`
+        addToast({
+          type: 'success',
+          title: `Found ${result.data.recommendations.length} recommendations`,
+          message: `Based on ${result.data.seedArtists.length} selected artists`
         });
       }
     }
-    setIsLoadingRecs(false);
   };
 
   const addToLidarr = async (rec: Recommendation) => {
@@ -260,8 +223,8 @@ export default function DiscoverPage() {
     } else {
       addToast({ type: 'success', title: `Added ${rec.name} to Lidarr` });
       // Mark as in library and remove from selection
-      setRecommendations(prev => 
-        prev.map(r => r.name === rec.name ? { ...r, inLibrary: true } : r)
+      updateRecommendations(recs =>
+        recs.map(r => r.name === rec.name ? { ...r, inLibrary: true } : r)
       );
       setSelectedRecs(prev => {
         const newSet = new Set(prev);
@@ -294,6 +257,11 @@ export default function DiscoverPage() {
     setSelectedRecs(new Set());
   };
 
+  const cancelBulkAdd = () => {
+    bulkCancelRef.current = true;
+    setIsCancellingBulk(true);
+  };
+
   const bulkAddToLidarr = async () => {
     if (!selectedQuality || !selectedMetadata || !selectedRootFolder) {
       addToast({ type: 'warning', title: 'Please select profiles first' });
@@ -306,22 +274,30 @@ export default function DiscoverPage() {
       return;
     }
 
+    bulkCancelRef.current = false;
+    setIsCancellingBulk(false);
     setIsBulkAdding(true);
     setBulkAddProgress({ current: 0, total: toAdd.length, failed: 0 });
 
     let successCount = 0;
     let failCount = 0;
+    let cancelled = false;
 
     for (let i = 0; i < toAdd.length; i++) {
+      if (bulkCancelRef.current) {
+        cancelled = true;
+        break;
+      }
+
       const rec = toAdd[i];
       setBulkAddProgress({ current: i + 1, total: toAdd.length, failed: failCount });
 
       const { error } = await api.post('/api/discover/add', {
         artistName: rec.name,
         mbid: rec.mbid,
-        qualityProfileId: addProfiles.qualityProfileId,
-        metadataProfileId: addProfiles.metadataProfileId,
-        rootFolderPath: addProfiles.rootFolderPath,
+        qualityProfileId: selectedQuality,
+        metadataProfileId: selectedMetadata,
+        rootFolderPath: selectedRootFolder,
       });
 
       if (error) {
@@ -329,25 +305,39 @@ export default function DiscoverPage() {
         setBulkAddProgress({ current: i + 1, total: toAdd.length, failed: failCount });
       } else {
         successCount++;
-        // Mark as in library
-        setRecommendations(prev => 
-          prev.map(r => r.name === rec.name ? { ...r, inLibrary: true } : r)
+        // Mark as in library and drop from selection so a re-run skips it
+        updateRecommendations(recs =>
+          recs.map(r => r.name === rec.name ? { ...r, inLibrary: true } : r)
         );
+        setSelectedRecs(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(rec.name);
+          return newSet;
+        });
       }
 
       // Small delay between adds to avoid overwhelming Lidarr
-      if (i < toAdd.length - 1) {
+      if (i < toAdd.length - 1 && !bulkCancelRef.current) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
 
     setIsBulkAdding(false);
+    setIsCancellingBulk(false);
     setShowBulkAddModal(false);
-    setSelectedRecs(new Set());
+    if (!cancelled) {
+      setSelectedRecs(new Set());
+    }
 
-    if (successCount > 0) {
-      addToast({ 
-        type: 'success', 
+    if (cancelled) {
+      addToast({
+        type: 'info',
+        title: 'Bulk add stopped',
+        message: `Added ${successCount} of ${toAdd.length}${failCount > 0 ? `, ${failCount} failed` : ''}`,
+      });
+    } else if (successCount > 0) {
+      addToast({
+        type: 'success',
         title: `Added ${successCount} artist${successCount > 1 ? 's' : ''} to Lidarr`,
         message: failCount > 0 ? `${failCount} failed` : undefined
       });
@@ -391,40 +381,6 @@ export default function DiscoverPage() {
         title="Discover"
         description="Get artist recommendations based on your Lidarr library"
       />
-
-      {/* Filters Section */}
-      <Card>
-        <CardContent className="p-4">
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center gap-2 text-sm font-medium w-full"
-          >
-            <Filter className="h-4 w-4" />
-            Filters
-            {showFilters ? (
-              <ChevronUp className="h-4 w-4 ml-auto" />
-            ) : (
-              <ChevronDown className="h-4 w-4 ml-auto" />
-            )}
-            {releaseTypes.length > 0 && (
-              <Badge variant="secondary" className="ml-2">
-                {releaseTypes.length} release type{releaseTypes.length !== 1 ? 's' : ''}
-              </Badge>
-            )}
-          </button>
-          {showFilters && (
-            <div className="mt-4 pt-4 border-t">
-              <ReleaseTypeFilter
-                value={releaseTypes}
-                onChange={setReleaseTypes}
-              />
-              <p className="text-xs text-muted-foreground mt-3">
-                Filter recommendations by release type (for future subscription results)
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Library Selection Panel */}
@@ -673,9 +629,9 @@ export default function DiscoverPage() {
                   </div>
                 )}
                 <div className="divide-y">
-                  {recommendations.map((rec, idx) => (
+                  {recommendations.map((rec) => (
                     <div
-                      key={idx}
+                      key={rec.mbid ?? rec.name}
                       className={`flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors ${
                         selectedRecs.has(rec.name) && !rec.inLibrary ? 'bg-primary/10' : ''
                       }`}
@@ -802,7 +758,7 @@ export default function DiscoverPage() {
         </Card>
       </div>
 
-      {/* Bulk Add Modal */}
+      {/* Bulk Add Modal — uses the same profile selections as single add */}
       <Modal
         isOpen={showBulkAddModal}
         onClose={() => !isBulkAdding && setShowBulkAddModal(false)}
@@ -810,33 +766,36 @@ export default function DiscoverPage() {
       >
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Quality Profile</label>
+            <label className="text-sm font-medium" htmlFor="bulk-quality-profile">Quality Profile</label>
             <Select
-              value={String(addProfiles.qualityProfileId)}
-              onChange={(e) => setAddProfiles(p => ({ ...p, qualityProfileId: Number(e.target.value) }))}
+              id="bulk-quality-profile"
+              value={String(selectedQuality || '')}
+              onChange={(e) => setSelectedQuality(Number(e.target.value))}
               disabled={isBulkAdding}
               options={profiles?.qualityProfiles.map(p => ({ value: String(p.id), label: p.name })) ?? []}
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Metadata Profile</label>
+            <label className="text-sm font-medium" htmlFor="bulk-metadata-profile">Metadata Profile</label>
             <Select
-              value={String(addProfiles.metadataProfileId)}
-              onChange={(e) => setAddProfiles(p => ({ ...p, metadataProfileId: Number(e.target.value) }))}
+              id="bulk-metadata-profile"
+              value={String(selectedMetadata || '')}
+              onChange={(e) => setSelectedMetadata(Number(e.target.value))}
               disabled={isBulkAdding}
               options={profiles?.metadataProfiles.map(p => ({ value: String(p.id), label: p.name })) ?? []}
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Root Folder</label>
+            <label className="text-sm font-medium" htmlFor="bulk-root-folder">Root Folder</label>
             <Select
-              value={addProfiles.rootFolderPath}
-              onChange={(e) => setAddProfiles(p => ({ ...p, rootFolderPath: e.target.value }))}
+              id="bulk-root-folder"
+              value={selectedRootFolder || ''}
+              onChange={(e) => setSelectedRootFolder(e.target.value)}
               disabled={isBulkAdding}
               options={profiles?.rootFolders.map(f => ({ value: f.path, label: f.path })) ?? []}
             />
           </div>
-          
+
           {isBulkAdding && (
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
@@ -860,10 +819,10 @@ export default function DiscoverPage() {
         <ModalFooter>
           <Button
             variant="outline"
-            onClick={() => setShowBulkAddModal(false)}
-            disabled={isBulkAdding}
+            onClick={() => (isBulkAdding ? cancelBulkAdd() : setShowBulkAddModal(false))}
+            disabled={isCancellingBulk}
           >
-            Cancel
+            {isBulkAdding ? (isCancellingBulk ? 'Stopping…' : 'Stop') : 'Cancel'}
           </Button>
           <Button
             onClick={bulkAddToLidarr}

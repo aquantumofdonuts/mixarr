@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -95,6 +95,12 @@ export default function LibraryPage() {
   const JOB_COMPLETE_DISPLAY_MS = 3000;
   const POLL_INTERVAL_MS = 2000;
 
+  // Guards the poll loop: skips a tick while the previous fetch is still
+  // in flight, and ensures completion side effects (toast + refetch) fire
+  // exactly once even if responses overlap.
+  const pollInFlightRef = useRef(false);
+  const completionHandledRef = useRef(false);
+
   // Check for existing fix job on mount
   useEffect(() => {
     if (!isAdmin) return;
@@ -113,19 +119,28 @@ export default function LibraryPage() {
   useEffect(() => {
     if (!fixJob || fixJob.status !== 'running') return;
 
+    completionHandledRef.current = false;
+
     const pollStatus = async () => {
-      const { data } = await api.get<FixJobStatus>('/api/search/lidarr/artists/fix-all/status');
-      if (data) {
-        setFixJob(data);
-        if (data.status === 'completed' || data.status === 'cancelled') {
-          fetchArtists();
-          addToast({
-            type: data.status === 'completed' ? 'success' : 'info',
-            title: data.status === 'completed' ? 'Fix All Completed' : 'Fix All Cancelled',
-            message: `Processed ${data.processed}/${data.total} artists. Fixed: ${data.fixed}, Failed: ${data.failed}`
-          });
-          setTimeout(() => setFixJob(null), JOB_COMPLETE_DISPLAY_MS);
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      try {
+        const { data } = await api.get<FixJobStatus>('/api/search/lidarr/artists/fix-all/status');
+        if (data) {
+          setFixJob(data);
+          if ((data.status === 'completed' || data.status === 'cancelled') && !completionHandledRef.current) {
+            completionHandledRef.current = true;
+            fetchArtists();
+            addToast({
+              type: data.status === 'completed' ? 'success' : 'info',
+              title: data.status === 'completed' ? 'Fix All Completed' : 'Fix All Cancelled',
+              message: `Processed ${data.processed}/${data.total} artists. Fixed: ${data.fixed}, Failed: ${data.failed}`
+            });
+            setTimeout(() => setFixJob(null), JOB_COMPLETE_DISPLAY_MS);
+          }
         }
+      } finally {
+        pollInFlightRef.current = false;
       }
     };
 
@@ -264,13 +279,20 @@ export default function LibraryPage() {
     setIsLoading(false);
   };
 
+  // Defer search filtering so typing stays responsive on large libraries
+  const deferredSearch = useDeferredValue(searchQuery);
+
+  // Cap rendered rows; "Show more" reveals the rest incrementally
+  const RENDER_CHUNK = 250;
+  const [visibleCount, setVisibleCount] = useState(RENDER_CHUNK);
+
   // Filter and sort artists
   const filteredArtists = useMemo(() => {
     let result = [...artists];
-    
+
     // Apply search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+    if (deferredSearch) {
+      const query = deferredSearch.toLowerCase();
       result = result.filter(a => a.name.toLowerCase().includes(query));
     }
     
@@ -314,7 +336,17 @@ export default function LibraryPage() {
     });
     
     return result;
-  }, [artists, searchQuery, filter, sortField, sortDirection]);
+  }, [artists, deferredSearch, filter, sortField, sortDirection]);
+
+  // Reset the render window whenever the visible data set changes
+  useEffect(() => {
+    setVisibleCount(RENDER_CHUNK);
+  }, [deferredSearch, filter, sortField, sortDirection, artists]);
+
+  const visibleArtists = useMemo(
+    () => filteredArtists.slice(0, visibleCount),
+    [filteredArtists, visibleCount]
+  );
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -582,7 +614,7 @@ export default function LibraryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredArtists.map((artist) => (
+                  {visibleArtists.map((artist) => (
                     <tr key={artist.id} className="border-b hover:bg-muted/50">
                       <td className="py-3 px-2">
                         <div className="font-medium">{artist.name}</div>
@@ -638,6 +670,17 @@ export default function LibraryPage() {
                   ))}
                 </tbody>
               </table>
+              {filteredArtists.length > visibleCount && (
+                <div className="flex justify-center py-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setVisibleCount(c => c + RENDER_CHUNK)}
+                  >
+                    Show more ({filteredArtists.length - visibleCount} remaining)
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
