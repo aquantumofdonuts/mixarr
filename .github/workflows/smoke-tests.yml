@@ -1,0 +1,126 @@
+name: Smoke Tests
+
+on:
+  pull_request:
+    branches: [prod, dev]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  PNPM_VERSION: '8.15.0'
+
+jobs:
+  smoke-tests:
+    name: E2E Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: galaxymath_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/galaxymath_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: test-secret-for-smoke-tests
+      JWT_REFRESH_SECRET: test-refresh-secret-for-smoke-tests
+      NODE_ENV: test
+      CI: true
+      API_URL: http://localhost:4000
+      BASE_URL: http://localhost:5173
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Run database migrations
+        run: pnpm db:migrate:deploy
+
+      - name: Build all packages
+        run: pnpm build
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Start API server
+        run: |
+          cd apps/api
+          node dist/main.js &
+          sleep 10
+        env:
+          PORT: 4000
+
+      - name: Start Game frontend
+        run: |
+          cd apps/game/frontend
+          pnpm exec vite preview --port 5173 &
+          sleep 5
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for API..."
+          timeout 60 bash -c 'until curl -s http://localhost:4000/api/v1/health > /dev/null; do sleep 2; done'
+          echo "API is ready!"
+          
+          echo "Waiting for frontend..."
+          timeout 60 bash -c 'until curl -s http://localhost:5173 > /dev/null; do sleep 2; done'
+          echo "Frontend is ready!"
+
+      - name: Run smoke tests
+        run: pnpm exec playwright test tests/e2e/smoke/ --reporter=list
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 7
