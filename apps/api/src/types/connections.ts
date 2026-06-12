@@ -107,7 +107,10 @@ export function isListenBrainzConfig(config: unknown): config is ListenBrainzCon
     return false;
   }
   const c = config as Record<string, unknown>;
-  return typeof c.username === 'string';
+  return (
+    typeof c.username === 'string' &&
+    (c.url === undefined || typeof c.url === 'string')
+  );
 }
 
 // =============================================================================
