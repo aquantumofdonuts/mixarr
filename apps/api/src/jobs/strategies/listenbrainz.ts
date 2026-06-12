@@ -31,7 +31,7 @@ function getListenBrainzService(context: StrategyContext): { service: ListenBrai
   if (!isListenBrainzConfig(conn.config)) throw new Error('Invalid ListenBrainz connection config');
   const username = context.config.username || conn.config.username;
   if (!username) throw new Error('ListenBrainz username not found. Check your ListenBrainz connection settings.');
-  return { service: new ListenBrainzService(username, conn.config.token), username };
+  return { service: new ListenBrainzService(username, conn.config.token, undefined, conn.config.url), username };
 }
 
 

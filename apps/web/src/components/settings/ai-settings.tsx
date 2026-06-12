@@ -197,7 +197,7 @@ export function AISettings() {
                   type="text"
                   value={openaiModel}
                   onChange={(e) => setOpenaiModel(e.target.value)}
-                  placeholder="gpt-3.5-turbo (default)"
+                  placeholder="gpt-4o-mini (default)"
                 />
                 <p className="text-xs text-muted-foreground">
                   Model name varies by provider (e.g., llama3.2, mistral, gpt-4o)

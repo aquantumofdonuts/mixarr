@@ -156,7 +156,7 @@ const connectionTestHandlers: Record<string, (config: Record<string, any>) => Pr
 
   listenbrainz: async (config) => {
     try {
-      const service = new ListenBrainzService(config.username, config.token);
+      const service = new ListenBrainzService(config.username, config.token, undefined, config.url);
       const isValid = await service.validateUser();
       return {
         success: isValid,
