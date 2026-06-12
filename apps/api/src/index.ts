@@ -33,6 +33,13 @@ import { apiLimiter } from './middleware/rate-limiter.js';
 import { initializeScheduler } from './jobs/scheduler.js';
 import { redis } from './lib/redis.js';
 import slskdRouter, { cleanupQueueEvents } from './routes/slskd.js';
+import { applyNetworkPreflight } from './lib/network-preflight.js';
+
+// Probe outbound IPv6 connectivity before any worker establishes pools.
+// On hosts where v6 is advertised but egress is broken, this falls back to v4.
+if (process.env.NODE_ENV !== 'test') {
+  await applyNetworkPreflight();
+}
 
 // Import workers only in non-test environments to prevent test pollution
 if (process.env.NODE_ENV !== 'test') {
