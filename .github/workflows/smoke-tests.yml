@@ -9,7 +9,9 @@ on:
 
 env:
   NODE_VERSION: '20'
-  PNPM_VERSION: '8.15.0'
+
+permissions:
+  contents: read
 
 jobs:
   smoke-tests:
@@ -18,19 +20,20 @@ jobs:
     timeout-minutes: 30
     
     services:
-      postgres:
-        image: postgres:16-alpine
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: galaxymath_test
+          MYSQL_DATABASE: mixarr_test
+          MYSQL_USER: mixarr
+          MYSQL_PASSWORD: mixarr
+          MYSQL_ROOT_PASSWORD: root
         ports:
-          - 5432:5432
+          - 3306:3306
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
       redis:
         image: redis:7-alpine
@@ -43,78 +46,72 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://test:test@localhost:5432/galaxymath_test
-      REDIS_URL: redis://localhost:6379
-      JWT_SECRET: test-secret-for-smoke-tests
-      JWT_REFRESH_SECRET: test-refresh-secret-for-smoke-tests
+      DATABASE_URL: mysql://mixarr:mixarr@127.0.0.1:3306/mixarr_test
+      REDIS_URL: redis://127.0.0.1:6379
+      SESSION_SECRET: smoke-test-secret
       NODE_ENV: test
       CI: true
-      API_URL: http://localhost:4000
-      BASE_URL: http://localhost:5173
+      API_URL: http://127.0.0.1:3005
+      E2E_BASE_URL: http://127.0.0.1:3000
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
+          cache: npm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Generate Prisma client
-        run: pnpm db:generate
+        run: npm run db:generate
 
       - name: Run database migrations
-        run: pnpm db:migrate:deploy
+        run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
 
-      - name: Build all packages
-        run: pnpm build
+      - name: Build API and web
+        run: |
+          npm run build --workspace=@mixarr/api
+          npm run build --workspace=@mixarr/web
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install chromium --with-deps
+        run: |
+          cd apps/web
+          npx playwright install --with-deps chromium
 
       - name: Start API server
         run: |
-          cd apps/api
-          node dist/main.js &
-          sleep 10
-        env:
-          PORT: 4000
+          npm run start --workspace=@mixarr/api &
 
-      - name: Start Game frontend
+      - name: Start web frontend
         run: |
-          cd apps/game/frontend
-          pnpm exec vite preview --port 5173 &
-          sleep 5
+          npm run start --workspace=@mixarr/web &
 
       - name: Wait for services
         run: |
           echo "Waiting for API..."
-          timeout 60 bash -c 'until curl -s http://localhost:4000/api/v1/health > /dev/null; do sleep 2; done'
+          timeout 90 bash -c 'until curl -fsS http://127.0.0.1:3005/api/health > /dev/null; do sleep 2; done'
           echo "API is ready!"
           
           echo "Waiting for frontend..."
-          timeout 60 bash -c 'until curl -s http://localhost:5173 > /dev/null; do sleep 2; done'
+          timeout 90 bash -c 'until curl -fsS http://127.0.0.1:3000 > /dev/null; do sleep 2; done'
           echo "Frontend is ready!"
 
       - name: Run smoke tests
-        run: pnpm exec playwright test tests/e2e/smoke/ --reporter=list
+        run: |
+          cd apps/web
+          npx playwright test e2e/theme.spec.ts --project=chromium --reporter=list
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-report
-          path: playwright-report/
+          path: apps/web/playwright-report/
           retention-days: 7
 
       - name: Upload test results
@@ -122,5 +119,5 @@ jobs:
         if: always()
         with:
           name: test-results
-          path: test-results/
+          path: apps/web/test-results/
           retention-days: 7

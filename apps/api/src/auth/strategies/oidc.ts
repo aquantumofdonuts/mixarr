@@ -7,7 +7,7 @@ const DEFAULT_DISPLAY_NAME_ATTRIBUTE = 'name';
 const DEFAULT_USERNAME_ATTRIBUTE = 'preferred_username';
 
 // Cache discovered OIDC clients to avoid a network round-trip on every login attempt.
-// Keyed by issuerUrl::clientId so separate providers don't share an entry.
+// Key includes secret/callback so config rotations invalidate stale clients.
 const discoveryCache = new Map<string, { client: Client; issuerIdentifier: string }>();
 
 export function clearOidcDiscoveryCache(): void {
@@ -29,8 +29,12 @@ export interface OidcConfig {
 type OidcUser = Express.User | false;
 type DoneCallback = (err: unknown, user?: OidcUser, info?: { message?: string }) => void;
 
+function getDiscoveryCacheKey(config: OidcConfig): string {
+  return `${config.issuerUrl}::${config.clientId}::${config.clientSecret}::${config.callbackUrl}`;
+}
+
 async function getOidcClient(config: OidcConfig): Promise<{ client: Client; issuerIdentifier: string }> {
-  const cacheKey = `${config.issuerUrl}::${config.clientId}`;
+  const cacheKey = getDiscoveryCacheKey(config);
   const cached = discoveryCache.get(cacheKey);
   if (cached) return cached;
 

@@ -21,6 +21,10 @@ import {
 
 const logger = createLogger('SSORoute');
 
+function isTimeoutLikeError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
+
 export const ssoRouter = Router();
 const ssoService = new SsoProviderService(prisma);
 
@@ -170,7 +174,7 @@ ssoRouter.post('/providers/:type/test', validateParams(ssoProviderTypeParamsSche
             res.json({ success: true, message: 'Successfully fetched SAML metadata' });
             return;
           } catch (error) {
-            if (error instanceof Error && error.name === 'AbortError') {
+            if (isTimeoutLikeError(error)) {
               res.json({ success: false, message: 'Timeout: Failed to fetch metadata within 10 seconds' });
               return;
             }
@@ -215,7 +219,7 @@ ssoRouter.post('/providers/:type/test', validateParams(ssoProviderTypeParamsSche
           res.json({ success: true, message: `OIDC discovery successful (issuer: ${doc.issuer})` });
           return;
         } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') {
+          if (isTimeoutLikeError(error)) {
             res.json({ success: false, message: 'Timeout: Failed to fetch discovery document within 10 seconds' });
             return;
           }

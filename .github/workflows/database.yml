@@ -4,39 +4,38 @@ on:
   push:
     branches: [prod]
     paths:
-      - 'packages/database/prisma/**'
+      - 'apps/api/prisma/schema.prisma'
+      - 'apps/api/prisma/migrations/**'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   NODE_VERSION: '20'
-  PNPM_VERSION: '8.15.0'
 
 jobs:
   migrate-production:
     name: Migrate Production Database
     runs-on: ubuntu-latest
-    environment: production
+    environment:
+      name: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
+          cache: npm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Run migrations
-        run: pnpm db:migrate:deploy
+        run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
 

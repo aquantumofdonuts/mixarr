@@ -34,6 +34,11 @@ function getListenBrainzService(context: StrategyContext): { service: ListenBrai
   return { service: new ListenBrainzService(username, conn.config.token, undefined, conn.config.url), username };
 }
 
+function getListenBrainzBaseUrl(context: StrategyContext): string | undefined {
+  const conn = context.connections.get('listenbrainz');
+  return conn && isListenBrainzConfig(conn.config) ? conn.config.url : undefined;
+}
+
 
 
 /** Extract unique artists by lowercase name from tracks with artist_name/artist_mbid. */
@@ -84,6 +89,7 @@ const listenbrainzTop: SubscriptionStrategy = {
 const listenbrainzSimilar: SubscriptionStrategy = {
   async execute(context) {
     const { service, username } = getListenBrainzService(context);
+    const baseUrl = getListenBrainzBaseUrl(context);
     const limit = context.config.limit || 50;
     const period: ListenBrainzPeriod = VALID_PERIODS.includes(context.config.period) ? context.config.period : 'all_time';
 
@@ -99,7 +105,7 @@ const listenbrainzSimilar: SubscriptionStrategy = {
     for (const similarUser of similarUsers.slice(0, 5)) {
       try {
         // Use NO token when querying other users' public data
-        const similarUserService = new ListenBrainzService(similarUser.user_name);
+        const similarUserService = new ListenBrainzService(similarUser.user_name, undefined, undefined, baseUrl);
         const topArtists = await similarUserService.getUserTopArtists(period, 25);
 
         for (const artist of topArtists.artists) {
@@ -195,7 +201,7 @@ const listenbrainzFreshReleases: SubscriptionStrategy = {
     const conn = context.connections.get('listenbrainz');
     const lbConfig = conn?.config;
     const lbUsername = (lbConfig && isListenBrainzConfig(lbConfig)) ? lbConfig.username : 'anonymous';
-    const listenbrainz = new ListenBrainzService(lbUsername);
+    const listenbrainz = new ListenBrainzService(lbUsername, undefined, undefined, getListenBrainzBaseUrl(context));
     const limit = context.config.limit || 50;
 
     const result = await listenbrainz.getFreshReleases();
@@ -289,7 +295,7 @@ const listenbrainzRadio: SubscriptionStrategy = {
     const conn = context.connections.get('listenbrainz');
     const lbConfig = conn?.config;
     const lbUsername = (lbConfig && isListenBrainzConfig(lbConfig)) ? lbConfig.username : 'anonymous';
-    const listenbrainz = new ListenBrainzService(lbUsername);
+    const listenbrainz = new ListenBrainzService(lbUsername, undefined, undefined, getListenBrainzBaseUrl(context));
     const mode = context.config.mode || 'medium';
     const limit = context.config.limit || 50;
 
