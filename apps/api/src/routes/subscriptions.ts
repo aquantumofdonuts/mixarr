@@ -71,8 +71,8 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       return;
     }
 
-    // Pagination limit — default to 500 (return all results unless client paginates)
-    const limit = parseInt(req.query.limit as string) || 500;
+    // Pagination: default 50 per page, hard cap 200
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
 
     const whereClause: any = { subscriptionId: id };
     if (status) {
