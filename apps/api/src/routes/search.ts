@@ -39,17 +39,16 @@ searchRouter.get('/artists', async (req, res) => {
       return;
     }
 
-    const lidarr = await getLidarrService(req.user!.id);
+    // Fetch once with config so we can key the shared cache without a second DB hit
+    const lidarrResult = await getLidarrServiceWithConfig(req.user!.id);
+    const lidarr = lidarrResult?.service ?? null;
     
     // If Lidarr is available, use it for search with inLibrary status
-    if (lidarr) {
+    if (lidarr && lidarrResult) {
       const results = await lidarr.searchArtist(q);
       
-      // Check which artists are already in library (shared 5-min cache)
-      const lidarrResult = await getLidarrServiceWithConfig(req.user!.id);
-      const cache = lidarrResult
-        ? getSharedLidarrCache(lidarrResult.config.url, lidarrResult.service)
-        : new LidarrCache(lidarr);
+      // Check which artists are already in library (shared cache, no extra DB round-trip)
+      const cache = getSharedLidarrCache(lidarrResult.config.url, lidarrResult.service);
       // No explicit refresh needed - exists() populates lazily on first use
       
       // Get Deezer images for all artists

@@ -59,7 +59,9 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       res.status(400).json({ error: 'Invalid subscription ID' });
       return;
     }
-    const offset = parseInt(req.query.offset as string) || 0;
+    // Pagination: default 50 per page, hard cap 200; clamp both params to safe ranges
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
     const status = req.query.status as string;
 
     const subscription = await prisma.subscription.findUnique({
@@ -70,9 +72,6 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       res.status(404).json({ error: 'Subscription not found' });
       return;
     }
-
-    // Pagination: default 50 per page, hard cap 200
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
 
     const whereClause: any = { subscriptionId: id };
     if (status) {

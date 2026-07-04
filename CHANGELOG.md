@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Redis-cached artist images**: All Deezer artist image lookups now route through a shared Redis cache (7-day positive TTL, 1-hour negative TTL, bounded concurrency of 5). A cold cache warms on first use; subsequent requests are served in microseconds without hitting Deezer
 - **Persistent `imageUrl` on subscription results**: The worker now stores the resolved artist image URL directly on each result row at creation time. Read paths serve the stored URL immediately — no per-request Deezer calls on subscription result pages
 - **Boot-time Lidarr cache warmup**: On startup, the API warms the shared `LidarrCache` for all active Lidarr connections so the first `/results` request never pays the full library download cost
-- **Server-side pagination for subscription results**: `GET /api/subscriptions/:id/results` now defaults to 50 results per page (cap 200) with `page` and `pageSize` query params — replaces unbounded full-table loads
+- **Server-side pagination for subscription results**: `GET /api/subscriptions/:id/results` now defaults to 50 results per page (cap 200) with `limit` / `offset` query params — replaces unbounded full-table loads
 
 ### Changed
 - **Shared `LidarrCache` registry**: All routes now share a single per-Lidarr-URL `LidarrCache` instance. Refresh calls are coalesced (parallel callers share one in-flight refresh) and use stale-while-revalidate — the first call blocks, subsequent stale reads serve immediately and refresh in the background

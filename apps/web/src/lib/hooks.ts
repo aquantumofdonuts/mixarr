@@ -946,7 +946,8 @@ export function useApproveResult(subscriptionId: number) {
     },
     onSuccess: (_data, resultId) => {
       updateResultStatus(queryClient, subscriptionId, resultId, 'added');
-      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'] });
+      // Mark stale without triggering an immediate refetch — the cache is already updated surgically above
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'], refetchType: 'none' });
     },
   });
 }
@@ -960,7 +961,8 @@ export function useRejectResult(subscriptionId: number) {
     },
     onSuccess: (_data, resultId) => {
       updateResultStatus(queryClient, subscriptionId, resultId, 'rejected');
-      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'] });
+      // Mark stale without triggering an immediate refetch — the cache is already updated surgically above
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'], refetchType: 'none' });
     },
   });
 }
