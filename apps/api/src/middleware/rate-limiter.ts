@@ -78,7 +78,10 @@ export const apiLimiter = rateLimit({
     });
   },
   skip: (req: Request) => {
-    // Skip rate limiting for health checks
-    return req.path === '/api/health' || req.path === '/api/health/ready';
+    // Skip rate limiting for health checks. The limiter is mounted at /api,
+    // which strips that prefix from req.path, so compare against the full
+    // original URL (falling back to req.path for direct invocation).
+    const fullPath = (req.originalUrl || req.path).split('?')[0];
+    return fullPath === '/api/health' || fullPath.startsWith('/api/health/');
   },
 });

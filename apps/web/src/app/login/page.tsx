@@ -14,6 +14,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import MonitorPlay from 'lucide-react/dist/esm/icons/monitor-play';
 import KeyRound from 'lucide-react/dist/esm/icons/key-round';
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
+import LogIn from 'lucide-react/dist/esm/icons/log-in';
 import { APP_VERSION } from '@/lib/constants';
 
 function LoginPageContent() {
@@ -205,6 +206,9 @@ function LoginPageContent() {
                     )}
                     {provider.type === 'saml' && (
                       <ShieldCheck className="w-5 h-5 mr-2" />
+                    )}
+                    {provider.type === 'oidc' && (
+                      <LogIn className="w-5 h-5 mr-2" />
                     )}
                     Login with {provider.name}
                   </Button>

@@ -14,18 +14,20 @@ export function ListenBrainzForm({
 }: ConnectionFormProps) {
   const [username, setUsername] = useState(initialConfig?.username ?? '');
   const [token, setToken] = useState(initialConfig?.token ?? '');
+  const [url, setUrl] = useState(initialConfig?.url ?? '');
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (username) {
       const config: Record<string, any> = { username };
       if (token) config.token = token;
+      if (url) config.url = url;
       onConfigReady(config);
     } else {
       onConfigInvalid();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [username, token]);
+  }, [username, token, url]);
 
   return (
     <>
@@ -75,6 +77,18 @@ export function ListenBrainzForm({
         </div>
         <p className="text-xs text-muted-foreground mt-1">
           Optional. Get from listenbrainz.org/profile
+        </p>
+      </div>
+      <div>
+        <label className="text-sm font-medium">API URL (optional)</label>
+        <Input
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://api.listenbrainz.org"
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          Leave blank for ListenBrainz. Set to your Koito instance URL for self-hosted scrobbling.
         </p>
       </div>
     </>

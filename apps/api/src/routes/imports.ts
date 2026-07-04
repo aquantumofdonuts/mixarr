@@ -202,18 +202,23 @@ importsRouter.get('/review/queue', validateQuery(reviewQueueQuerySchema), async 
     const itemType = req.query.itemType as string | undefined;
     const isAdmin = req.user!.role === 'admin';
 
-    const items = await prisma.reviewItem.findMany({
-      where: {
-        ...(isAdmin ? {} : { userId: req.user!.id }),
-        status: status as ReviewStatus,
-        ...(itemType ? { itemType } : {}),
-      },
-      include: {
-        user: { select: { username: true, displayName: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
+    const where = {
+      ...(isAdmin ? {} : { userId: req.user!.id }),
+      status: status as ReviewStatus,
+      ...(itemType ? { itemType } : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      prisma.reviewItem.findMany({
+        where,
+        include: {
+          user: { select: { username: true, displayName: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      }),
+      prisma.reviewItem.count({ where }),
+    ]);
 
     // Fetch artist images from Deezer
     const artistNames = items.map(item => item.artistName);
@@ -225,7 +230,7 @@ importsRouter.get('/review/queue', validateQuery(reviewQueueQuerySchema), async 
       imageUrl: imageMap.get(item.artistName),
     }));
 
-    res.json({ items: itemsWithImages });
+    res.json({ items: itemsWithImages, total });
   } catch (error) {
     log.error('Failed to fetch review queue', {
       error: error instanceof Error ? error.message : String(error),

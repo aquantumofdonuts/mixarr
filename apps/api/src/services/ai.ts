@@ -31,7 +31,7 @@ interface AISettings {
   anthropicStrategy: AIStrategy;
 }
 
-const DEFAULT_OPENAI_MODEL = 'gpt-3.5-turbo';
+const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 
 /**
  * Placeholder API key for OpenAI-compatible endpoints that don't require auth.

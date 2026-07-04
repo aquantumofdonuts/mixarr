@@ -127,59 +127,47 @@ const getDefaultFormState = (): FormState => ({
   discoverAlbums: false,
 });
 
-const getFormStateFromSubscription = (subscription: Subscription): FormState => ({
-  type: subscription.type,
-  name: subscription.name,
-  schedule: subscription.schedule || '',
-  resultHandling: subscription.resultHandling || 'preview',
-  limit: (subscription.config.limit as number)?.toString() || '50',
-  country: (subscription.config.country as string) || '',
-  tag: (subscription.config.tag as string) || (subscription.config.categoryId as string) || '',
-  playlistId: (subscription.config.playlistId as string) || '',
-  aiStrategy: (subscription.config.strategy as string) || 'similar',
-  aiSource: (subscription.config.source as string) || 'spotify',
-  labelId: (subscription.config.labelId as number)?.toString() || '',
-  labelName: (subscription.config.labelName as string) || '',
-  discogsStyle: (subscription.config.style as string) || '',
-  bandcampTag: (subscription.config.tag as string) || '',
-  bandcampSort: (subscription.config.sort as string) || 'pop',
-  listenbrainzPeriod: (subscription.config.period as string) || 'all_time',
-  listenbrainzRecType: (subscription.config.recommendationType as string) || 'similar_artist',
-  listenbrainzYear: (subscription.config.year as number)?.toString() || String(new Date().getFullYear()),
-  listenbrainzPlaylistId: (subscription.config.playlistId as string) || '',
-  listenbrainzSeedMbid: (subscription.config.seedMbid as string) || '',
-  listenbrainzRadioMode: (subscription.config.mode as string) || 'medium',
-  publicPlaylistUrl: (subscription.config.playlistUrl as string) || '',
-  includeAllArtists: (subscription.config.includeAllArtists as boolean) || false,
-  discoverAlbums: (subscription.config.discoverAlbums as boolean) || false,
+/** Map a stored config object onto form fields; shared by edit and preset flows. */
+const buildFormState = (
+  type: string,
+  name: string,
+  config: Record<string, unknown>,
+  overrides: Partial<Pick<FormState, 'schedule' | 'resultHandling'>> = {}
+): FormState => ({
+  type,
+  name,
+  schedule: overrides.schedule ?? '',
+  resultHandling: overrides.resultHandling ?? 'preview',
+  limit: (config.limit as number)?.toString() || '50',
+  country: (config.country as string) || '',
+  tag: (config.tag as string) || (config.categoryId as string) || '',
+  playlistId: (config.playlistId as string) || '',
+  aiStrategy: (config.strategy as string) || 'similar',
+  aiSource: (config.source as string) || 'spotify',
+  labelId: (config.labelId as number)?.toString() || '',
+  labelName: (config.labelName as string) || '',
+  discogsStyle: (config.style as string) || '',
+  bandcampTag: (config.tag as string) || '',
+  bandcampSort: (config.sort as string) || 'pop',
+  listenbrainzPeriod: (config.period as string) || 'all_time',
+  listenbrainzRecType: (config.recommendationType as string) || 'similar_artist',
+  listenbrainzYear: (config.year as number)?.toString() || String(new Date().getFullYear()),
+  listenbrainzPlaylistId: (config.playlistId as string) || '',
+  listenbrainzSeedMbid: (config.seedMbid as string) || '',
+  listenbrainzRadioMode: (config.mode as string) || 'medium',
+  publicPlaylistUrl: (config.playlistUrl as string) || '',
+  includeAllArtists: (config.includeAllArtists as boolean) || false,
+  discoverAlbums: (config.discoverAlbums as boolean) || false,
 });
 
-const getFormStateFromPreset = (preset: Preset): FormState => ({
-  type: preset.type,
-  name: preset.name,
-  schedule: '',
-  resultHandling: 'preview',
-  limit: (preset.config.limit as number)?.toString() || '50',
-  country: (preset.config.country as string) || '',
-  tag: (preset.config.tag as string) || (preset.config.categoryId as string) || '',
-  playlistId: (preset.config.playlistId as string) || '',
-  aiStrategy: (preset.config.strategy as string) || 'similar',
-  aiSource: (preset.config.source as string) || 'spotify',
-  labelId: (preset.config.labelId as number)?.toString() || '',
-  labelName: (preset.config.labelName as string) || '',
-  discogsStyle: (preset.config.style as string) || '',
-  bandcampTag: (preset.config.tag as string) || '',
-  bandcampSort: (preset.config.sort as string) || 'pop',
-  listenbrainzPeriod: (preset.config.period as string) || 'all_time',
-  listenbrainzRecType: (preset.config.recommendationType as string) || 'similar_artist',
-  listenbrainzYear: (preset.config.year as number)?.toString() || String(new Date().getFullYear()),
-  listenbrainzPlaylistId: (preset.config.playlistId as string) || '',
-  listenbrainzSeedMbid: (preset.config.seedMbid as string) || '',
-  listenbrainzRadioMode: (preset.config.mode as string) || 'medium',
-  publicPlaylistUrl: (preset.config.playlistUrl as string) || '',
-  includeAllArtists: (preset.config.includeAllArtists as boolean) || false,
-  discoverAlbums: (preset.config.discoverAlbums as boolean) || false,
-});
+const getFormStateFromSubscription = (subscription: Subscription): FormState =>
+  buildFormState(subscription.type, subscription.name, subscription.config, {
+    schedule: subscription.schedule || '',
+    resultHandling: subscription.resultHandling || 'preview',
+  });
+
+const getFormStateFromPreset = (preset: Preset): FormState =>
+  buildFormState(preset.type, preset.name, preset.config);
 
 // ============================================================================
 // Component
@@ -201,12 +189,15 @@ export function SubscriptionFormModal({
   // Form state
   const [form, setForm] = useState<FormState>(getDefaultFormState());
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Artist search autocomplete state (for listenbrainz_radio)
   const [artistSearch, setArtistSearch] = useState('');
   const [artistResults, setArtistResults] = useState<Array<{ id: string; name: string; disambiguation?: string }>>([]);
   const [isSearchingArtist, setIsSearchingArtist] = useState(false);
   const [showArtistDropdown, setShowArtistDropdown] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
 
   // Name editing state (for edit mode pencil-to-unlock)
   const [isNameEditing, setIsNameEditing] = useState(false);
@@ -231,6 +222,8 @@ export function SubscriptionFormModal({
       }
       setSelectedFromPreset(false);
       setValidationErrors({});
+      setSubmitError(null);
+      setIsSubmitting(false);
       setArtistSearch('');
       setArtistResults([]);
       setShowArtistDropdown(false);
@@ -252,6 +245,7 @@ export function SubscriptionFormModal({
           `/api/search/musicbrainz/artist?q=${encodeURIComponent(artistSearch)}`
         );
         setArtistResults(data?.results || []);
+        setHighlightedIndex(-1);
         setShowArtistDropdown(true);
       } catch (error) {
         console.error('Artist search failed:', error);
@@ -274,6 +268,12 @@ export function SubscriptionFormModal({
       errors.name = 'Name is required';
     } else if (trimmedName.length > 255) {
       errors.name = 'Name must be 255 characters or less';
+    }
+
+    // Validate limit (the number input doesn't enforce min/max for typed values)
+    const limitValue = parseInt(form.limit, 10);
+    if (isNaN(limitValue) || limitValue < 1 || limitValue > 200) {
+      errors.limit = 'Limit must be a number between 1 and 200';
     }
 
     // Validate type-specific required fields
@@ -353,24 +353,34 @@ export function SubscriptionFormModal({
 
   // Handlers
   const handleSave = async () => {
+    if (isSubmitting) return;
+
     const errors = validateForm();
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
       return;
     }
     setValidationErrors({});
+    setSubmitError(null);
 
     const config = buildConfig();
     const name = (form.name || subscriptionTypes.find((t) => t.value === form.type)?.label || form.type).trim();
 
-    await onSave({
-      id: editingSubscription?.id,
-      name,
-      type: form.type,
-      config,
-      schedule: form.schedule || '',
-      resultHandling: form.resultHandling,
-    });
+    setIsSubmitting(true);
+    try {
+      await onSave({
+        id: editingSubscription?.id,
+        name,
+        type: form.type,
+        config,
+        schedule: form.schedule || '',
+        resultHandling: form.resultHandling,
+      });
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Failed to save subscription');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const selectPreset = (preset: Preset) => {
@@ -487,8 +497,9 @@ export function SubscriptionFormModal({
 
           {/* Subscription Type */}
           <div>
-            <label className="text-sm font-medium">Type</label>
+            <label className="text-sm font-medium" htmlFor="sub-type">Type</label>
             <Select
+              id="sub-type"
               value={form.type}
               onChange={(e) => handleTypeChange(e.target.value)}
               options={subscriptionTypes.map((t) => ({
@@ -508,10 +519,11 @@ export function SubscriptionFormModal({
 
           {/* Display Label */}
           <div>
-            <label className="text-sm font-medium">Display Label</label>
+            <label className="text-sm font-medium" htmlFor="sub-name">Display Label</label>
             {editingSubscription && !isNameEditing ? (
               <div className="flex gap-2">
                 <Input
+                  id="sub-name"
                   value={form.name || descriptorPreview || typeConfig?.label || ''}
                   readOnly
                   className="bg-muted cursor-not-allowed flex-1"
@@ -529,6 +541,7 @@ export function SubscriptionFormModal({
               </div>
             ) : (
               <Input
+                id="sub-name"
                 value={form.name || (editingSubscription ? '' : typeConfig?.label || '')}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder={descriptorPreview}
@@ -543,8 +556,9 @@ export function SubscriptionFormModal({
 
           {/* Schedule */}
           <div>
-            <label className="text-sm font-medium">Schedule</label>
+            <label className="text-sm font-medium" htmlFor="sub-schedule">Schedule</label>
             <Select
+              id="sub-schedule"
               value={form.schedule}
               onChange={(e) => setForm({ ...form, schedule: e.target.value })}
               options={scheduleOptions}
@@ -553,8 +567,9 @@ export function SubscriptionFormModal({
 
           {/* Result Handling */}
           <div>
-            <label className="text-sm font-medium">Result Handling</label>
+            <label className="text-sm font-medium" htmlFor="sub-result-handling">Result Handling</label>
             <Select
+              id="sub-result-handling"
               value={form.resultHandling}
               onChange={(e) => setForm({ ...form, resultHandling: e.target.value })}
               options={resultHandlingOptions}
@@ -573,8 +588,9 @@ export function SubscriptionFormModal({
 
           {/* Limit */}
           <div>
-            <label className="text-sm font-medium">Limit</label>
+            <label className="text-sm font-medium" htmlFor="sub-limit">Limit</label>
             <Input
+              id="sub-limit"
               type="number"
               value={form.limit}
               onChange={(e) => setForm({ ...form, limit: e.target.value })}
@@ -582,6 +598,9 @@ export function SubscriptionFormModal({
               min="1"
               max="200"
             />
+            {validationErrors.limit && (
+              <p className="text-xs text-destructive mt-1">{validationErrors.limit}</p>
+            )}
           </div>
 
           {/* ============================================================== */}
@@ -591,8 +610,9 @@ export function SubscriptionFormModal({
           {/* Last.fm Chart / Geo - Country */}
           {(form.type === 'lastfm_chart' || form.type === 'lastfm_geo') && (
             <div>
-              <label className="text-sm font-medium">Country</label>
+              <label className="text-sm font-medium" htmlFor="sub-country">Country</label>
               <Input
+                id="sub-country"
                 value={form.country}
                 onChange={(e) => setForm({ ...form, country: e.target.value })}
                 placeholder="global"
@@ -603,13 +623,14 @@ export function SubscriptionFormModal({
           {/* Last.fm Tag */}
           {(form.type === 'lastfm_tag' || form.type === 'lastfm_tag_albums' || form.type === 'lastfm_tag_similar') && (
             <div>
-              <label className="text-sm font-medium">
+              <label className="text-sm font-medium" htmlFor="sub-tag">
                 Tag
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'tag') && (
                   <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
+                id="sub-tag"
                 value={form.tag}
                 onChange={(e) => setForm({ ...form, tag: e.target.value })}
                 placeholder="e.g., rock, metal, jazz"
@@ -624,13 +645,14 @@ export function SubscriptionFormModal({
           {/* Spotify Playlist */}
           {form.type === 'spotify_playlist' && (
             <div>
-              <label className="text-sm font-medium">
+              <label className="text-sm font-medium" htmlFor="sub-playlist-id">
                 Playlist ID
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'playlistId') && (
                   <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
+                id="sub-playlist-id"
                 value={form.playlistId}
                 onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                 placeholder="Spotify playlist ID"
@@ -645,13 +667,14 @@ export function SubscriptionFormModal({
           {form.type === 'spotify_public_playlist' && (
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium">
+                <label className="text-sm font-medium" htmlFor="sub-playlist-url">
                   Playlist URL
                   {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'publicPlaylistUrl') && (
                     <span className="text-destructive ml-1">*</span>
                   )}
                 </label>
                 <Input
+                  id="sub-playlist-url"
                   value={form.publicPlaylistUrl}
                   onChange={(e) => setForm({ ...form, publicPlaylistUrl: e.target.value })}
                   placeholder="https://open.spotify.com/playlist/..."
@@ -701,13 +724,14 @@ export function SubscriptionFormModal({
           {/* Deezer Playlist */}
           {form.type === 'deezer_playlist' && (
             <div>
-              <label className="text-sm font-medium">
+              <label className="text-sm font-medium" htmlFor="sub-playlist-id">
                 Playlist ID
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'playlistId') && (
                   <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
+                id="sub-playlist-id"
                 value={form.playlistId}
                 onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                 placeholder="Deezer playlist ID"
@@ -721,13 +745,14 @@ export function SubscriptionFormModal({
           {/* TIDAL Playlist */}
           {form.type === 'tidal_playlist' && (
             <div>
-              <label className="text-sm font-medium">
+              <label className="text-sm font-medium" htmlFor="sub-playlist-id">
                 Playlist ID
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'playlistId') && (
                   <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
+                id="sub-playlist-id"
                 value={form.playlistId}
                 onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                 placeholder="TIDAL playlist UUID"
@@ -741,8 +766,9 @@ export function SubscriptionFormModal({
           {/* ListenBrainz Top / Similar - Time Period */}
           {(form.type === 'listenbrainz_top' || form.type === 'listenbrainz_similar') && (
             <div>
-              <label className="text-sm font-medium">Time Period</label>
+              <label className="text-sm font-medium" htmlFor="sub-lb-period">Time Period</label>
               <Select
+                id="sub-lb-period"
                 value={form.listenbrainzPeriod}
                 onChange={(e) => setForm({ ...form, listenbrainzPeriod: e.target.value })}
                 options={[
@@ -760,8 +786,9 @@ export function SubscriptionFormModal({
           {/* ListenBrainz Recommendations - Recommendation Type */}
           {form.type === 'listenbrainz_recommendations' && (
             <div>
-              <label className="text-sm font-medium">Recommendation Type</label>
+              <label className="text-sm font-medium" htmlFor="sub-lb-rectype">Recommendation Type</label>
               <Select
+                id="sub-lb-rectype"
                 value={form.listenbrainzRecType}
                 onChange={(e) => setForm({ ...form, listenbrainzRecType: e.target.value })}
                 options={[
@@ -778,8 +805,9 @@ export function SubscriptionFormModal({
           {/* ListenBrainz Year */}
           {form.type === 'listenbrainz_year' && (
             <div>
-              <label className="text-sm font-medium">Year</label>
+              <label className="text-sm font-medium" htmlFor="sub-lb-year">Year</label>
               <Input
+                id="sub-lb-year"
                 type="number"
                 value={form.listenbrainzYear}
                 onChange={(e) => setForm({ ...form, listenbrainzYear: e.target.value })}
@@ -796,13 +824,14 @@ export function SubscriptionFormModal({
           {/* ListenBrainz Playlist */}
           {form.type === 'listenbrainz_playlist' && (
             <div>
-              <label className="text-sm font-medium">
+              <label className="text-sm font-medium" htmlFor="sub-lb-playlist-id">
                 Playlist ID
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'listenbrainzPlaylistId') && (
                   <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
+                id="sub-lb-playlist-id"
                 value={form.listenbrainzPlaylistId}
                 onChange={(e) => setForm({ ...form, listenbrainzPlaylistId: e.target.value })}
                 placeholder="e.g., abc123-def456-..."
@@ -820,7 +849,7 @@ export function SubscriptionFormModal({
           {form.type === 'listenbrainz_radio' && (
             <>
               <div className="relative">
-                <label className="text-sm font-medium">
+                <label className="text-sm font-medium" htmlFor="sub-seed-artist">
                   Seed Artist{' '}
                   {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'listenbrainzSeedMbid') && (
                     <span className="text-destructive">*</span>
@@ -828,6 +857,14 @@ export function SubscriptionFormModal({
                 </label>
                 <div className="relative">
                   <Input
+                    id="sub-seed-artist"
+                    role="combobox"
+                    aria-expanded={showArtistDropdown && artistResults.length > 0}
+                    aria-controls="seed-artist-listbox"
+                    aria-autocomplete="list"
+                    aria-activedescendant={
+                      highlightedIndex >= 0 ? `seed-artist-option-${highlightedIndex}` : undefined
+                    }
                     value={artistSearch}
                     onChange={(e) => {
                       setArtistSearch(e.target.value);
@@ -837,7 +874,27 @@ export function SubscriptionFormModal({
                       }
                     }}
                     onFocus={() => artistResults.length > 0 && setShowArtistDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowArtistDropdown(false), 200)}
+                    onBlur={() => setShowArtistDropdown(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setShowArtistDropdown(true);
+                        setHighlightedIndex((i) => Math.min(i + 1, artistResults.length - 1));
+                      } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setHighlightedIndex((i) => Math.max(i - 1, 0));
+                      } else if (e.key === 'Enter') {
+                        if (showArtistDropdown && highlightedIndex >= 0 && artistResults[highlightedIndex]) {
+                          e.preventDefault();
+                          const artist = artistResults[highlightedIndex];
+                          setForm({ ...form, listenbrainzSeedMbid: artist.id });
+                          setArtistSearch(artist.name);
+                          setShowArtistDropdown(false);
+                        }
+                      } else if (e.key === 'Escape') {
+                        setShowArtistDropdown(false);
+                      }
+                    }}
                     placeholder="Search for an artist..."
                   />
                   {isSearchingArtist && (
@@ -849,12 +906,24 @@ export function SubscriptionFormModal({
 
                 {/* Dropdown results */}
                 {showArtistDropdown && artistResults.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-60 overflow-auto">
-                    {artistResults.map((artist) => (
+                  <div
+                    id="seed-artist-listbox"
+                    role="listbox"
+                    className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-60 overflow-auto"
+                  >
+                    {artistResults.map((artist, idx) => (
                       <button
                         key={artist.id}
+                        id={`seed-artist-option-${idx}`}
                         type="button"
-                        className="w-full px-3 py-2 text-left hover:bg-accent flex flex-col"
+                        role="option"
+                        aria-selected={idx === highlightedIndex}
+                        className={`w-full px-3 py-2 text-left hover:bg-accent flex flex-col ${
+                          idx === highlightedIndex ? 'bg-accent' : ''
+                        }`}
+                        // Prevent the input blur so onClick fires reliably
+                        onMouseDown={(e) => e.preventDefault()}
+                        onMouseEnter={() => setHighlightedIndex(idx)}
                         onClick={() => {
                           setForm({ ...form, listenbrainzSeedMbid: artist.id });
                           setArtistSearch(artist.name);
@@ -911,8 +980,9 @@ export function SubscriptionFormModal({
               </details>
 
               <div>
-                <label className="text-sm font-medium">Radio Mode</label>
+                <label className="text-sm font-medium" htmlFor="sub-lb-radio-mode">Radio Mode</label>
                 <Select
+                  id="sub-lb-radio-mode"
                   value={form.listenbrainzRadioMode}
                   onChange={(e) => setForm({ ...form, listenbrainzRadioMode: e.target.value })}
                   options={[
@@ -929,13 +999,14 @@ export function SubscriptionFormModal({
           {form.type === 'discogs_label' && (
             <>
               <div>
-                <label className="text-sm font-medium">
+                <label className="text-sm font-medium" htmlFor="sub-label-id">
                   Label ID
                   {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'labelId') && (
                     <span className="text-destructive ml-1">*</span>
                   )}
                 </label>
                 <Input
+                  id="sub-label-id"
                   value={form.labelId}
                   onChange={(e) => setForm({ ...form, labelId: e.target.value })}
                   placeholder="Discogs label ID (e.g., 1234)"
@@ -946,8 +1017,9 @@ export function SubscriptionFormModal({
                 {validationErrors.labelId && <p className="text-xs text-destructive mt-1">{validationErrors.labelId}</p>}
               </div>
               <div>
-                <label className="text-sm font-medium">Label Name (for display)</label>
+                <label className="text-sm font-medium" htmlFor="sub-label-name">Label Name (for display)</label>
                 <Input
+                  id="sub-label-name"
                   value={form.labelName}
                   onChange={(e) => setForm({ ...form, labelName: e.target.value })}
                   placeholder="e.g., Warp Records"
@@ -959,13 +1031,14 @@ export function SubscriptionFormModal({
           {/* Discogs Style */}
           {form.type === 'discogs_style' && (
             <div>
-              <label className="text-sm font-medium">
+              <label className="text-sm font-medium" htmlFor="sub-discogs-style">
                 Style/Genre
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'discogsStyle') && (
                   <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Select
+                id="sub-discogs-style"
                 value={form.discogsStyle}
                 onChange={(e) => setForm({ ...form, discogsStyle: e.target.value })}
                 options={[
@@ -997,13 +1070,14 @@ export function SubscriptionFormModal({
           {(form.type === 'bandcamp_tag' || form.type === 'bandcamp_new') && (
             <>
               <div>
-                <label className="text-sm font-medium">
+                <label className="text-sm font-medium" htmlFor="sub-bandcamp-tag">
                   Tag
                   {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'bandcampTag') && (
                     <span className="text-destructive ml-1">*</span>
                   )}
                 </label>
                 <Input
+                  id="sub-bandcamp-tag"
                   value={form.bandcampTag}
                   onChange={(e) => setForm({ ...form, bandcampTag: e.target.value })}
                   placeholder="e.g., electronic, metal, ambient"
@@ -1015,8 +1089,9 @@ export function SubscriptionFormModal({
               </div>
               {form.type === 'bandcamp_tag' && (
                 <div>
-                  <label className="text-sm font-medium">Sort By</label>
+                  <label className="text-sm font-medium" htmlFor="sub-bandcamp-sort">Sort By</label>
                   <Select
+                    id="sub-bandcamp-sort"
                     value={form.bandcampSort}
                     onChange={(e) => setForm({ ...form, bandcampSort: e.target.value })}
                     options={[
@@ -1033,8 +1108,9 @@ export function SubscriptionFormModal({
           {form.type === 'ai_recommendation' && (
             <>
               <div>
-                <label className="text-sm font-medium">AI Source</label>
+                <label className="text-sm font-medium" htmlFor="sub-ai-source">AI Source</label>
                 <Select
+                  id="sub-ai-source"
                   value={form.aiSource}
                   onChange={(e) => setForm({ ...form, aiSource: e.target.value })}
                   options={[
@@ -1045,8 +1121,9 @@ export function SubscriptionFormModal({
                 <p className="text-xs text-muted-foreground mt-1">Which library to base recommendations on</p>
               </div>
               <div>
-                <label className="text-sm font-medium">AI Strategy</label>
+                <label className="text-sm font-medium" htmlFor="sub-ai-strategy">AI Strategy</label>
                 <Select
+                  id="sub-ai-strategy"
                   value={form.aiStrategy}
                   onChange={(e) => setForm({ ...form, aiStrategy: e.target.value })}
                   options={[
@@ -1065,11 +1142,18 @@ export function SubscriptionFormModal({
           )}
 
           {/* Footer */}
+          {submitError && (
+            <p className="text-sm text-destructive flex items-center gap-1">
+              <AlertTriangle className="h-4 w-4 shrink-0" /> {submitError}
+            </p>
+          )}
           <ModalFooter>
-            <Button variant="outline" onClick={handleClose}>
+            <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button onClick={handleSave}>Save</Button>
+            <Button onClick={handleSave} disabled={isSubmitting}>
+              {isSubmitting ? 'Saving…' : 'Save'}
+            </Button>
           </ModalFooter>
         </div>
       )}

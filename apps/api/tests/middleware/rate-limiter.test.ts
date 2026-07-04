@@ -69,6 +69,35 @@ describe('Rate Limiters', () => {
       expect(next).toHaveBeenCalled();
     });
 
+    it('should skip health checks when mounted at /api (req.path has prefix stripped)', async () => {
+      // Express strips the mount prefix: app.use('/api', apiLimiter) sees
+      // req.path === '/health' but req.originalUrl === '/api/health'.
+      const req = {
+        ip: '127.0.0.1',
+        path: '/health',
+        originalUrl: '/api/health',
+        headers: {},
+        socket: { remoteAddress: '127.0.0.1' },
+      } as unknown as Request;
+      const res = {
+        setHeader: vi.fn(),
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as unknown as Response;
+      const next = vi.fn() as NextFunction;
+
+      await new Promise<void>((resolve) => {
+        apiLimiter(req, res, (...args: unknown[]) => {
+          next(...args);
+          resolve();
+        });
+      });
+
+      expect(next).toHaveBeenCalled();
+      // skip() short-circuits before any rate-limit headers are set
+      expect(res.setHeader).not.toHaveBeenCalled();
+    });
+
     it('should skip rate limiting for health ready path /api/health/ready', async () => {
       const req = {
         ip: '127.0.0.1',

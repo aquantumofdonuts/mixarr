@@ -91,7 +91,9 @@ export function Sidebar() {
       return res.json();
     },
     staleTime: 5 * 60 * 1000,
-    refetchInterval: 6 * 60 * 60 * 1000,
+    // Refresh the version/update indicator often enough that it isn't
+    // stale for hours after an upgrade is published
+    refetchInterval: 10 * 60 * 1000,
   });
 
   // Filter nav groups based on user role

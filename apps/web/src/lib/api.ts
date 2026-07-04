@@ -5,7 +5,11 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   body?: unknown;
   headers?: Record<string, string>;
+  /** Request timeout in milliseconds. Defaults to 30s. */
+  timeoutMs?: number;
 }
+
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 interface ApiResponse<T> {
   data: T | null;
@@ -17,7 +21,7 @@ async function request<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<ApiResponse<T>> {
-  const { method = 'GET', body, headers = {} } = options;
+  const { method = 'GET', body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
 
   const config: RequestInit = {
     method,
@@ -26,6 +30,8 @@ async function request<T>(
       ...headers,
     },
     credentials: 'include',
+    // Abort hung requests so the UI never spins forever
+    signal: AbortSignal.timeout(timeoutMs),
   };
 
   if (body) {
@@ -34,32 +40,37 @@ async function request<T>(
 
   try {
     const res = await fetch(`${API_URL}${endpoint}`, config);
-    
+
     // Check content type before parsing - handles HTML error pages from proxies
     const contentType = res.headers.get('content-type') || '';
-    let data: unknown;
-    
-    if (contentType.includes('application/json')) {
-      data = await res.json();
-    } else {
-      // Non-JSON response (likely HTML error page from Caddy/proxy)
-      const text = await res.text();
-      data = { error: `Server error (${res.status}): ${text.substring(0, 100)}` };
-    }
+    const isJson = contentType.includes('application/json');
 
     if (!res.ok) {
-      return {
-        data: null,
-        error: (data as { error?: string }).error || `HTTP ${res.status}`,
-        status: res.status,
-      };
+      let message = `HTTP ${res.status}`;
+      if (isJson) {
+        const parsed = (await res.json()) as { error?: string };
+        message = parsed.error || message;
+      } else {
+        // Non-JSON response (likely HTML error page from Caddy/proxy)
+        const text = await res.text();
+        message = `Server error (${res.status}): ${text.substring(0, 100)}`;
+      }
+      return { data: null, error: message, status: res.status };
     }
 
-    return { data: data as T, error: null, status: res.status };
+    // Successful response without a JSON body (e.g. 204 No Content)
+    if (!isJson) {
+      return { data: null, error: null, status: res.status };
+    }
+
+    return { data: (await res.json()) as T, error: null, status: res.status };
   } catch (err) {
+    const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
     return {
       data: null,
-      error: err instanceof Error ? err.message : 'Network error',
+      error: isTimeout
+        ? `Request timed out after ${Math.round(timeoutMs / 1000)}s`
+        : err instanceof Error ? err.message : 'Network error',
       status: 0,
     };
   }

@@ -1,4 +1,4 @@
-import { test, expect, waitForTheme, getCurrentTheme } from './fixtures';
+import { test, expect, waitForTheme } from './fixtures';
 
 /**
  * Theme E2E Tests

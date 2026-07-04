@@ -219,7 +219,7 @@ describe('AIService', () => {
 
       expect(mockOpenAICreate).toHaveBeenCalled();
       const callArgs = mockOpenAICreate.mock.calls[0][0];
-      expect(callArgs.model).toBe('gpt-3.5-turbo');
+      expect(callArgs.model).toBe('gpt-4o-mini');
     });
 
     it('should work with custom base URL and no API key (Ollama mode)', async () => {

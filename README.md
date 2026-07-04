@@ -161,6 +161,8 @@ Configure these in **Settings → AI**.
 | `BASE_URL` | **Required.** The full URL to access Mixarr. Used for OAuth redirects. | - |
 | `FRONTEND_URL` | Optional. If behind a reverse proxy, set this to the public URL. | - |
 | `TZ` | Timezone for scheduled tasks. | `UTC` |
+| `IPV6_PROBE_HOST` | Host probed at startup over IPv6 to detect broken v6 egress. If the probe fails, Mixarr prefers IPv4 for outbound fetches. | `musicbrainz.org` |
+| `MIXARR_SKIP_NETWORK_PREFLIGHT` | Set to `1` to skip the IPv6 egress probe entirely (e.g. on air-gapped hosts or when you want to force Node's default Happy Eyeballs behaviour). | - |
 
 ### Ports
 

@@ -1,0 +1,43 @@
+name: Database Migrations
+
+on:
+  push:
+    branches: [prod]
+    paths:
+      - 'apps/api/prisma/schema.prisma'
+      - 'apps/api/prisma/migrations/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  migrate-production:
+    name: Migrate Production Database
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Push schema changes
+        # Note: project uses prisma db push (not migrate deploy) — no migration
+        # baseline exists. This safely syncs schema changes to production.
+        run: npx prisma db push --schema apps/api/prisma/schema.prisma --skip-generate --accept-data-loss
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+

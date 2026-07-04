@@ -17,7 +17,7 @@ import Save from 'lucide-react/dist/esm/icons/save';
 import Shield from 'lucide-react/dist/esm/icons/shield';
 import Zap from 'lucide-react/dist/esm/icons/zap';
 
-type SSOProviderType = 'ldap' | 'saml' | 'google' | 'plex';
+type SSOProviderType = 'ldap' | 'saml' | 'google' | 'plex' | 'oidc';
 
 interface SSOProvider {
   id: string;
@@ -41,6 +41,7 @@ interface FieldConfig {
   required?: boolean;
   helpText?: string;
   placeholder?: string;
+  advanced?: boolean;
 }
 
 const providerConfigs: ProviderConfig[] = [
@@ -71,6 +72,21 @@ const providerConfigs: ProviderConfig[] = [
     ],
   },
   {
+    type: 'oidc',
+    name: 'OIDC',
+    description: 'Generic OpenID Connect',
+    fields: [
+      { key: 'issuerUrl', label: 'Issuer URL', type: 'text', required: true, placeholder: 'https://idp.example.com/realms/myrealm', helpText: 'Base URL of the OIDC provider (the .well-known/openid-configuration is appended automatically)' },
+      { key: 'clientId', label: 'Client ID', type: 'text', required: true, placeholder: 'mixarr' },
+      { key: 'clientSecret', label: 'Client Secret', type: 'password', required: true },
+      { key: 'scopes', label: 'Scopes', type: 'text', placeholder: 'openid email profile', helpText: 'Space-separated list. Defaults to "openid email profile".' },
+      { key: 'allowedDomains', label: 'Allowed Domains', type: 'text', placeholder: 'example.com, company.org', helpText: 'Comma-separated list. Leave empty for all.' },
+      { key: 'emailAttribute', label: 'Email Claim', type: 'text', placeholder: 'email', helpText: 'Override only if your provider returns email under a non-standard claim name.', advanced: true },
+      { key: 'displayNameAttribute', label: 'Display Name Claim', type: 'text', placeholder: 'name', helpText: 'Override only if your provider uses a non-standard claim for the user\'s full name.', advanced: true },
+      { key: 'usernameAttribute', label: 'Username Claim', type: 'text', placeholder: 'preferred_username', helpText: 'Fallback claim used when the display name claim is missing.', advanced: true },
+    ],
+  },
+  {
     type: 'google',
     name: 'Google',
     description: 'Allow users to sign in with their Google accounts',
@@ -98,6 +114,7 @@ export function SSOSettings() {
     saml: {},
     google: {},
     plex: {},
+    oidc: {},
   });
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -113,7 +130,7 @@ export function SSOSettings() {
         api.get<{ providers: SSOProvider[] }>('/api/sso/providers'),
         api.get<{ baseUrl: string }>('/api/settings/base-url'),
       ]);
-      
+
       if (providersRes.error) {
         addToast({ type: 'error', title: 'Failed to load SSO providers', message: providersRes.error });
       } else if (providersRes.data) {
@@ -125,7 +142,7 @@ export function SSOSettings() {
         });
         setFormData(newFormData);
       }
-      
+
       if (baseUrlRes.data?.baseUrl) {
         setBaseUrl(baseUrlRes.data.baseUrl);
       }
@@ -279,6 +296,56 @@ export function SSOSettings() {
           const isExpanded = expandedProvider === config.type;
           const isEnabled = provider?.isEnabled ?? false;
           const isSaved = !!provider;
+          const mainFields = config.fields.filter((f) => !f.advanced);
+          const advancedFields = config.fields.filter((f) => f.advanced);
+
+          const renderField = (field: FieldConfig) => (
+            <div key={field.key} className="space-y-2">
+              <label className="text-sm font-medium">
+                {field.label}
+                {field.required && <span className="text-destructive ml-1">*</span>}
+              </label>
+              {field.type === 'textarea' ? (
+                <textarea
+                  value={formData[config.type][field.key] || ''}
+                  onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
+                  placeholder={field.placeholder}
+                  className="w-full min-h-[100px] px-3 py-2 text-sm rounded-md border border-input bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                />
+              ) : field.type === 'password' ? (
+                <div className="relative">
+                  <Input
+                    type={showPasswords[`${config.type}-${field.key}`] ? 'text' : 'password'}
+                    value={formData[config.type][field.key] || ''}
+                    onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
+                    placeholder={field.placeholder || '••••••••'}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => togglePasswordVisibility(`${config.type}-${field.key}`)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPasswords[`${config.type}-${field.key}`] ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <Input
+                  type="text"
+                  value={formData[config.type][field.key] || ''}
+                  onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
+                  placeholder={field.placeholder}
+                />
+              )}
+              {field.helpText && (
+                <p className="text-xs text-muted-foreground">{field.helpText}</p>
+              )}
+            </div>
+          );
 
           return (
             <div key={config.type} className="rounded-container border">
@@ -333,53 +400,19 @@ export function SSOSettings() {
               {/* Accordion Content */}
               {isExpanded && (
                 <div className="border-t p-4 space-y-4">
-                  {config.fields.map((field) => (
-                    <div key={field.key} className="space-y-2">
-                      <label className="text-sm font-medium">
-                        {field.label}
-                        {field.required && <span className="text-destructive ml-1">*</span>}
-                      </label>
-                      {field.type === 'textarea' ? (
-                        <textarea
-                          value={formData[config.type][field.key] || ''}
-                          onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
-                          placeholder={field.placeholder}
-                          className="w-full min-h-[100px] px-3 py-2 text-sm rounded-md border border-input bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                        />
-                      ) : field.type === 'password' ? (
-                        <div className="relative">
-                          <Input
-                            type={showPasswords[`${config.type}-${field.key}`] ? 'text' : 'password'}
-                            value={formData[config.type][field.key] || ''}
-                            onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
-                            placeholder={field.placeholder || '••••••••'}
-                            className="pr-10"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => togglePasswordVisibility(`${config.type}-${field.key}`)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                          >
-                            {showPasswords[`${config.type}-${field.key}`] ? (
-                              <EyeOff className="h-4 w-4" />
-                            ) : (
-                              <Eye className="h-4 w-4" />
-                            )}
-                          </button>
-                        </div>
-                      ) : (
-                        <Input
-                          type="text"
-                          value={formData[config.type][field.key] || ''}
-                          onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
-                          placeholder={field.placeholder}
-                        />
-                      )}
-                      {field.helpText && (
-                        <p className="text-xs text-muted-foreground">{field.helpText}</p>
-                      )}
-                    </div>
-                  ))}
+                  {mainFields.map(renderField)}
+
+                  {advancedFields.length > 0 && (
+                    <details className="group rounded-container border border-dashed">
+                      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+                        <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+                        Advanced (Claim mappings)
+                      </summary>
+                      <div className="space-y-4 border-t border-dashed px-3 py-3">
+                        {advancedFields.map(renderField)}
+                      </div>
+                    </details>
+                  )}
 
                   {/* Google OAuth Callback URL Info */}
                   {config.type === 'google' && (
@@ -387,9 +420,9 @@ export function SSOSettings() {
                       <p className="font-medium text-amber-900 dark:text-amber-100">OAuth Redirect URI</p>
                       <p className="mt-1 text-amber-800 dark:text-amber-200">
                         Add this redirect URI in your{' '}
-                        <a 
-                          href="https://console.cloud.google.com/apis/credentials" 
-                          target="_blank" 
+                        <a
+                          href="https://console.cloud.google.com/apis/credentials"
+                          target="_blank"
                           rel="noopener noreferrer"
                           className="underline hover:no-underline"
                         >
@@ -411,6 +444,19 @@ export function SSOSettings() {
                       </p>
                       <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
                         {baseUrl ? `${baseUrl}/api/auth/sso/saml/callback` : 'Configure Base URL in Global Settings first'}
+                      </code>
+                    </div>
+                  )}
+
+                  {/* OIDC Callback URL Info */}
+                  {config.type === 'oidc' && (
+                    <div className="rounded-container bg-amber-50 dark:bg-amber-950/50 p-3 text-sm">
+                      <p className="font-medium text-amber-900 dark:text-amber-100">OIDC Redirect URI</p>
+                      <p className="mt-1 text-amber-800 dark:text-amber-200">
+                        Register this redirect URI with your OpenID Connect provider:
+                      </p>
+                      <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
+                        {baseUrl ? `${baseUrl}/api/auth/sso/oidc/callback` : 'Configure Base URL in Global Settings first'}
                       </code>
                     </div>
                   )}
