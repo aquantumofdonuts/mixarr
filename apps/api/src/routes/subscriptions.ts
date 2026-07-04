@@ -121,14 +121,29 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       }
     }
 
-    // Fetch artist images from Deezer
-    const artistNames = results.map(r => r.name);
-    const imageMap = await getArtistImages(artistNames);
+    // Serve stored images; resolve (cached) only for legacy rows missing one
+    const missingImage = results.filter(r => !r.imageUrl);
+    const imageMap = missingImage.length > 0
+      ? await getArtistImages(missingImage.map(r => r.artistName ?? r.name))
+      : new Map<string, string>();
+
+    // Persist backfilled URLs so this is a one-time cost per legacy row.
+    // Fire-and-forget: don't block the response on writes.
+    const backfills = missingImage
+      .map(r => ({ id: r.id, url: imageMap.get(r.artistName ?? r.name) }))
+      .filter((u): u is { id: number; url: string } => Boolean(u.url));
+    if (backfills.length > 0) {
+      void Promise.all(
+        backfills.map(u =>
+          prisma.subscriptionResult.update({ where: { id: u.id }, data: { imageUrl: u.url } })
+        )
+      ).catch(error => logger.warn('Failed to backfill result imageUrls', { error }));
+    }
 
     // Add images and optionally inLibrary to results
     const resultsWithImages = results.map(r => ({
       ...r,
-      imageUrl: imageMap.get(r.name),
+      imageUrl: r.imageUrl ?? imageMap.get(r.artistName ?? r.name),
       // Only include inLibrary if we have Lidarr data
       ...(existingArtists && { inLibrary: existingArtists.has(r.name.toLowerCase()) }),
     }));
@@ -144,6 +159,11 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       }, {} as Record<string, number>),
     });
   } catch (error) {
+    logger.error('Failed to fetch subscription results', {
+      error: error instanceof Error ? error.message : String(error),
+      subscriptionId: req.params.id,
+      userId: req.user?.id,
+    });
     res.status(500).json({ error: 'Failed to fetch results' });
   }
 });
@@ -363,6 +383,12 @@ subscriptionsRouter.post('/:id/results/:resultId/reject', async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
+    logger.error('Failed to reject subscription result', {
+      error: error instanceof Error ? error.message : String(error),
+      subscriptionId: req.params.id,
+      resultId: req.params.resultId,
+      userId: req.user?.id,
+    });
     res.status(500).json({ error: 'Failed to reject result' });
   }
 });
