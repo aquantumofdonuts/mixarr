@@ -5,7 +5,7 @@ import { validateBody } from '../middleware/validate.js';
 import { createSubscriptionSchema, updateSubscriptionSchema } from '../schemas/subscription.js';
 import { parseIntParam } from '../utils/params.js';
 import { subscriptionController } from '../controllers/subscriptions.controller.js';
-import { fetchDeezerArtistImages } from '../services/deezer.js';
+import { getArtistImages } from '../services/artist-images.js';
 import { LidarrService } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { notificationService } from '../services/notifications.js';
@@ -123,7 +123,7 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
 
     // Fetch artist images from Deezer
     const artistNames = results.map(r => r.name);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    const imageMap = await getArtistImages(artistNames);
 
     // Add images and optionally inLibrary to results
     const resultsWithImages = results.map(r => ({

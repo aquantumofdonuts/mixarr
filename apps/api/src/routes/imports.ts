@@ -21,7 +21,7 @@ import { LastfmService } from '../services/lastfm.js';
 import { LidarrService, LidarrCache } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { AIService } from '../services/ai.js';
-import { fetchDeezerArtistImages } from '../services/deezer.js';
+import { getArtistImages } from '../services/artist-images.js';
 import { addLogEntry } from './logs.js';
 import { parseSpotifyPlaylistUrl, importPublicPlaylist } from '../services/public-playlist.js';
 import { notificationService } from '../services/notifications.js';
@@ -222,7 +222,7 @@ importsRouter.get('/review/queue', validateQuery(reviewQueueQuerySchema), async 
 
     // Fetch artist images from Deezer
     const artistNames = items.map(item => item.artistName);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    const imageMap = await getArtistImages(artistNames);
 
     // Add images to items
     const itemsWithImages = items.map(item => ({
@@ -956,7 +956,7 @@ importsRouter.get('/preview/spotify/:connectionId', validateParams(connectionIdP
     // Fetch Deezer images for artists without images
     const artistsNeedingImages = artists.filter(a => !a.images || a.images.length === 0);
     if (artistsNeedingImages.length > 0) {
-      const imageMap = await fetchDeezerArtistImages(artistsNeedingImages.map(a => a.name));
+      const imageMap = await getArtistImages(artistsNeedingImages.map(a => a.name));
       artists = artists.map(a => {
         if (!a.images || a.images.length === 0) {
           const imageUrl = imageMap.get(a.name);
@@ -1026,7 +1026,7 @@ importsRouter.get('/preview/lastfm/:connectionId', validateParams(connectionIdPa
 
     // Fetch Deezer images for artists
     const artistNames = filteredArtists.map(a => a.name);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    const imageMap = await getArtistImages(artistNames);
 
     const artists = filteredArtists.map(a => ({
       name: a.name,
@@ -1050,7 +1050,7 @@ importsRouter.get('/preview/lastfm/:connectionId', validateParams(connectionIdPa
           
           // Fetch images for similar artists too
           const similarNames = similarFiltered.map(a => a.name);
-          const similarImageMap = await fetchDeezerArtistImages(similarNames);
+          const similarImageMap = await getArtistImages(similarNames);
           
           similarArtists = similarFiltered.map(a => ({
             name: a.name,

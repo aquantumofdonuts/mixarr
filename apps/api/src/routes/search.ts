@@ -5,7 +5,7 @@ import { parseIntParam } from '../utils/params.js';
 import { LidarrCache } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { LastfmService } from '../services/lastfm.js';
-import { fetchDeezerArtistImages } from '../services/deezer.js';
+import { getArtistImages } from '../services/artist-images.js';
 import { multiSourceSearch, resolveMbid, SearchSource } from '../services/multi-search.js';
 import { MetadataEnrichmentService } from '../services/metadata-enrichment.js';
 import { notificationService } from '../services/notifications.js';
@@ -51,7 +51,7 @@ searchRouter.get('/artists', async (req, res) => {
       
       // Get Deezer images for all artists
       const artistNames = results.map(r => r.artistName);
-      const imageMap = await fetchDeezerArtistImages(artistNames);
+      const imageMap = await getArtistImages(artistNames);
       
       const enrichedResults = await Promise.all(
         results.map(async (artist) => ({
@@ -85,7 +85,7 @@ searchRouter.get('/artists', async (req, res) => {
     
     // Get Deezer images for all artists
     const artistNames = mbResults.map(r => r.name);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    const imageMap = await getArtistImages(artistNames);
     
     // Transform MusicBrainz results to match expected format (without inLibrary)
     const results = mbResults.map(artist => ({
@@ -296,7 +296,7 @@ searchRouter.post('/ai', async (req, res) => {
 
     // Fetch images from Deezer
     const artistNamesForImages = validResults.map(r => r.artistName);
-    const imageMap = await fetchDeezerArtistImages(artistNamesForImages);
+    const imageMap = await getArtistImages(artistNamesForImages);
 
     // Add images to results
     const finalResults = validResults.map(r => ({
@@ -1257,7 +1257,7 @@ searchRouter.get('/label/:mbid/artists', async (req, res) => {
     
     // Fetch images from Deezer
     const artistNames = artists.map(a => a.name);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    const imageMap = await getArtistImages(artistNames);
     
     const enrichedArtists = artists.map(artist => ({
       ...artist,

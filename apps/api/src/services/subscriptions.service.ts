@@ -9,7 +9,7 @@ import prisma from '../lib/db.js';
 import { createLogger } from '../lib/logger.js';
 import { addScheduledJob, removeScheduledJob } from '../jobs/scheduler.js';
 import { scheduleSubscriptionJob } from '../jobs/queue.js';
-import { fetchDeezerArtistImages } from './deezer.js';
+import { getArtistImages } from './artist-images.js';
 import type { Subscription, SubscriptionType, ResultHandling, ConnectionType, Prisma } from '@prisma/client';
 
 const logger = createLogger('SubscriptionService');
@@ -256,7 +256,7 @@ export class SubscriptionService {
 
     // Fetch artist images from Deezer
     const artistNames = results.map(r => r.name);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    const imageMap = await getArtistImages(artistNames);
 
     // Add images to results
     const resultsWithImages = results.map(r => ({
