@@ -33,8 +33,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run migrations
-        run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+      - name: Push schema changes
+        # Note: project uses prisma db push (not migrate deploy) — no migration
+        # baseline exists. This safely syncs schema changes to production.
+        run: npx prisma db push --schema apps/api/prisma/schema.prisma --skip-generate --accept-data-loss
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 

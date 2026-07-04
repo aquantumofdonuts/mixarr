@@ -103,8 +103,8 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Run migrations
-        run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+      - name: Push schema to test DB
+        run: npx prisma db push --schema apps/api/prisma/schema.prisma --skip-generate --accept-data-loss
 
       - name: Run tests
         run: npm test
