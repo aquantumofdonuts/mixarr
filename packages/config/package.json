@@ -1,6 +1,6 @@
 {
   "name": "@mixarr/config",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "private": true,
   "description": "Shared ESLint and TypeScript configurations",
   "main": "index.js",
