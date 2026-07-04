@@ -9,7 +9,7 @@ import prisma from '../lib/db.js';
 import { createLogger } from '../lib/logger.js';
 import { addScheduledJob, removeScheduledJob } from '../jobs/scheduler.js';
 import { scheduleSubscriptionJob } from '../jobs/queue.js';
-import { fetchDeezerArtistImages } from './deezer.js';
+import { getArtistImages } from './artist-images.js';
 import type { Subscription, SubscriptionType, ResultHandling, ConnectionType, Prisma } from '@prisma/client';
 
 const logger = createLogger('SubscriptionService');
@@ -254,14 +254,26 @@ export class SubscriptionService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Fetch artist images from Deezer
-    const artistNames = results.map(r => r.name);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    // Serve stored images; resolve (cached) only for legacy rows missing one
+    const missingImage = results.filter(r => !r.imageUrl);
+    const imageMap = missingImage.length > 0
+      ? await getArtistImages(missingImage.map(r => r.artistName ?? r.name))
+      : new Map<string, string>();
 
-    // Add images to results
+    const backfills = missingImage
+      .map(r => ({ id: r.id, url: imageMap.get(r.artistName ?? r.name) }))
+      .filter((u): u is { id: number; url: string } => Boolean(u.url));
+    if (backfills.length > 0) {
+      void Promise.all(
+        backfills.map(u =>
+          prisma.subscriptionResult.update({ where: { id: u.id }, data: { imageUrl: u.url } })
+        )
+      ).catch(error => logger.warn('Failed to backfill result imageUrls', { error }));
+    }
+
     const resultsWithImages = results.map(r => ({
       ...r,
-      imageUrl: imageMap.get(r.name),
+      imageUrl: r.imageUrl ?? imageMap.get(r.artistName ?? r.name),
     }));
 
     return { run, results: resultsWithImages };

@@ -2,10 +2,10 @@ import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { parseIntParam } from '../utils/params.js';
-import { LidarrCache } from '../services/lidarr.js';
+import { LidarrCache, getSharedLidarrCache } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { LastfmService } from '../services/lastfm.js';
-import { fetchDeezerArtistImages } from '../services/deezer.js';
+import { getArtistImages } from '../services/artist-images.js';
 import { multiSourceSearch, resolveMbid, SearchSource } from '../services/multi-search.js';
 import { MetadataEnrichmentService } from '../services/metadata-enrichment.js';
 import { notificationService } from '../services/notifications.js';
@@ -39,19 +39,21 @@ searchRouter.get('/artists', async (req, res) => {
       return;
     }
 
-    const lidarr = await getLidarrService(req.user!.id);
+    // Fetch once with config so we can key the shared cache without a second DB hit
+    const lidarrResult = await getLidarrServiceWithConfig(req.user!.id);
+    const lidarr = lidarrResult?.service ?? null;
     
     // If Lidarr is available, use it for search with inLibrary status
-    if (lidarr) {
+    if (lidarr && lidarrResult) {
       const results = await lidarr.searchArtist(q);
       
-      // Check which artists are already in library
-      const cache = new LidarrCache(lidarr);
-      await cache.refresh();
+      // Check which artists are already in library (shared cache, no extra DB round-trip)
+      const cache = getSharedLidarrCache(lidarrResult.config.url, lidarrResult.service);
+      // No explicit refresh needed - exists() populates lazily on first use
       
       // Get Deezer images for all artists
       const artistNames = results.map(r => r.artistName);
-      const imageMap = await fetchDeezerArtistImages(artistNames);
+      const imageMap = await getArtistImages(artistNames);
       
       const enrichedResults = await Promise.all(
         results.map(async (artist) => ({
@@ -85,7 +87,7 @@ searchRouter.get('/artists', async (req, res) => {
     
     // Get Deezer images for all artists
     const artistNames = mbResults.map(r => r.name);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    const imageMap = await getArtistImages(artistNames);
     
     // Transform MusicBrainz results to match expected format (without inLibrary)
     const results = mbResults.map(artist => ({
@@ -220,13 +222,11 @@ searchRouter.post('/ai', async (req, res) => {
     // Resolve each artist name to MBID via Lidarr or MusicBrainz
     let cache: LidarrCache | null = null;
     if (lidarr) {
-      cache = new LidarrCache(lidarr);
-      try {
-        await cache.refresh();
-      } catch (cacheError) {
-        log.error('Failed to refresh library cache:', cacheError);
-        // Continue without cache - inLibrary will be false for all
-      }
+      const lidarrResult = await getLidarrServiceWithConfig(req.user!.id);
+      cache = lidarrResult
+        ? getSharedLidarrCache(lidarrResult.config.url, lidarrResult.service)
+        : new LidarrCache(lidarr);
+      // exists() refreshes lazily on first use; no explicit refresh needed
     }
 
     // Use MusicBrainz as fallback when no Lidarr
@@ -296,7 +296,7 @@ searchRouter.post('/ai', async (req, res) => {
 
     // Fetch images from Deezer
     const artistNamesForImages = validResults.map(r => r.artistName);
-    const imageMap = await fetchDeezerArtistImages(artistNamesForImages);
+    const imageMap = await getArtistImages(artistNamesForImages);
 
     // Add images to results
     const finalResults = validResults.map(r => ({
@@ -1257,7 +1257,7 @@ searchRouter.get('/label/:mbid/artists', async (req, res) => {
     
     // Fetch images from Deezer
     const artistNames = artists.map(a => a.name);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    const imageMap = await getArtistImages(artistNames);
     
     const enrichedArtists = artists.map(artist => ({
       ...artist,
@@ -1317,9 +1317,12 @@ searchRouter.post('/batch', async (req, res) => {
       return;
     }
 
-    // Get cache to check existing artists
-    const cache = new LidarrCache(lidarr);
-    await cache.refresh();
+    // Get cache to check existing artists (shared 5-min cache)
+    const lidarrResult2 = await getLidarrServiceWithConfig(req.user!.id);
+    const cache = lidarrResult2
+      ? getSharedLidarrCache(lidarrResult2.config.url, lidarrResult2.service)
+      : new LidarrCache(lidarr);
+    // exists() refreshes lazily on first use
 
     const results = {
       added: [] as string[],

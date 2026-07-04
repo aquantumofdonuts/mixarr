@@ -74,6 +74,18 @@ vi.mock('../../src/services/musicbrainz.js', () => ({
 vi.mock('../../src/services/lidarr.js', () => ({
   LidarrService: vi.fn(),
   LidarrCache: vi.fn(),
+  getSharedLidarrCache: vi.fn(() => ({
+    exists: vi.fn().mockResolvedValue(false),
+    get: vi.fn().mockResolvedValue(null),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  })),
+  invalidateLidarrCache: vi.fn(),
+}));
+
+// Mock artist image service - prevents real Redis/Deezer calls in tests
+vi.mock('../../src/services/artist-images.js', () => ({
+  getArtistImages: vi.fn().mockResolvedValue(new Map()),
+  normalizeArtistName: vi.fn((name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '')),
 }));
 
 // Mock Last.fm service - may be used for some endpoints

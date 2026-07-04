@@ -35,8 +35,19 @@ vi.mock('../../src/services/lidarr.js', () => {
       refresh = mockLidarrCacheRefresh;
       exists = mockLidarrCacheExists;
     },
+    getSharedLidarrCache: vi.fn(() => ({
+      exists: mockLidarrCacheExists,
+      get: vi.fn().mockResolvedValue(null),
+      refresh: mockLidarrCacheRefresh,
+    })),
+    invalidateLidarrCache: vi.fn(),
   };
 });
+
+vi.mock('../../src/services/artist-images.js', () => ({
+  getArtistImages: vi.fn().mockResolvedValue(new Map()),
+  normalizeArtistName: vi.fn((name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '')),
+}));
 
 vi.mock('../../src/services/deezer.js', () => ({
   fetchDeezerArtistImages: vi.fn().mockResolvedValue(new Map()),

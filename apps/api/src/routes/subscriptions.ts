@@ -5,8 +5,8 @@ import { validateBody } from '../middleware/validate.js';
 import { createSubscriptionSchema, updateSubscriptionSchema } from '../schemas/subscription.js';
 import { parseIntParam } from '../utils/params.js';
 import { subscriptionController } from '../controllers/subscriptions.controller.js';
-import { fetchDeezerArtistImages } from '../services/deezer.js';
-import { LidarrService } from '../services/lidarr.js';
+import { getArtistImages } from '../services/artist-images.js';
+import { LidarrService, getSharedLidarrCache, invalidateLidarrCache } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { notificationService } from '../services/notifications.js';
 import { SUBSCRIPTION_PRESETS } from '../data/subscription-presets.js';
@@ -59,7 +59,9 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       res.status(400).json({ error: 'Invalid subscription ID' });
       return;
     }
-    const offset = parseInt(req.query.offset as string) || 0;
+    // Pagination: default 50 per page, hard cap 200; clamp both params to safe ranges
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
     const status = req.query.status as string;
 
     const subscription = await prisma.subscription.findUnique({
@@ -70,9 +72,6 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       res.status(404).json({ error: 'Subscription not found' });
       return;
     }
-
-    // Pagination limit — default to 500 (return all results unless client paginates)
-    const limit = parseInt(req.query.limit as string) || 500;
 
     const whereClause: any = { subscriptionId: id };
     if (status) {
@@ -107,30 +106,48 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       orderBy: { userId: 'desc' },
     });
 
-    let existingArtists: Set<string> | null = null;
+    let inLibraryById: Map<number, boolean> | null = null;
     if (lidarrConn) {
       try {
         const lidarrConfig = lidarrConn.config as { url: string; apiKey: string };
-        const lidarr = new LidarrService(lidarrConfig);
-        existingArtists = new Set(
-          (await lidarr.getArtists()).map(a => a.artistName.toLowerCase())
+        const lidarrCache = getSharedLidarrCache(lidarrConfig.url, new LidarrService(lidarrConfig));
+        const entries = await Promise.all(
+          results.map(async r =>
+            [r.id, await lidarrCache.exists({ name: r.artistName ?? r.name, mbid: r.mbid ?? undefined })] as const
+          )
         );
+        inLibraryById = new Map(entries);
       } catch {
         // Lidarr might be unreachable - continue without library status
-        existingArtists = null;
+        inLibraryById = null;
       }
     }
 
-    // Fetch artist images from Deezer
-    const artistNames = results.map(r => r.name);
-    const imageMap = await fetchDeezerArtistImages(artistNames);
+    // Serve stored images; resolve (cached) only for legacy rows missing one
+    const missingImage = results.filter(r => !r.imageUrl);
+    const imageMap = missingImage.length > 0
+      ? await getArtistImages(missingImage.map(r => r.artistName ?? r.name))
+      : new Map<string, string>();
+
+    // Persist backfilled URLs so this is a one-time cost per legacy row.
+    // Fire-and-forget: don't block the response on writes.
+    const backfills = missingImage
+      .map(r => ({ id: r.id, url: imageMap.get(r.artistName ?? r.name) }))
+      .filter((u): u is { id: number; url: string } => Boolean(u.url));
+    if (backfills.length > 0) {
+      void Promise.all(
+        backfills.map(u =>
+          prisma.subscriptionResult.update({ where: { id: u.id }, data: { imageUrl: u.url } })
+        )
+      ).catch(error => logger.warn('Failed to backfill result imageUrls', { error }));
+    }
 
     // Add images and optionally inLibrary to results
     const resultsWithImages = results.map(r => ({
       ...r,
-      imageUrl: imageMap.get(r.name),
+      imageUrl: r.imageUrl ?? imageMap.get(r.artistName ?? r.name),
       // Only include inLibrary if we have Lidarr data
-      ...(existingArtists && { inLibrary: existingArtists.has(r.name.toLowerCase()) }),
+      ...(inLibraryById && { inLibrary: inLibraryById.get(r.id) ?? false }),
     }));
 
     res.json({
@@ -144,6 +161,11 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       }, {} as Record<string, number>),
     });
   } catch (error) {
+    logger.error('Failed to fetch subscription results', {
+      error: error instanceof Error ? error.message : String(error),
+      subscriptionId: req.params.id,
+      userId: req.user?.id,
+    });
     res.status(500).json({ error: 'Failed to fetch results' });
   }
 });
@@ -302,6 +324,9 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
         data: { status: 'added', processedAt: new Date() },
       });
 
+      // Invalidate shared Lidarr cache so inLibrary reflects the new addition immediately
+      invalidateLidarrCache((lidarrConfig as { url: string }).url);
+
       // Send notification
       await notificationService.send(req.user!.id, 'artist.added', {
         artistName: result.name,
@@ -363,6 +388,12 @@ subscriptionsRouter.post('/:id/results/:resultId/reject', async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
+    logger.error('Failed to reject subscription result', {
+      error: error instanceof Error ? error.message : String(error),
+      subscriptionId: req.params.id,
+      resultId: req.params.resultId,
+      userId: req.user?.id,
+    });
     res.status(500).json({ error: 'Failed to reject result' });
   }
 });

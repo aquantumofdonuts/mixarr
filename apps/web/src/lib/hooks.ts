@@ -18,6 +18,11 @@ export const queryKeys = {
   subscriptions: ['subscriptions'] as const,
   subscription: (id: number) => ['subscriptions', id] as const,
   subscriptionHistory: (id: number) => ['subscriptions', id, 'history'] as const,
+  subscriptionRuns: (id: number) => ['subscriptions', id, 'runs'] as const,
+  subscriptionResults: (id: number, status: string, page: number) =>
+    ['subscriptions', id, 'results', status, page] as const,
+  subscriptionRunDetails: (id: number, runId: number) =>
+    ['subscriptions', id, 'runs', runId] as const,
   presets: ['subscriptions', 'presets'] as const,
   
   // Connections
@@ -792,6 +797,172 @@ export function useCancelSlskdDownload() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['slskd', 'downloads'] });
+    },
+  });
+}
+
+// ─── Subscription Detail Types ───────────────────────────────────────────────
+
+export const RESULTS_PAGE_SIZE = 50;
+
+export interface SubscriptionDetail {
+  id: number;
+  name: string;
+  type: string;
+  config: Record<string, unknown>;
+  schedule: string | null;
+  resultHandling: string;
+  resultLimit: number;
+  isActive: boolean;
+  lastRun: string | null;
+}
+
+export interface SubscriptionRun {
+  id: number;
+  status: string;
+  resultsCount: number;
+  addedCount: number;
+  skippedCount: number;
+  errorMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface SubscriptionResult {
+  id: number;
+  itemType: string;
+  name: string;
+  artistName: string | null;
+  mbid: string | null;
+  status: string;
+  skipReason: string | null;
+  createdAt: string;
+  imageUrl?: string | null;
+  inLibrary?: boolean;
+}
+
+export interface SubscriptionResultsPage {
+  results: SubscriptionResult[];
+  total: number;
+  limit: number;
+  offset: number;
+  statusCounts: Record<string, number>;
+}
+
+// ─── Subscription Detail Hooks ───────────────────────────────────────────────
+
+export function useSubscriptionDetail(id: number) {
+  return useQuery({
+    queryKey: queryKeys.subscription(id),
+    queryFn: async () => {
+      const { data, error } = await api.get<{ subscription: SubscriptionDetail }>(`/api/subscriptions/${id}`);
+      if (error) throw new Error(error);
+      return data!.subscription;
+    },
+    staleTime: 30 * 1000,
+    enabled: Number.isFinite(id),
+  });
+}
+
+export function useSubscriptionRuns(id: number) {
+  return useQuery({
+    queryKey: queryKeys.subscriptionRuns(id),
+    queryFn: async () => {
+      const { data, error } = await api.get<{ runs: SubscriptionRun[] }>(`/api/subscriptions/${id}/runs`);
+      if (error) throw new Error(error);
+      return data!.runs;
+    },
+    staleTime: 30 * 1000,
+    enabled: Number.isFinite(id),
+  });
+}
+
+export function useSubscriptionResults(id: number, status: string, page: number) {
+  return useQuery({
+    queryKey: queryKeys.subscriptionResults(id, status, page),
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        limit: String(RESULTS_PAGE_SIZE),
+        offset: String(page * RESULTS_PAGE_SIZE),
+      });
+      if (status) params.set('status', status);
+      const { data, error } = await api.get<SubscriptionResultsPage>(
+        `/api/subscriptions/${id}/results?${params.toString()}`
+      );
+      if (error) throw new Error(error);
+      return data!;
+    },
+    staleTime: 30 * 1000,
+    placeholderData: (prev) => prev,
+    enabled: Number.isFinite(id),
+  });
+}
+
+export function useSubscriptionRunDetails(id: number, runId: number | null) {
+  return useQuery({
+    queryKey: queryKeys.subscriptionRunDetails(id, runId ?? -1),
+    queryFn: async () => {
+      const { data, error } = await api.get<{ run: SubscriptionRun; results: SubscriptionResult[] }>(
+        `/api/subscriptions/${id}/runs/${runId}`
+      );
+      if (error) throw new Error(error);
+      return data!;
+    },
+    staleTime: 30 * 1000,
+    enabled: Number.isFinite(id) && runId !== null,
+  });
+}
+
+/** Shared cache surgery for approve/reject: flip one row's status everywhere it appears. */
+function updateResultStatus(
+  queryClient: ReturnType<typeof useQueryClient>,
+  subscriptionId: number,
+  resultId: number,
+  newStatus: string
+) {
+  queryClient.setQueriesData<SubscriptionResultsPage>(
+    { queryKey: ['subscriptions', subscriptionId, 'results'] },
+    (old) =>
+      old
+        ? { ...old, results: old.results.map((r) => (r.id === resultId ? { ...r, status: newStatus } : r)) }
+        : old
+  );
+  // For run-details views (shape: { run, results }) — skip plain runs-list (SubscriptionRun[])
+  queryClient.setQueriesData<{ run: SubscriptionRun; results: SubscriptionResult[] }>(
+    { queryKey: ['subscriptions', subscriptionId, 'runs'] },
+    (old) =>
+      old && 'results' in old
+        ? { ...old, results: old.results.map((r) => (r.id === resultId ? { ...r, status: newStatus } : r)) }
+        : old
+  );
+}
+
+export function useApproveResult(subscriptionId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (resultId: number) => {
+      const { error } = await api.post(`/api/subscriptions/${subscriptionId}/results/${resultId}/approve`);
+      if (error) throw new Error(error);
+    },
+    onSuccess: (_data, resultId) => {
+      updateResultStatus(queryClient, subscriptionId, resultId, 'added');
+      // Mark stale without triggering an immediate refetch — the cache is already updated surgically above
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'], refetchType: 'none' });
+    },
+  });
+}
+
+export function useRejectResult(subscriptionId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (resultId: number) => {
+      const { error } = await api.post(`/api/subscriptions/${subscriptionId}/results/${resultId}/reject`);
+      if (error) throw new Error(error);
+    },
+    onSuccess: (_data, resultId) => {
+      updateResultStatus(queryClient, subscriptionId, resultId, 'rejected');
+      // Mark stale without triggering an immediate refetch — the cache is already updated surgically above
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'], refetchType: 'none' });
     },
   });
 }

@@ -10,6 +10,7 @@ import prisma from '../lib/db.js';
 import { QUEUE_NAMES, type SubscriptionJobData } from './queue.js';
 import { LidarrService, LidarrCache } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
+import { getArtistImages } from '../services/artist-images.js';
 
 import { addLogEntry } from '../routes/logs.js';
 import { deduplicateResults } from '../utils/deduplication.js';
@@ -178,6 +179,22 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       dedupedCount: artists.length,
     });
 
+    // Resolve artist images once per run (Redis-cached, bounded concurrency)
+    // so result rows are stored with imageUrl and reads never hit Deezer.
+    let artistImageMap = new Map<string, string>();
+    try {
+      artistImageMap = await getArtistImages([
+        ...artists.map((a) => a.name),
+        ...albumsToAdd.map((a) => a.artistName),
+      ]);
+    } catch (error) {
+      // Images are cosmetic; never fail a run over them
+      await addLogEntry('warn', 'subscription', 'Artist image lookup failed for run', {
+        subscriptionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Process artists based on resultHandling mode
     const resultHandling = subscription.resultHandling || 'preview';
     let added = 0;
@@ -208,6 +225,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             status: 'skipped',
             skipReason: 'already_in_library',
             sources: sourcesArray,
+            imageUrl: artistImageMap.get(artist.name),
             matchCount: sourcesArray.length,
           },
         });
@@ -241,6 +259,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             status: 'skipped',
             skipReason: 'no_mbid_found',
             sources: sourcesArray,
+            imageUrl: artistImageMap.get(artist.name),
             matchCount: sourcesArray.length,
           },
         });
@@ -260,6 +279,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             mbid,
             status: 'pending',
             sources: sourcesArray,
+            imageUrl: artistImageMap.get(artist.name),
             matchCount: sourcesArray.length,
           },
         });
@@ -282,6 +302,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             mbid,
             status: reviewResult.created ? 'queued' : 'deduplicated',
             sources: sourcesArray,
+            imageUrl: artistImageMap.get(artist.name),
             matchCount: sourcesArray.length,
           },
         });
@@ -310,6 +331,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
               status: reviewResult.created ? 'queued' : 'deduplicated',
               skipReason: 'no_slskd_connection',
               sources: sourcesArray,
+              imageUrl: artistImageMap.get(artist.name),
               matchCount: sourcesArray.length,
             },
           });
@@ -341,6 +363,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
               status: slskdResult.searchResultCount && slskdResult.searchResultCount > 0 ? 'pending' : 'skipped',
               skipReason: slskdResult.status === 'not_found' ? 'not_found_on_soulseek' : undefined,
               sources: sourcesArray,
+              imageUrl: artistImageMap.get(artist.name),
               matchCount: slskdResult.searchResultCount || 0,
             },
           });
@@ -364,6 +387,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
                 status: reviewResult.created ? 'queued' : 'deduplicated',
                 skipReason: slskdResult.status === 'not_found' ? 'not_found_on_soulseek' : undefined,
                 sources: sourcesArray,
+                imageUrl: artistImageMap.get(artist.name),
                 matchCount: slskdResult.searchResultCount || 0,
               },
             });
@@ -384,6 +408,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
                 mbid,
                 status: 'added',
                 sources: sourcesArray,
+                imageUrl: artistImageMap.get(artist.name),
                 matchCount: slskdResult.searchResultCount || 0,
               },
             });
@@ -399,6 +424,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
                 status: 'skipped',
                 skipReason: 'not_found_on_soulseek',
                 sources: sourcesArray,
+                imageUrl: artistImageMap.get(artist.name),
                 matchCount: 0,
               },
             });
@@ -414,6 +440,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
                 status: 'failed',
                 skipReason: slskdResult.error,
                 sources: sourcesArray,
+                imageUrl: artistImageMap.get(artist.name),
                 matchCount: 0,
               },
             });
@@ -441,6 +468,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
               status: reviewResult.created ? 'queued' : 'deduplicated',
               skipReason: 'no_lidarr_connection',
               sources: sourcesArray,
+              imageUrl: artistImageMap.get(artist.name),
               matchCount: sourcesArray.length,
             },
           });
@@ -493,6 +521,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
               mbid,
               status: 'added',
               sources: sourcesArray,
+              imageUrl: artistImageMap.get(artist.name),
               matchCount: sourcesArray.length,
             },
           });
@@ -509,6 +538,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
               mbid,
               status: 'failed',
               sources: sourcesArray,
+              imageUrl: artistImageMap.get(artist.name),
               matchCount: sourcesArray.length,
             },
           });
@@ -547,6 +577,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             releaseType: album.releaseType,
             status: 'pending',
             sources: sourcesArray,
+            imageUrl: artistImageMap.get(album.artistName),
             matchCount: 1,
           },
         });
@@ -579,6 +610,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
             releaseType: album.releaseType,
             status: reviewResult.created ? 'queued' : 'deduplicated',
             sources: sourcesArray,
+            imageUrl: artistImageMap.get(album.artistName),
             matchCount: 1,
           },
         });

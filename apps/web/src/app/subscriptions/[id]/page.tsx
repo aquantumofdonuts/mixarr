@@ -21,134 +21,58 @@ import { useParams } from 'next/navigation';
 import { ExternalLinks } from '@/components/ExternalLinks';
 import { subscriptionTypes } from '@/lib/subscription-constants';
 import { buildSubscriptionDescriptor, isDefaultName } from '@/lib/subscription-descriptor';
-
-interface Subscription {
-  id: number;
-  name: string;
-  type: string;
-  config: Record<string, any>;
-  schedule: string | null;
-  resultHandling: string;
-  resultLimit: number;
-  isActive: boolean;
-  lastRun: string | null;
-}
-
-interface SubscriptionRun {
-  id: number;
-  status: string;
-  resultsCount: number;
-  addedCount: number;
-  skippedCount: number;
-  errorMessage: string | null;
-  startedAt: string;
-  completedAt: string | null;
-}
-
-interface SubscriptionResult {
-  id: number;
-  itemType: string;
-  name: string;
-  artistName: string | null;
-  mbid: string | null;
-  status: string;
-  skipReason: string | null;
-  createdAt: string;
-  imageUrl?: string;
-}
+import {
+  useSubscriptionDetail,
+  useSubscriptionRuns,
+  useSubscriptionResults,
+  useSubscriptionRunDetails,
+  useApproveResult,
+  useRejectResult,
+  RESULTS_PAGE_SIZE,
+} from '@/lib/hooks';
 
 export default function SubscriptionDetailPage() {
   const params = useParams();
   const subscriptionId = parseInt(params.id as string, 10);
-  
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [runs, setRuns] = useState<SubscriptionRun[]>([]);
-  const [results, setResults] = useState<SubscriptionResult[]>([]);
-  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
-  const [selectedRun, setSelectedRun] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadingRunId, setLoadingRunId] = useState<number | null>(null);
-  const [processingResultId, setProcessingResultId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'runs' | 'results'>('runs');
-  const [statusFilter, setStatusFilter] = useState<string>('');
   const { addToast } = useToast();
 
-  const fetchSubscription = async () => {
-    const { data, error } = await api.get<{ subscription: Subscription }>(`/api/subscriptions/${subscriptionId}`);
-    if (data) setSubscription(data.subscription);
-    if (error) addToast({ type: 'error', title: 'Failed to load subscription' });
-  };
+  const [activeTab, setActiveTab] = useState<'runs' | 'results'>('runs');
+  const [selectedRun, setSelectedRun] = useState<number | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [page, setPage] = useState(0);
 
-  const fetchRuns = async () => {
-    const { data } = await api.get<{ runs: SubscriptionRun[] }>(`/api/subscriptions/${subscriptionId}/runs`);
-    if (data) setRuns(data.runs);
-  };
+  // These three fire in parallel — no waterfall.
+  const { data: subscription, isLoading: subLoading, isError: subError } = useSubscriptionDetail(subscriptionId);
+  const { data: runs = [], isLoading: runsLoading } = useSubscriptionRuns(subscriptionId);
+  const { data: resultsPage, isLoading: resultsLoading, isFetching: resultsFetching } =
+    useSubscriptionResults(subscriptionId, statusFilter, page);
+  const { data: runDetails, isLoading: runDetailsLoading } =
+    useSubscriptionRunDetails(subscriptionId, selectedRun);
 
-  const fetchResults = async () => {
-    const queryParams = new URLSearchParams();
-    if (statusFilter) queryParams.set('status', statusFilter);
-    const params = queryParams.toString() ? `?${queryParams.toString()}` : '';
-    const { data } = await api.get<{ results: SubscriptionResult[]; statusCounts: Record<string, number> }>(
-      `/api/subscriptions/${subscriptionId}/results${params}`
-    );
-    if (data) {
-      setResults(data.results);
-      setStatusCounts(data.statusCounts);
-    }
-  };
+  const approveMutation = useApproveResult(subscriptionId);
+  const rejectMutation = useRejectResult(subscriptionId);
 
-  const fetchRunDetails = async (runId: number) => {
-    setLoadingRunId(runId);
-    const { data } = await api.get<{ run: SubscriptionRun; results: SubscriptionResult[] }>(
-      `/api/subscriptions/${subscriptionId}/runs/${runId}`
-    );
-    if (data) {
-      setResults(data.results);
-      setSelectedRun(runId);
-    }
-    setLoadingRunId(null);
-  };
+  const isLoading = subLoading || runsLoading || resultsLoading;
 
+  // Show error toast once when the subscription fails to load
   useEffect(() => {
-    const loadData = async () => {
-      setIsLoading(true);
-      await fetchSubscription();
-      await fetchRuns();
-      await fetchResults();
-      setIsLoading(false);
-    };
-    loadData();
-  }, [subscriptionId]);
+    if (subError) addToast({ type: 'error', title: 'Failed to load subscription' });
+  }, [subError]);
 
-  useEffect(() => {
-    if (activeTab === 'results' && selectedRun === null) {
-      fetchResults();
-    }
-  }, [statusFilter, activeTab]);
+  // Filter changes reset paging
+  const handleFilterChange = (s: string) => { setStatusFilter(s); setPage(0); };
 
-  const handleApprove = async (resultId: number) => {
-    setProcessingResultId(resultId);
-    const { error } = await api.post(`/api/subscriptions/${subscriptionId}/results/${resultId}/approve`);
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to approve' });
-    } else {
-      addToast({ type: 'success', title: 'Artist approved' });
-      fetchResults();
-    }
-    setProcessingResultId(null);
-  };
+  const handleApprove = (resultId: number) =>
+    approveMutation.mutate(resultId, {
+      onSuccess: () => addToast({ type: 'success', title: 'Artist approved' }),
+      onError: () => addToast({ type: 'error', title: 'Failed to approve' }),
+    });
 
-  const handleReject = async (resultId: number) => {
-    setProcessingResultId(resultId);
-    const { error } = await api.post(`/api/subscriptions/${subscriptionId}/results/${resultId}/reject`);
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to reject' });
-    } else {
-      addToast({ type: 'success', title: 'Artist rejected' });
-      fetchResults();
-    }
-    setProcessingResultId(null);
-  };
+  const handleReject = (resultId: number) =>
+    rejectMutation.mutate(resultId, {
+      onSuccess: () => addToast({ type: 'success', title: 'Artist rejected' }),
+      onError: () => addToast({ type: 'error', title: 'Failed to reject' }),
+    });
 
   const handleRun = async () => {
     const { error } = await api.post(`/api/jobs/run/subscription/${subscriptionId}`);
@@ -180,53 +104,178 @@ export default function SubscriptionDetailPage() {
     return <Badge className={colors[status] || 'bg-muted-foreground/20'}>{status}</Badge>;
   };
 
-  const renderResultsContent = (showBackButton: boolean) => (
+  // Subscription-wide counts from server (cover ALL pages, not just current)
+  const statusCounts = resultsPage?.statusCounts ?? {};
+  const totalCount = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+
+  // Pagination for the all-results view
+  const totalForFilter = resultsPage?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(totalForFilter / RESULTS_PAGE_SIZE));
+
+  const renderResultCard = (result: NonNullable<typeof resultsPage>['results'][number]) => {
+    const approvePending = approveMutation.isPending && approveMutation.variables === result.id;
+    const rejectPending = rejectMutation.isPending && rejectMutation.variables === result.id;
+    return (
+      <Card key={result.id}>
+        <CardContent className="flex items-center justify-between py-3">
+          <div className="flex items-center gap-4">
+            <div className="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-md overflow-hidden bg-muted">
+              {result.imageUrl ? (
+                <img
+                  src={result.imageUrl}
+                  alt={result.name}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <Music2 className="h-6 w-6 sm:h-7 sm:w-7 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-medium">{result.name}</p>
+              {result.skipReason && (
+                <p className="text-xs text-muted-foreground">{result.skipReason}</p>
+              )}
+              <ExternalLinks mbid={result.mbid || undefined} artistName={result.name} size="sm" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {getResultStatusBadge(result.status)}
+            {(result.status === 'pending' || result.status === 'queued') && (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleApprove(result.id)}
+                  disabled={approvePending || rejectPending}
+                >
+                  {approvePending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle className="h-4 w-4 text-status-success" />
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleReject(result.id)}
+                  disabled={approvePending || rejectPending}
+                >
+                  {rejectPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-status-error" />
+                  )}
+                </Button>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  const renderAllResultsContent = () => (
     <>
-      {showBackButton && (
+      {/* Subscription-wide status filter buttons — counts cover all pages */}
+      <div className="flex gap-2 flex-wrap">
+        <Button
+          size="sm"
+          variant={statusFilter === '' ? 'default' : 'outline'}
+          onClick={() => handleFilterChange('')}
+        >
+          All ({totalCount})
+        </Button>
+        {Object.entries(statusCounts).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
+          <Button
+            key={status}
+            size="sm"
+            variant={statusFilter === status ? 'default' : 'outline'}
+            onClick={() => handleFilterChange(status)}
+          >
+            {status} ({count})
+          </Button>
+        ))}
+      </div>
+
+      {resultsLoading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-container" />)}
+        </div>
+      ) : !resultsPage?.results.length ? (
+        <Card>
+          <CardContent className="py-8 text-center text-muted-foreground">
+            {statusFilter ? `No ${statusFilter} results found` : 'No results found'}
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {resultsPage.results.map(renderResultCard)}
+        </div>
+      )}
+
+      {/* Pagination controls */}
+      {pageCount > 1 && (
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+            Previous
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Page {page + 1} of {pageCount}{resultsFetching ? ' · updating…' : ''}
+          </span>
+          <Button size="sm" variant="outline" disabled={page + 1 >= pageCount} onClick={() => setPage(p => p + 1)}>
+            Next
+          </Button>
+        </div>
+      )}
+    </>
+  );
+
+  const renderRunDetailsContent = () => {
+    if (runDetailsLoading) {
+      return (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-container" />)}
+        </div>
+      );
+    }
+
+    const runResults = runDetails?.results ?? [];
+
+    // Client-side filter for run-details view (small, unpaginated payload)
+    const runCounts = runResults.reduce((acc, r) => {
+      acc[r.status] = (acc[r.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    const runTotal = runResults.length;
+    const filteredRunResults = statusFilter ? runResults.filter(r => r.status === statusFilter) : runResults;
+
+    return (
+      <>
         <Button variant="outline" onClick={() => { setSelectedRun(null); setStatusFilter(''); }}>
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to runs
         </Button>
-      )}
 
-      {/* Status filter - show for both All Results and Run Details */}
-      {(() => {
-        // Calculate counts from current results
-        const counts = results.reduce((acc, r) => {
-          acc[r.status] = (acc[r.status] || 0) + 1;
-          return acc;
-        }, {} as Record<string, number>);
-        const total = results.length;
-
-        return (
-          <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap">
+          <Button size="sm" variant={statusFilter === '' ? 'default' : 'outline'} onClick={() => setStatusFilter('')}>
+            All ({runTotal})
+          </Button>
+          {Object.entries(runCounts).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
             <Button
+              key={status}
               size="sm"
-              variant={statusFilter === '' ? 'default' : 'outline'}
-              onClick={() => setStatusFilter('')}
+              variant={statusFilter === status ? 'default' : 'outline'}
+              onClick={() => setStatusFilter(status)}
             >
-              All ({total})
+              {status} ({count})
             </Button>
-            {Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
-              <Button
-                key={status}
-                size="sm"
-                variant={statusFilter === status ? 'default' : 'outline'}
-                onClick={() => setStatusFilter(status)}
-              >
-                {status} ({count})
-              </Button>
-            ))}
-          </div>
-        );
-      })()}
+          ))}
+        </div>
 
-      {(() => {
-        // Filter results by status
-        const filteredResults = statusFilter
-          ? results.filter(r => r.status === statusFilter)
-          : results;
-
-        return filteredResults.length === 0 ? (
+        {filteredRunResults.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-center text-muted-foreground">
               {statusFilter ? `No ${statusFilter} results found` : 'No results found'}
@@ -234,66 +283,12 @@ export default function SubscriptionDetailPage() {
           </Card>
         ) : (
           <div className="space-y-2">
-            {filteredResults.map((result) => (
-              <Card key={result.id}>
-                <CardContent className="flex items-center justify-between py-3">
-                  <div className="flex items-center gap-4">
-                    <div className="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-md overflow-hidden bg-muted">
-                      {result.imageUrl ? (
-                        <img
-                          src={result.imageUrl}
-                          alt={result.name}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Music2 className="h-6 w-6 sm:h-7 sm:w-7 text-muted-foreground" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium">{result.name}</p>
-                      {result.skipReason && (
-                        <p className="text-xs text-muted-foreground">{result.skipReason}</p>
-                      )}
-                      <ExternalLinks mbid={result.mbid || undefined} artistName={result.name} size="sm" />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {getResultStatusBadge(result.status)}
-                    {(result.status === 'pending' || result.status === 'queued') && (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleApprove(result.id)}
-                          disabled={processingResultId === result.id}
-                        >
-                          {processingResultId === result.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <CheckCircle className="h-4 w-4 text-status-success" />
-                          )}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleReject(result.id)}
-                          disabled={processingResultId === result.id}
-                        >
-                          <XCircle className="h-4 w-4 text-status-error" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+            {filteredRunResults.map(renderResultCard)}
           </div>
-        );
-      })()}
-    </>
-  );
+        )}
+      </>
+    );
+  };
 
   if (isLoading) {
     return (
@@ -345,10 +340,9 @@ export default function SubscriptionDetailPage() {
         </Button>
       </PageHeader>
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onChange={(v) => { setActiveTab(v as 'runs' | 'results'); setSelectedRun(null); }} className="mb-6">
+      <Tabs value={activeTab} onChange={(v) => { setActiveTab(v as 'runs' | 'results'); setSelectedRun(null); setStatusFilter(''); setPage(0); }} className="mb-6">
         <Tab value="runs" label="Run History" badge={runs.length} />
-        <Tab value="results" label="All Results" badge={Object.values(statusCounts).reduce((a, b) => a + b, 0)} />
+        <Tab value="results" label="All Results" badge={totalCount} />
         <TabPanel value="runs">
           {!selectedRun ? (
             <div className="space-y-4">
@@ -360,14 +354,14 @@ export default function SubscriptionDetailPage() {
                 </Card>
               ) : (
                 runs.map((run) => (
-                  <Card 
-                    key={run.id} 
-                    className={`cursor-pointer hover:bg-muted/50 transition-colors ${loadingRunId === run.id ? 'opacity-70' : ''}`} 
-                    onClick={() => !loadingRunId && fetchRunDetails(run.id)}
+                  <Card
+                    key={run.id}
+                    className={`cursor-pointer hover:bg-muted/50 transition-colors ${runDetailsLoading && selectedRun === run.id ? 'opacity-70' : ''}`}
+                    onClick={() => { setSelectedRun(run.id); setStatusFilter(''); }}
                   >
                     <CardContent className="flex items-center justify-between py-4">
                       <div className="flex items-center gap-4">
-                        {loadingRunId === run.id ? (
+                        {runDetailsLoading && selectedRun === run.id ? (
                           <Loader2 className="h-4 w-4 text-primary animate-spin" />
                         ) : (
                           getStatusIcon(run.status)
@@ -384,7 +378,7 @@ export default function SubscriptionDetailPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {loadingRunId === run.id && (
+                        {runDetailsLoading && selectedRun === run.id && (
                           <span className="text-sm text-muted-foreground">Loading...</span>
                         )}
                         <Badge variant={run.status === 'completed' ? 'default' : 'destructive'}>
@@ -398,13 +392,13 @@ export default function SubscriptionDetailPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {renderResultsContent(true)}
+              {renderRunDetailsContent()}
             </div>
           )}
         </TabPanel>
         <TabPanel value="results">
           <div className="space-y-4">
-            {renderResultsContent(false)}
+            {renderAllResultsContent()}
           </div>
         </TabPanel>
       </Tabs>

@@ -42,6 +42,12 @@ vi.mock('../../src/lib/logger.js', () => ({
   }),
 }));
 
+// Mock artist image service - prevents real Redis/Deezer calls in tests
+vi.mock('../../src/services/artist-images.js', () => ({
+  getArtistImages: vi.fn().mockResolvedValue(new Map()),
+  normalizeArtistName: vi.fn((name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '')),
+}));
+
 // Mock Lidarr service as a class
 vi.mock('../../src/services/lidarr.js', () => ({
   LidarrService: class MockLidarrService {
@@ -51,7 +57,20 @@ vi.mock('../../src/services/lidarr.js', () => ({
         { artistName: 'The Beatles' },
       ];
     }
+    async artistExists() { return false; }
   },
+  LidarrCache: class MockLidarrCache {
+    async exists() { return false; }
+    async get() { return null; }
+    async refresh() {}
+  },
+  getSharedLidarrCache: vi.fn(() => ({
+    // Pink Floyd is "in library"; all other artists are not.
+    exists: vi.fn(({ name }: { name: string; mbid?: string }) => Promise.resolve(name === 'Pink Floyd')),
+    get: vi.fn().mockResolvedValue(null),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  })),
+  invalidateLidarrCache: vi.fn(),
 }));
 
 // Mock Deezer image fetching
