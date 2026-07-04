@@ -85,11 +85,11 @@ jobs:
 
       - name: Start API server
         run: |
-          PORT=3005 npm run start --workspace=@mixarr/api > /tmp/api.log 2>&1 &
+          PORT=3005 NODE_ENV=production npm run start --workspace=@mixarr/api > /tmp/api.log 2>&1 &
 
       - name: Start web frontend
         run: |
-          npm run start --workspace=@mixarr/web > /tmp/web.log 2>&1 &
+          NODE_ENV=production npm run start --workspace=@mixarr/web > /tmp/web.log 2>&1 &
 
       - name: Wait for services
         run: |
