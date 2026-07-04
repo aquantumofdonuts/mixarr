@@ -2,7 +2,7 @@ import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { parseIntParam } from '../utils/params.js';
-import { LidarrCache } from '../services/lidarr.js';
+import { LidarrCache, getSharedLidarrCache } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { LastfmService } from '../services/lastfm.js';
 import { getArtistImages } from '../services/artist-images.js';
@@ -45,9 +45,12 @@ searchRouter.get('/artists', async (req, res) => {
     if (lidarr) {
       const results = await lidarr.searchArtist(q);
       
-      // Check which artists are already in library
-      const cache = new LidarrCache(lidarr);
-      await cache.refresh();
+      // Check which artists are already in library (shared 5-min cache)
+      const lidarrResult = await getLidarrServiceWithConfig(req.user!.id);
+      const cache = lidarrResult
+        ? getSharedLidarrCache(lidarrResult.config.url, lidarrResult.service)
+        : new LidarrCache(lidarr);
+      // No explicit refresh needed - exists() populates lazily on first use
       
       // Get Deezer images for all artists
       const artistNames = results.map(r => r.artistName);
@@ -220,13 +223,11 @@ searchRouter.post('/ai', async (req, res) => {
     // Resolve each artist name to MBID via Lidarr or MusicBrainz
     let cache: LidarrCache | null = null;
     if (lidarr) {
-      cache = new LidarrCache(lidarr);
-      try {
-        await cache.refresh();
-      } catch (cacheError) {
-        log.error('Failed to refresh library cache:', cacheError);
-        // Continue without cache - inLibrary will be false for all
-      }
+      const lidarrResult = await getLidarrServiceWithConfig(req.user!.id);
+      cache = lidarrResult
+        ? getSharedLidarrCache(lidarrResult.config.url, lidarrResult.service)
+        : new LidarrCache(lidarr);
+      // exists() refreshes lazily on first use; no explicit refresh needed
     }
 
     // Use MusicBrainz as fallback when no Lidarr
@@ -1317,9 +1318,12 @@ searchRouter.post('/batch', async (req, res) => {
       return;
     }
 
-    // Get cache to check existing artists
-    const cache = new LidarrCache(lidarr);
-    await cache.refresh();
+    // Get cache to check existing artists (shared 5-min cache)
+    const lidarrResult2 = await getLidarrServiceWithConfig(req.user!.id);
+    const cache = lidarrResult2
+      ? getSharedLidarrCache(lidarrResult2.config.url, lidarrResult2.service)
+      : new LidarrCache(lidarr);
+    // exists() refreshes lazily on first use
 
     const results = {
       added: [] as string[],

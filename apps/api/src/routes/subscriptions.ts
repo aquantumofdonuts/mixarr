@@ -6,7 +6,7 @@ import { createSubscriptionSchema, updateSubscriptionSchema } from '../schemas/s
 import { parseIntParam } from '../utils/params.js';
 import { subscriptionController } from '../controllers/subscriptions.controller.js';
 import { getArtistImages } from '../services/artist-images.js';
-import { LidarrService } from '../services/lidarr.js';
+import { LidarrService, getSharedLidarrCache, invalidateLidarrCache } from '../services/lidarr.js';
 import { MusicBrainzService } from '../services/musicbrainz.js';
 import { notificationService } from '../services/notifications.js';
 import { SUBSCRIPTION_PRESETS } from '../data/subscription-presets.js';
@@ -107,17 +107,20 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       orderBy: { userId: 'desc' },
     });
 
-    let existingArtists: Set<string> | null = null;
+    let inLibraryById: Map<number, boolean> | null = null;
     if (lidarrConn) {
       try {
         const lidarrConfig = lidarrConn.config as { url: string; apiKey: string };
-        const lidarr = new LidarrService(lidarrConfig);
-        existingArtists = new Set(
-          (await lidarr.getArtists()).map(a => a.artistName.toLowerCase())
+        const lidarrCache = getSharedLidarrCache(lidarrConfig.url, new LidarrService(lidarrConfig));
+        const entries = await Promise.all(
+          results.map(async r =>
+            [r.id, await lidarrCache.exists({ name: r.artistName ?? r.name, mbid: r.mbid ?? undefined })] as const
+          )
         );
+        inLibraryById = new Map(entries);
       } catch {
         // Lidarr might be unreachable - continue without library status
-        existingArtists = null;
+        inLibraryById = null;
       }
     }
 
@@ -145,7 +148,7 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
       ...r,
       imageUrl: r.imageUrl ?? imageMap.get(r.artistName ?? r.name),
       // Only include inLibrary if we have Lidarr data
-      ...(existingArtists && { inLibrary: existingArtists.has(r.name.toLowerCase()) }),
+      ...(inLibraryById && { inLibrary: inLibraryById.get(r.id) ?? false }),
     }));
 
     res.json({
@@ -321,6 +324,9 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
         where: { id: resultId },
         data: { status: 'added', processedAt: new Date() },
       });
+
+      // Invalidate shared Lidarr cache so inLibrary reflects the new addition immediately
+      invalidateLidarrCache((lidarrConfig as { url: string }).url);
 
       // Send notification
       await notificationService.send(req.user!.id, 'artist.added', {

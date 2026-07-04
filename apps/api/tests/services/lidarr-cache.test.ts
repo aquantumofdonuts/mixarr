@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { LidarrCache } from '../../src/services/lidarr.js';
+import { LidarrCache, getSharedLidarrCache, invalidateLidarrCache } from '../../src/services/lidarr.js';
 import type { LidarrService } from '../../src/services/lidarr.js';
 
 function makeFakeService(callCounter: { count: number }) {
@@ -72,5 +72,27 @@ describe('LidarrCache stale-while-revalidate', () => {
     expect(counter.count).toBe(2); // background refresh was kicked off
 
     release(); // let the background refresh finish cleanly
+  });
+});
+
+describe('shared LidarrCache registry', () => {
+  it('returns the same cache instance for the same key', () => {
+    const counter = { count: 0 };
+    const service = makeFakeService(counter);
+    const a = getSharedLidarrCache('http://lidarr:8686', service);
+    const b = getSharedLidarrCache('http://lidarr:8686', service);
+    expect(a).toBe(b);
+  });
+
+  it('returns distinct caches for distinct keys, and invalidate() drops the instance', () => {
+    const counter = { count: 0 };
+    const service = makeFakeService(counter);
+    const a = getSharedLidarrCache('http://lidarr-a:8686', service);
+    const other = getSharedLidarrCache('http://lidarr-b:8686', service);
+    expect(other).not.toBe(a);
+
+    invalidateLidarrCache('http://lidarr-a:8686');
+    const fresh = getSharedLidarrCache('http://lidarr-a:8686', service);
+    expect(fresh).not.toBe(a);
   });
 });

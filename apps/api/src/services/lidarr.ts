@@ -754,3 +754,24 @@ export class LidarrCache {
     this.lastRefresh = 0;
   }
 }
+
+/**
+ * Process-wide LidarrCache registry keyed by Lidarr base URL, so the
+ * 5-minute artist cache survives across requests instead of being
+ * rebuilt per request.
+ */
+const sharedLidarrCaches = new Map<string, LidarrCache>();
+
+export function getSharedLidarrCache(key: string, service: LidarrService): LidarrCache {
+  let cache = sharedLidarrCaches.get(key);
+  if (!cache) {
+    cache = new LidarrCache(service);
+    sharedLidarrCaches.set(key, cache);
+  }
+  return cache;
+}
+
+/** Drop a cached instance (call after mutating the Lidarr library). */
+export function invalidateLidarrCache(key: string): void {
+  sharedLidarrCaches.delete(key);
+}
