@@ -675,21 +675,34 @@ export class LidarrCache {
   private lastRefresh: number = 0;
   private refreshInterval: number = 5 * 60 * 1000; // 5 minutes
   private service: LidarrService;
+  private refreshPromise: Promise<void> | null = null;
 
-  constructor(service: LidarrService) {
+  constructor(service: LidarrService, refreshIntervalMs?: number) {
     this.service = service;
+    if (refreshIntervalMs !== undefined) {
+      this.refreshInterval = refreshIntervalMs;
+    }
   }
 
   async refresh(): Promise<void> {
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.doRefresh().finally(() => {
+        this.refreshPromise = null;
+      });
+    }
+    return this.refreshPromise;
+  }
+
+  private async doRefresh(): Promise<void> {
     const artists = await this.service.getArtists();
     this.artists.clear();
-    
+
     for (const artist of artists) {
       this.artists.set(artist.foreignArtistId, artist);
       // Also index by normalized name
       this.artists.set(this.normalizeName(artist.artistName), artist);
     }
-    
+
     this.lastRefresh = Date.now();
   }
 
@@ -698,8 +711,13 @@ export class LidarrCache {
   }
 
   async exists(options: { mbid?: string; name?: string }): Promise<boolean> {
-    if (Date.now() - this.lastRefresh > this.refreshInterval) {
+    if (this.lastRefresh === 0) {
+      // First use: nothing cached yet, must wait for a population
       await this.refresh();
+    } else if (Date.now() - this.lastRefresh > this.refreshInterval) {
+      // Stale: serve current data immediately, refresh in background.
+      // Errors are swallowed; the next exists() call retries.
+      void this.refresh().catch(() => {});
     }
 
     if (options.mbid) {
@@ -714,8 +732,10 @@ export class LidarrCache {
   }
 
   async get(options: { mbid?: string; name?: string }): Promise<LidarrArtist | undefined> {
-    if (Date.now() - this.lastRefresh > this.refreshInterval) {
+    if (this.lastRefresh === 0) {
       await this.refresh();
+    } else if (Date.now() - this.lastRefresh > this.refreshInterval) {
+      void this.refresh().catch(() => {});
     }
 
     if (options.mbid) {
