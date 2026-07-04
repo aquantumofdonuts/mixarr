@@ -85,20 +85,22 @@ jobs:
 
       - name: Start API server
         run: |
-          npm run start --workspace=@mixarr/api &
+          PORT=3005 npm run start --workspace=@mixarr/api > /tmp/api.log 2>&1 &
 
       - name: Start web frontend
         run: |
-          npm run start --workspace=@mixarr/web &
+          npm run start --workspace=@mixarr/web > /tmp/web.log 2>&1 &
 
       - name: Wait for services
         run: |
           echo "Waiting for API..."
-          timeout 90 bash -c 'until curl -fsS http://127.0.0.1:3005/api/health > /dev/null; do sleep 2; done'
+          timeout 90 bash -c 'until curl -fsS http://127.0.0.1:3005/api/health > /dev/null; do sleep 2; done' \
+            || { echo "=== API startup log ==="; cat /tmp/api.log; exit 1; }
           echo "API is ready!"
-          
+
           echo "Waiting for frontend..."
-          timeout 90 bash -c 'until curl -fsS http://127.0.0.1:3000 > /dev/null; do sleep 2; done'
+          timeout 90 bash -c 'until curl -fsS http://127.0.0.1:3000 > /dev/null; do sleep 2; done' \
+            || { echo "=== Web startup log ==="; cat /tmp/web.log; exit 1; }
           echo "Frontend is ready!"
 
       - name: Run smoke tests
