@@ -421,7 +421,7 @@ done
 cd /app/api
 export REDIS_URL="redis://127.0.0.1:6379"
 npx prisma db push --accept-data-loss || echo "Warning: Database migration had issues, continuing..."
-mysqladmin -u root shutdown
+mysqladmin -u root shutdown 2>/dev/null || true
 sleep 2
 
 # -----------------------------------------------------------------------------
