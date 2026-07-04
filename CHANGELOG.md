@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.3.3] - 2026-07-04
+
+### Fixed
+- **`package-lock.json` version drift**: Lockfile version fields were stuck at `2.2.0` since the v2.3.0 release. Version bump commits were updating all `package.json` files but not regenerating the lockfile. Now in sync at `2.3.3`.
+
+---
+
 ## [v2.3.2] - 2026-07-04
 
 ### Added
