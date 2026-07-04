@@ -254,7 +254,6 @@ fi
 mkdir -p /data/certs /data/mysql /data/redis /run/mysqld
 chown -R mysql:mysql /data/mysql /run/mysqld
 chown -R redis:redis /data/redis 2>/dev/null || true
-chown -R mixarr:mixarr /app
 
 # -----------------------------------------------------------------------------
 # Auto-generate database credentials if not provided
@@ -409,31 +408,28 @@ if [ -n "${DISABLE_CADDY}" ]; then
 fi
 
 # -----------------------------------------------------------------------------
+# Run database migrations before starting services (prevents API startup race)
+# -----------------------------------------------------------------------------
+echo "Running database migrations..."
+/usr/bin/mysqld_safe --datadir=/data/mysql &
+for i in $(seq 1 30); do
+    if mysqladmin ping -h 127.0.0.1 --silent 2>/dev/null; then
+        break
+    fi
+    sleep 1
+done
+cd /app/api
+export REDIS_URL="redis://127.0.0.1:6379"
+npx prisma db push --accept-data-loss || echo "Warning: Database migration had issues, continuing..."
+mysqladmin -u root shutdown
+sleep 2
+
+# -----------------------------------------------------------------------------
 # Start all services via supervisor
 # -----------------------------------------------------------------------------
 echo "Starting all services..."
 /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf &
 SUPERVISOR_PID=$!
-
-# Wait for MariaDB and Redis to be ready
-echo "Waiting for database services..."
-sleep 5
-
-for i in $(seq 1 30); do
-    if mysqladmin ping -h 127.0.0.1 --silent 2>/dev/null && redis-cli ping 2>/dev/null | grep -q PONG; then
-        echo "Database services ready"
-        break
-    fi
-    sleep 1
-done
-
-# -----------------------------------------------------------------------------
-# Run database migrations
-# -----------------------------------------------------------------------------
-echo "Running database migrations..."
-cd /app/api
-export REDIS_URL="redis://127.0.0.1:6379"
-npx prisma db push --accept-data-loss || echo "Warning: Database migration had issues, continuing..."
 
 echo "=== Mixarr is starting up ==="
 if [ -n "${DISABLE_CADDY}" ]; then
