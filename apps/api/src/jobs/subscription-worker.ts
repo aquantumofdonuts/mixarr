@@ -183,6 +183,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     let added = 0;
     let skipped = 0;
     let queued = 0;
+    // Funnel metrics counters
+    let alreadyInLibrary = 0;
+    let noMbidFound = 0;
+    let dedupedCount = artistsForDedup.length - artists.length;
 
     for (let i = 0; i < artists.length; i++) {
       const artist = artists[i];
@@ -190,6 +194,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       // Check if already in library (skip if no Lidarr connection)
       if (lidarrCache && await lidarrCache.exists({ name: artist.name, mbid: artist.mbid })) {
         skipped++;
+        alreadyInLibrary++;
         // Parse sources from comma-separated string
         const sourcesArray = artist.source.includes(',') ? artist.source.split(',') : [artist.source];
         // Store result for tracking
@@ -209,14 +214,23 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         continue;
       }
 
-      // Get MBID if not present
+      // Get MBID if not present; try strict match first, then lenient fallback
+      // for unresolved names (single tokens, transliterations, romanised names).
       let mbid = artist.mbid;
       if (!mbid) {
         mbid = await musicbrainz.getMbidFromSpotifyArtist(artist.name) || undefined;
       }
+      if (!mbid) {
+        const lenient = await musicbrainz.findBestMatchLenient(artist.name);
+        if (lenient) {
+          mbid = lenient.id;
+          logger.info(`MBID fallback resolved "${artist.name}" → "${lenient.name}" (${mbid})`, { artistName: artist.name, resolvedName: lenient.name, mbid });
+        }
+      }
 
       if (!mbid) {
         skipped++;
+        noMbidFound++;
         const sourcesArray = artist.source.includes(',') ? artist.source.split(',') : [artist.source];
         await prisma.subscriptionResult.create({
           data: {
@@ -613,11 +627,14 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       subscriptionId,
       subscriptionName: subscription.name,
       type: subscription.type,
-      artistsFound: artists.length,
-      albumsFound: albumsToAdd.length,
-      added,
-      skipped,
+      // Discovery funnel metrics
+      fetched: artistsForDedup.length,
+      deduped: dedupedCount,
+      already_in_library: alreadyInLibrary,
+      no_mbid_found: noMbidFound,
       queued,
+      added,
+      albumsFound: albumsToAdd.length,
     });
 
     // Send notification for completed subscription

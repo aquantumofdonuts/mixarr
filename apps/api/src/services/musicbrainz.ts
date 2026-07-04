@@ -251,6 +251,28 @@ export class MusicBrainzService {
   }
 
   /**
+   * Lenient fallback: returns the top MusicBrainz result when strict matching fails,
+   * provided the score is >= 95. Skips word-overlap requirement — useful for
+   * single-token stage names, transliterations, and romanised names that have
+   * no lexical overlap with the canonical MusicBrainz spelling.
+   *
+   * Only call this AFTER findBestMatch() returns null.
+   */
+  async findBestMatchLenient(name: string): Promise<MusicBrainzArtist | null> {
+    const artists = await this.searchArtist(name, 5);
+    if (artists.length === 0) return null;
+
+    const top = artists.sort((a, b) => (b.score || 0) - (a.score || 0))[0];
+    if (top.score && top.score >= 95) {
+      logger.debug(`Lenient fallback accepted "${top.name}" (score ${top.score}) for query "${name}"`);
+      return top;
+    }
+
+    logger.debug(`Lenient fallback rejected "${top.name}" (score ${top.score ?? 'n/a'}) for query "${name}" — score below 95`);
+    return null;
+  }
+
+  /**
    * Look up artist MBID from Spotify artist
    * Uses artist name to find the MusicBrainz ID needed for Lidarr
    */

@@ -20,6 +20,13 @@ export interface ReviewItemInput {
   releaseType?: string;
   source: string;
   itemType?: 'artist' | 'album';
+  /**
+   * Dedup strategy for name-based collision resolution.
+   * - 'default' (or omitted): match by MBID > SpotifyId > normalized name
+   * - 'relaxed': match by MBID > SpotifyId only; skips normalized-name collapse
+   *   for ambiguous artist names that share a common token (e.g. "The" prefixed names).
+   */
+  dedupStrategy?: 'default' | 'relaxed';
 }
 
 /**
@@ -29,7 +36,7 @@ export interface ReviewItemInput {
  * If not found: creates new item
  */
 export async function findOrCreateReviewItem(input: ReviewItemInput): Promise<{ id: number; created: boolean }> {
-  const { userId, artistName, mbid, spotifyId, source, albumName, albumMbid, releaseYear, releaseDate, releaseType, itemType = 'artist' } = input;
+  const { userId, artistName, mbid, spotifyId, source, albumName, albumMbid, releaseYear, releaseDate, releaseType, itemType = 'artist', dedupStrategy = 'default' } = input;
   
   // Try to find existing by MBID first (most reliable)
   if (mbid) {
@@ -67,25 +74,28 @@ export async function findOrCreateReviewItem(input: ReviewItemInput): Promise<{ 
     }
   }
   
-  // Try normalized name match
-  const normalizedName = normalizeArtistName(artistName);
-  const pending = await prisma.reviewItem.findMany({
-    where: { userId, status: 'pending' },
-  });
-  
-  for (const item of pending) {
-    if (normalizeArtistName(item.artistName) === normalizedName) {
-      if (!item.source.includes(source)) {
-        await prisma.reviewItem.update({
-          where: { id: item.id },
-          data: { 
-            source: `${item.source}, ${source}`,
-            mbid: item.mbid || mbid,
-            spotifyId: item.spotifyId || spotifyId,
-          },
-        });
+  // Try normalized name match (skipped in relaxed mode to prevent
+  // collapsing distinct artists that share a normalized token)
+  if (dedupStrategy !== 'relaxed') {
+    const normalizedName = normalizeArtistName(artistName);
+    const pending = await prisma.reviewItem.findMany({
+      where: { userId, status: 'pending' },
+    });
+    
+    for (const item of pending) {
+      if (normalizeArtistName(item.artistName) === normalizedName) {
+        if (!item.source.includes(source)) {
+          await prisma.reviewItem.update({
+            where: { id: item.id },
+            data: { 
+              source: `${item.source}, ${source}`,
+              mbid: item.mbid || mbid,
+              spotifyId: item.spotifyId || spotifyId,
+            },
+          });
+        }
+        return { id: item.id, created: false };
       }
-      return { id: item.id, created: false };
     }
   }
   

@@ -606,7 +606,7 @@ export class SpotifyService {
   /**
    * Search for artists by name
    */
-  async searchArtists(query: string, limit: number = 25): Promise<Array<{
+  async searchArtists(query: string, limit: number = 10): Promise<Array<{
     id: string;
     name: string;
     popularity: number;
@@ -617,7 +617,7 @@ export class SpotifyService {
     const params = new URLSearchParams({
       q: query,
       type: 'artist',
-      limit: limit.toString(),
+      limit: Math.min(limit, 10).toString(),
     });
     
     const response = await this.request<{

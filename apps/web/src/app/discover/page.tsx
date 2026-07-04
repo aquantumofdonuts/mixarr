@@ -75,7 +75,7 @@ export default function DiscoverPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
-  const limit = 100;
+  const limit = 250;
 
   const { addToast } = useToast();
 
@@ -112,7 +112,7 @@ export default function DiscoverPage() {
     queryFn: async () => {
       const { data, error } = await api.post<RecommendationsResponse>('/api/discover/similar', {
         artistNames: Array.from(selectedArtists),
-        limit: 50,
+        limit: 100,
       });
       if (error) throw new Error(error);
       return data!;

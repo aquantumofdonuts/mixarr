@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.3.1] - 2026-07-03
+
+### Added
+- **Discovery funnel metrics**: Subscription runs now emit structured counters (`fetched`, `deduped`, `already_in_library`, `no_mbid_found`, `queued`, `added`) in the completion log, enabling before/after breadth comparisons
+- **Lenient MBID fallback**: When strict MusicBrainz matching fails, a secondary lenient pass accepts the top result when score ≥ 95 — reduces `no_mbid_found` skips for single-token stage names, transliterations, and romanised names
+- **Feed truncation metadata**: `GET /api/feed` now returns `truncation.totalBeforeAggregationCap` and `truncation.aggregationTruncated` so the UI can warn when candidates are invisible due to the aggregation cap
+- **Configurable review-queue dedup**: `findOrCreateReviewItem` accepts a `dedupStrategy` option (`default` | `relaxed`); relaxed mode skips normalized-name collapse to prevent incorrectly merging distinct artists that share a common token
+
+### Changed
+- **Feed aggregation cap**: Raised `MAX_AGGREGATION_ROWS` from 5 000 → 15 000 rows, reducing feed invisibility for users with large subscription histories
+- **Discover UI library page limit**: Raised from 100 → 250 artists per page
+- **Discover similar request limit**: Raised from 50 → 100 results per call
+- **Seed artist schema max**: Raised from 200 → 500 accepted artist names per similar-discovery request
+
+### Fixed
+- **Spotify artist search broken** (#62): Spotify's `/v1/search` now rejects `limit=25` with HTTP 400 — clamped to `Math.min(limit, 10)`. Swallowed provider errors in `multiSourceSearch` now log at `warn` instead of silently returning empty results
+
+---
+
 ## [v2.2.0] - 2026-04-30
 
 ### Added
@@ -428,6 +447,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[v2.3.1]: https://github.com/aquantumofdonuts/mixarr/compare/v2.2.0...v2.3.1
+[v2.2.0]: https://github.com/aquantumofdonuts/mixarr/compare/v2.1.6...v2.2.0
 [v2.1.2]: https://github.com/aquantumofdonuts/mixarr/compare/v2.1.1...v2.1.2
 [v2.1.1]: https://github.com/aquantumofdonuts/mixarr/compare/v2.1.0...v2.1.1
 [v2.1.0]: https://github.com/aquantumofdonuts/mixarr/compare/v2.0.0...v2.1.0
