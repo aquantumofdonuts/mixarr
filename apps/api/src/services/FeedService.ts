@@ -13,9 +13,9 @@ import type { PrismaClient } from '@prisma/client';
 import type { LidarrService } from './lidarr.js';
 import type { LidarrConnectionConfig } from '../types/connections.js';
 import { createLogger } from '../lib/logger.js';
-import { fetchDeezerArtistImage } from './deezer.js';
 import { CacheService, CACHE_MISS_SENTINEL, CACHE_TTLS, CACHE_KEYS } from './cache.js';
 import { mapWithConcurrency } from '../lib/concurrency.js';
+import { getArtistImages, normalizeArtistName } from './artist-images.js';
 
 const log = createLogger('FeedService');
 
@@ -144,10 +144,7 @@ export class FeedService {
    * Lowercase, remove "The " prefix, strip non-alphanumeric.
    */
   private normalizeName(name: string): string {
-    return name
-      .toLowerCase()
-      .replace(/^the\s+/, '')
-      .replace(/[^a-z0-9]/g, '');
+    return normalizeArtistName(name);
   }
 
   /**
@@ -200,8 +197,7 @@ export class FeedService {
 
   /**
    * Enrich feed items with images from Deezer for items missing imageUrl.
-   * Uses Redis cache to avoid redundant Deezer API calls.
-   * Flow per item: cache check → API call (if miss) → cache store
+   * Delegates to the shared cached artist-image service.
    */
   async enrichWithImages(items: AggregatedFeedItem[]): Promise<AggregatedFeedItem[]> {
     const itemsNeedingImages = items.filter((item) => !item.imageUrl);
@@ -209,49 +205,14 @@ export class FeedService {
       return items;
     }
 
-    // Fetch images with bounded concurrency (with cache)
-    const results = await mapWithConcurrency(itemsNeedingImages, ENRICHMENT_CONCURRENCY, async (item) => {
-      const normalizedName = this.normalizeName(item.artistName);
-      const cacheKey = CACHE_KEYS.deezerImage(normalizedName);
+    const imageMap = await getArtistImages(
+      itemsNeedingImages.map((item) => item.artistName),
+      this.cacheService
+    );
 
-      // Check cache first
-      if (this.cacheService) {
-        try {
-          const cached = await this.cacheService.get<string>(cacheKey);
-          if (cached === CACHE_MISS_SENTINEL) {
-            return { id: item.id, imageUrl: null };
-          }
-          if (cached !== null) {
-            return { id: item.id, imageUrl: cached };
-          }
-        } catch {
-          // Cache error — fall through to API
-        }
-      }
-
-      // Cache miss or no cache — call Deezer
-      try {
-        const imageUrl = await fetchDeezerArtistImage(item.artistName);
-        if (imageUrl) {
-          // Cache the successful result (fire-and-forget, don't discard valid result)
-          try { if (this.cacheService) await this.cacheService.set(cacheKey, imageUrl, CACHE_TTLS.DEEZER_IMAGE); } catch { /* cache write failure is non-fatal */ }
-          return { id: item.id, imageUrl };
-        } else {
-          // Cache the miss (fire-and-forget)
-          try { if (this.cacheService) await this.cacheService.setMiss(cacheKey, CACHE_TTLS.MISS); } catch { /* cache write failure is non-fatal */ }
-          return { id: item.id, imageUrl: null };
-        }
-      } catch {
-        return { id: item.id, imageUrl: null };
-      }
-    });
-
-    const imageMap = new Map(results.map((r) => [r.id, r.imageUrl]));
-
-    // Update items with fetched images
     return items.map((item) => {
-      if (!item.imageUrl && imageMap.has(item.id)) {
-        return { ...item, imageUrl: imageMap.get(item.id) || null };
+      if (!item.imageUrl) {
+        return { ...item, imageUrl: imageMap.get(item.artistName) ?? null };
       }
       return item;
     });

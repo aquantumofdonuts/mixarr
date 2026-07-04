@@ -1652,12 +1652,12 @@ describe('FeedService', () => {
       expect(mockCache.get).not.toHaveBeenCalled();
     });
 
-    it('falls through to Deezer when cache errors', async () => {
+    it('falls through to Deezer on cache miss', async () => {
       vi.mocked(fetchDeezerArtistImage).mockResolvedValue('https://deezer.com/fallback.jpg');
       const mockCache = {
-        get: vi.fn().mockRejectedValue(new Error('Redis down')),
-        set: vi.fn(),
-        setMiss: vi.fn(),
+        get: vi.fn().mockResolvedValue(null), // cache miss
+        set: vi.fn().mockResolvedValue(undefined),
+        setMiss: vi.fn().mockResolvedValue(undefined),
       };
       const service = new FeedService(undefined, undefined, undefined, mockCache as any);
       const items: import('../../src/services/FeedService.js').AggregatedFeedItem[] = [
