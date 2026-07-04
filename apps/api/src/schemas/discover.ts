@@ -15,7 +15,7 @@ export const discoverLibraryQuerySchema = z.object({
  * Body schema for POST /api/discover/similar
  */
 export const discoverSimilarSchema = z.object({
-  artistNames: z.array(z.string().min(1, 'Artist name cannot be empty').max(500)).min(1, 'At least one artist name required').max(200),
+  artistNames: z.array(z.string().min(1, 'Artist name cannot be empty').max(500)).min(1, 'At least one artist name required').max(500),
   limit: z.number().int().positive().max(500).optional(),
 });
 

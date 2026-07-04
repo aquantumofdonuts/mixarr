@@ -25,7 +25,7 @@ const ENRICHMENT_CONCURRENCY = 5;
  * Safety bound on how many result rows are aggregated per feed request.
  * Newest rows win; anything older than the cap ages out of the feed.
  */
-const MAX_AGGREGATION_ROWS = 5000;
+const MAX_AGGREGATION_ROWS = 15000;
 
 /**
  * Error thrown when a feed item is not found
@@ -92,6 +92,10 @@ export interface FeedResponse {
   stats: {
     pending: number;
     addedToday: number;
+  };
+  truncation: {
+    totalBeforeAggregationCap: number;
+    aggregationTruncated: boolean;
   };
 }
 
@@ -618,7 +622,7 @@ export class FeedService {
     });
 
     if (subscriptions.length === 0) {
-      return { items: [], total: 0, stats: { pending: 0, addedToday: 0 } };
+      return { items: [], total: 0, stats: { pending: 0, addedToday: 0 }, truncation: { totalBeforeAggregationCap: 0, aggregationTruncated: false } };
     }
 
     const subscriptionIds = subscriptions.map((s) => s.id);
@@ -631,30 +635,44 @@ export class FeedService {
 
     // Fetch matching results (artist type only for MVP), newest first,
     // bounded so a single request can never pull an unbounded result set
-    // into memory.
-    const results = await this.prismaClient.subscriptionResult.findMany({
-      where: {
-        subscriptionId: { in: subscriptionIds },
-        itemType: 'artist',
-        status: { in: statusFilter },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: MAX_AGGREGATION_ROWS,
-      select: {
-        id: true,
-        name: true,
-        artistName: true,
-        mbid: true,
-        subscriptionId: true,
-        imageUrl: true,
-        sources: true,
-        createdAt: true,
-        status: true,
-        itemType: true,
-        tags: true,
-        listeners: true,
-      },
-    });
+    // into memory. Run the count in parallel to detect truncation.
+    const resultWhere = {
+      subscriptionId: { in: subscriptionIds },
+      itemType: 'artist',
+      status: { in: statusFilter },
+    };
+
+    const [results, totalBeforeAggregationCap] = await Promise.all([
+      this.prismaClient.subscriptionResult.findMany({
+        where: resultWhere,
+        orderBy: { createdAt: 'desc' },
+        take: MAX_AGGREGATION_ROWS,
+        select: {
+          id: true,
+          name: true,
+          artistName: true,
+          mbid: true,
+          subscriptionId: true,
+          imageUrl: true,
+          sources: true,
+          createdAt: true,
+          status: true,
+          itemType: true,
+          tags: true,
+          listeners: true,
+        },
+      }),
+      this.prismaClient.subscriptionResult.count({ where: resultWhere }),
+    ]);
+
+    const aggregationTruncated = totalBeforeAggregationCap > MAX_AGGREGATION_ROWS;
+    if (aggregationTruncated) {
+      log.warn('Feed aggregation cap reached — some pending candidates may not be visible', {
+        userId,
+        totalBeforeAggregationCap,
+        cap: MAX_AGGREGATION_ROWS,
+      });
+    }
 
     // Map Prisma result to SubscriptionResultInput format
     const mappedResults: SubscriptionResultInput[] = results.map((r) => ({
@@ -718,6 +736,7 @@ export class FeedService {
       items: enrichedItems,
       total,
       stats: { pending, addedToday },
+      truncation: { totalBeforeAggregationCap, aggregationTruncated },
     };
   }
 

@@ -13,7 +13,9 @@ import { searchDeezerArtists } from './deezer.js';
 import { TidalService } from './tidal.js';
 import { BandcampService } from './bandcamp.js';
 import { MusicBrainzService } from './musicbrainz.js';
+import { createLogger } from '../lib/logger.js';
 
+const logger = createLogger('MultiSearch');
 export type SearchSource = 'spotify' | 'deezer' | 'tidal' | 'bandcamp';
 
 export interface UnifiedArtistResult {
@@ -245,7 +247,8 @@ export async function multiSourceSearch(
                 genres: r.genres,
                 followers: r.followers,
               }));
-            } catch {
+            } catch (err) {
+              logger.warn('Spotify artist search failed', { query, error: err instanceof Error ? err.message : String(err) });
               return [];
             }
           })()
