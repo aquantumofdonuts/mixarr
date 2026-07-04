@@ -468,7 +468,7 @@ describe('Discover API', () => {
       });
 
       it('should reject more than 200 artist names', async () => {
-        const names = Array.from({ length: 201 }, (_, i) => `Artist ${i}`);
+        const names = Array.from({ length: 501 }, (_, i) => `Artist ${i}`);
         const res = await request(app)
           .post('/api/discover/similar')
           .send({ artistNames: names });

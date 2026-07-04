@@ -489,7 +489,8 @@ describe('FeedService', () => {
       mockPrisma.subscriptionResult.findMany.mockResolvedValue([
         { id: 1, name: 'Artist1', artistName: null, mbid: 'mbid-1', subscriptionId: 1, imageUrl: null, sources: '["lastfm"]', createdAt: new Date(), status: 'pending', itemType: 'artist' },
       ]);
-      // First count call is for addedToday, second is for pending
+      // count calls in order: totalBeforeAggregationCap (parallel with findMany), addedToday, pending
+      mockPrisma.subscriptionResult.count.mockResolvedValueOnce(1); // totalBeforeAggregationCap
       mockPrisma.subscriptionResult.count.mockResolvedValueOnce(3); // addedToday
       mockPrisma.subscriptionResult.count.mockResolvedValueOnce(5); // pending
 
