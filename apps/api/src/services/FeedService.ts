@@ -15,6 +15,7 @@ import type { LidarrConnectionConfig } from '../types/connections.js';
 import { createLogger } from '../lib/logger.js';
 import { fetchDeezerArtistImage } from './deezer.js';
 import { CacheService, CACHE_MISS_SENTINEL, CACHE_TTLS, CACHE_KEYS } from './cache.js';
+import { mapWithConcurrency } from '../lib/concurrency.js';
 
 const log = createLogger('FeedService');
 
@@ -198,28 +199,6 @@ export class FeedService {
   }
 
   /**
-   * Run an async mapper over items with a bounded number of workers,
-   * preserving result order. Keeps enrichment from firing one external
-   * API call per feed item simultaneously.
-   */
-  private async mapWithConcurrency<T, R>(
-    items: T[],
-    limit: number,
-    fn: (item: T) => Promise<R>
-  ): Promise<R[]> {
-    const results: R[] = new Array(items.length);
-    let nextIndex = 0;
-    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (nextIndex < items.length) {
-        const i = nextIndex++;
-        results[i] = await fn(items[i]);
-      }
-    });
-    await Promise.all(workers);
-    return results;
-  }
-
-  /**
    * Enrich feed items with images from Deezer for items missing imageUrl.
    * Uses Redis cache to avoid redundant Deezer API calls.
    * Flow per item: cache check → API call (if miss) → cache store
@@ -231,7 +210,7 @@ export class FeedService {
     }
 
     // Fetch images with bounded concurrency (with cache)
-    const results = await this.mapWithConcurrency(itemsNeedingImages, ENRICHMENT_CONCURRENCY, async (item) => {
+    const results = await mapWithConcurrency(itemsNeedingImages, ENRICHMENT_CONCURRENCY, async (item) => {
       const normalizedName = this.normalizeName(item.artistName);
       const cacheKey = CACHE_KEYS.deezerImage(normalizedName);
 
@@ -306,7 +285,7 @@ export class FeedService {
     }
 
     // Fetch stats with bounded concurrency
-    const results = await this.mapWithConcurrency(itemsNeedingEnrichment, ENRICHMENT_CONCURRENCY, async (item) => {
+    const results = await mapWithConcurrency(itemsNeedingEnrichment, ENRICHMENT_CONCURRENCY, async (item) => {
       const normalizedName = this.normalizeName(item.artistName);
       const cacheKey = CACHE_KEYS.lastfmStats(normalizedName);
 
