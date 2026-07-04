@@ -32,6 +32,7 @@ import type { AuthenticatedSocket, SessionIncomingMessage, SocketSessionResponse
 import { apiLimiter } from './middleware/rate-limiter.js';
 import { initializeScheduler } from './jobs/scheduler.js';
 import { setupJobEventBroadcasting } from './jobs/queue.js';
+import { warmLidarrCaches } from './services/lidarr-warmup.js';
 import { redis } from './lib/redis.js';
 import slskdRouter, { cleanupQueueEvents } from './routes/slskd.js';
 import { applyNetworkPreflight } from './lib/network-preflight.js';
@@ -208,6 +209,9 @@ if (process.env.NODE_ENV !== 'test') {
 
     // Broadcast BullMQ job lifecycle events to connected Socket.IO clients
     setupJobEventBroadcasting(io);
+
+    // Warm shared Lidarr caches in the background (never blocks startup)
+    void warmLidarrCaches();
   });
 }
 
