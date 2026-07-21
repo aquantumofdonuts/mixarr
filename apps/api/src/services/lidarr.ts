@@ -67,6 +67,7 @@ export interface LidarrAlbum {
   statistics?: {
     trackCount: number;
     trackFileCount: number;
+    totalTrackCount: number;
     percentOfTracks: number;
   };
 }

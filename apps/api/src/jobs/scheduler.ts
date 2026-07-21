@@ -10,6 +10,7 @@ import { ResultHandling } from '@prisma/client';
 import { scheduleSubscriptionJob, scheduleImportJob } from './queue.js';
 import { createLogger } from '../lib/logger.js';
 import { pollSlskdDownloads } from './slskd-poll.js';
+import { LidarrService } from '../services/lidarr.js';
 
 const logger = createLogger('Scheduler');
 
@@ -61,6 +62,9 @@ export async function initializeScheduler(): Promise<void> {
   
   // Start slskd download polling job
   startSlskdPollJob();
+
+  // Start the Soulseek 30-day sweep-back job
+  startSoulseekSweepJob();
   
   // Load all active subscriptions with schedules
   const subscriptions = await prisma.subscription.findMany({
@@ -251,6 +255,131 @@ export function startDataRetentionJob(): void {
   );
 
   logger.info('Data retention cleanup job scheduled (daily at 3 AM UTC)');
+}
+
+/**
+ * Soulseek 30-day sweep-back job.
+ *
+ * When a Lidarr album's qBittorrent download is diverted to Soulseek (see
+ * move_queue_to_soulseek.js and the soulseek_diversions table it writes
+ * to), the album is deliberately unmonitored in Lidarr so its own periodic
+ * missing-album search doesn't immediately re-grab the same album via
+ * qBittorrent and undo the diversion. That's only meant to hold for a
+ * limited trial window, not forever — this job runs daily, finds
+ * diversions older than 30 days that haven't been resolved yet, and for
+ * each one:
+ *   - if Lidarr's own file count shows the album is now fully present
+ *     (Soulseek delivered it), re-enables normal monitoring and marks the
+ *     diversion resolved as a Soulseek success.
+ *   - otherwise (Soulseek never delivered), re-enables monitoring AND
+ *     triggers a fresh Lidarr album search, handing it back to Lidarr's
+ *     normal qBittorrent/indexer flow — the "best chance at getting the
+ *     music" fallback.
+ *
+ * soulseek_diversions is a hand-created table (see the script above), not
+ * part of the Prisma schema, so this reads/writes it via raw SQL.
+ */
+let soulseekSweepJob: CronJob | null = null;
+
+interface StaleDiversion {
+  id: number;
+  lidarr_album_id: number;
+  lidarr_artist_id: number;
+  artist_name: string;
+  album_title: string;
+}
+
+export function startSoulseekSweepJob(): void {
+  if (soulseekSweepJob) {
+    soulseekSweepJob.stop();
+  }
+
+  soulseekSweepJob = new CronJob(
+    '0 4 * * *', // Daily at 4 AM UTC
+    async () => {
+      logger.info('Running Soulseek 30-day sweep-back...');
+      try {
+        const staleDiversions = await prisma.$queryRaw<StaleDiversion[]>`
+          SELECT id, lidarr_album_id, lidarr_artist_id, artist_name, album_title
+          FROM soulseek_diversions
+          WHERE diverted_at < DATE_SUB(NOW(), INTERVAL 30 DAY) AND resolved_at IS NULL
+        `;
+
+        if (!staleDiversions.length) {
+          logger.info('No stale Soulseek diversions to sweep');
+          return;
+        }
+
+        const lidarrConn = await prisma.connection.findFirst({ where: { type: 'lidarr', isActive: true } });
+        if (!lidarrConn) {
+          logger.warn('Soulseek sweep: no active Lidarr connection configured, skipping');
+          return;
+        }
+        const lidarr = new LidarrService(lidarrConn.config as unknown as { url: string; apiKey: string });
+
+        let soulseekSuccess = 0;
+        let sweptBackToQbittorrent = 0;
+        let errors = 0;
+
+        for (const diversion of staleDiversions) {
+          try {
+            const albums = await lidarr.getAlbums(diversion.lidarr_artist_id);
+            const album = albums.find((a) => a.id === diversion.lidarr_album_id);
+
+            if (!album) {
+              logger.warn('Soulseek sweep: album no longer exists in Lidarr, marking resolved', { diversion });
+              await prisma.$executeRaw`
+                UPDATE soulseek_diversions SET resolved_at = NOW(), resolution = 'album_removed' WHERE id = ${diversion.id}
+              `;
+              continue;
+            }
+
+            const fileCount = album.statistics?.trackFileCount ?? 0;
+            const totalTracks = album.statistics?.totalTrackCount ?? 1;
+            const soulseekDelivered = fileCount >= totalTracks;
+
+            album.monitored = true;
+            await lidarr.updateAlbum(album);
+
+            if (soulseekDelivered) {
+              await prisma.$executeRaw`
+                UPDATE soulseek_diversions SET resolved_at = NOW(), resolution = 'soulseek_success' WHERE id = ${diversion.id}
+              `;
+              soulseekSuccess++;
+              logger.info(`Soulseek sweep: confirmed success for ${diversion.artist_name} - ${diversion.album_title}`);
+            } else {
+              await lidarr.searchAlbumCommand([album.id]);
+              await prisma.$executeRaw`
+                UPDATE soulseek_diversions SET resolved_at = NOW(), resolution = 'swept_back_to_qbittorrent' WHERE id = ${diversion.id}
+              `;
+              sweptBackToQbittorrent++;
+              logger.info(`Soulseek sweep: 30 days up with no Soulseek delivery, back to Lidarr/qBittorrent for ${diversion.artist_name} - ${diversion.album_title}`);
+            }
+          } catch (err) {
+            errors++;
+            logger.error('Soulseek sweep: failed to process diversion', {
+              diversion,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
+        logger.info('Soulseek sweep completed', {
+          total: staleDiversions.length,
+          soulseekSuccess,
+          sweptBackToQbittorrent,
+          errors,
+        });
+      } catch (error) {
+        logger.error('Soulseek sweep job failed', { error });
+      }
+    },
+    null,
+    true,
+    'UTC'
+  );
+
+  logger.info('Soulseek 30-day sweep job scheduled (daily at 4 AM UTC)');
 }
 
 /**
