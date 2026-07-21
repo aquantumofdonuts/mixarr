@@ -168,7 +168,7 @@ describe('SlskdPollJob', () => {
           username: 'user1',
           directories: [{
             directory: 'Album',
-            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+            files: [{ filename: '/music/track.flac', state: 'Completed, Succeeded' }],
           }],
         },
       ]);
@@ -208,7 +208,7 @@ describe('SlskdPollJob', () => {
           username: 'user1',
           directories: [{
             directory: 'Album',
-            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+            files: [{ filename: '/music/track.flac', state: 'Completed, Succeeded' }],
           }],
         },
       ]);
@@ -312,7 +312,7 @@ describe('SlskdPollJob', () => {
           username: '../../etc',
           directories: [{
             directory: 'cron.d',
-            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+            files: [{ filename: '/music/track.flac', state: 'Completed, Succeeded' }],
           }],
         },
       ]);
@@ -350,7 +350,7 @@ describe('SlskdPollJob', () => {
           username: 'normaluser',
           directories: [{
             directory: '../../../etc/cron.d',
-            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+            files: [{ filename: '/music/track.flac', state: 'Completed, Succeeded' }],
           }],
         },
       ]);

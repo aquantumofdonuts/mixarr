@@ -78,7 +78,25 @@ export async function pollSlskdDownloads(): Promise<void> {
         continue;
       }
 
-      if (slskdStatus.state === 'Completed') {
+      // slskd's real transfer states are compound strings, not the bare
+      // words this used to check for — confirmed live 2026-07-21:
+      // "Completed, Succeeded", "Completed, Errored", "Completed, TimedOut",
+      // "Completed, Aborted", "Completed, Rejected", "InProgress",
+      // "Queued, Remotely". A strict `state === 'Completed'` check never
+      // matched anything: 2,439 real successful downloads sat undetected,
+      // never organized into the library, because none of them were
+      // literally the string "Completed" on its own.
+      const isSuccess = slskdStatus.state === 'Completed, Succeeded';
+      const isFailed = [
+        'Completed, Errored',
+        'Completed, TimedOut',
+        'Completed, Aborted',
+        'Completed, Rejected',
+        'Errored',
+        'Cancelled',
+      ].includes(slskdStatus.state);
+
+      if (isSuccess) {
         // Validate the constructed path stays within downloadDir (path traversal protection)
         const relativePath = `${download.username}/${slskdStatus.directory}/${basename}`;
         if (!isPathSafe(relativePath, downloadDir)) {
@@ -138,8 +156,7 @@ export async function pollSlskdDownloads(): Promise<void> {
             data: { status: 'downloading' },
           });
         }
-      } else if (slskdStatus.state === 'Errored' || slskdStatus.state === 'Cancelled') {
-        // Failed or cancelled
+      } else if (isFailed) {
         await prisma.slskdDownload.update({
           where: { id: download.id },
           data: { status: 'failed', error: slskdStatus.state },
