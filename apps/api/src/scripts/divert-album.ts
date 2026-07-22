@@ -70,4 +70,13 @@ async function main() {
   }
 }
 
-main();
+main().finally(() => {
+  // Confirmed live 2026-07-22: the process doesn't exit on its own after
+  // this — something in the BullMQ/Redis chain (used by the rate-limited
+  // search queue path) keeps a handle open even after queueEvents.close()
+  // and prisma.$disconnect(). This is a one-off CLI invocation (called
+  // over SSH by Glen, which reads stdout until the stream closes), not a
+  // long-running server, so forcing an exit here is the right call rather
+  // than chasing down every possible lingering connection.
+  process.exit(process.exitCode ?? 0);
+});

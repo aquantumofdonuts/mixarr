@@ -125,7 +125,13 @@ async function main() {
   await prisma.$disconnect();
 }
 
-main().catch((err) => {
-  console.error("FATAL:", err);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error("FATAL:", err);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    // Same lingering-connection issue as divert-album.ts — force exit
+    // rather than chase down every BullMQ/Redis handle.
+    process.exit(process.exitCode ?? 0);
+  });
