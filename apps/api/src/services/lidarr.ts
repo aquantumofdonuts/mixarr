@@ -353,6 +353,38 @@ export class LidarrService {
   }
 
   /**
+   * Fetch Lidarr's current download queue. Used by the 60-day sweep to find
+   * and remove entries for albums that are being abandoned (see
+   * removeQueueItem below) — not part of the original service, added for
+   * that purpose.
+   */
+  async getQueue(pageSize = 1000): Promise<Array<{ id: number; albumId?: number; artistId?: number; title: string }>> {
+    const result = await this.request<{ records: Array<{ id: number; albumId?: number; artistId?: number; title: string }> }>(
+      `/queue?pageSize=${pageSize}&includeArtist=true&includeAlbum=true`,
+    );
+    return result.records || [];
+  }
+
+  /**
+   * Remove a download queue entry. Self-contained (doesn't go through the
+   * shared request<T> helper) because Lidarr's DELETE response body is
+   * empty and request<T> unconditionally calls response.json(), which
+   * would throw on an empty body.
+   */
+  async removeQueueItem(id: number, options: { blocklist?: boolean } = {}): Promise<void> {
+    const blocklist = options.blocklist ?? false;
+    await rateLimit('lidarr');
+    const url = `${this.baseUrl}/api/v1/queue/${id}?removeFromClient=true&blocklist=${blocklist}&skipRedownload=true`;
+    const response = await fetchWithTimeout(url, {
+      method: 'DELETE',
+      headers: { 'X-Api-Key': this.apiKey },
+    });
+    if (!response.ok) {
+      throw new Error(`Lidarr API error removing queue item ${id}: ${response.status} ${response.statusText}`);
+    }
+  }
+
+  /**
    * Trigger a metadata refresh for an artist.
    * This forces Lidarr to re-fetch artist and album data from MusicBrainz.
    * Useful after adding artists to ensure complete metadata is loaded.
