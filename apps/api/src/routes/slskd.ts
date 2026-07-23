@@ -10,7 +10,6 @@
 
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
-import path from 'path';
 import prisma from '../lib/db.js';
 import { serializeForJson } from '../utils/serialize.js';
 import { Prisma } from '@prisma/client';
@@ -34,6 +33,18 @@ import { QueueEvents } from 'bullmq';
 import { createRedisConnection } from '../lib/redis.js';
 
 const log = createLogger('SlskdRoutes');
+
+/**
+ * slskd reports remote filenames/directories as the peer's full path using
+ * whatever separator the peer's OS uses — almost always Windows `\`, since
+ * most Soulseek peers are Windows clients (confirmed live 2026-07-21).
+ * Extracts just the final path segment regardless of separator, so the
+ * result can be validated as a plain path component below.
+ */
+export function slskdBasename(remotePath: string): string {
+  const segments = remotePath.split(/[\\/]+/).filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : remotePath;
+}
 
 /**
  * Validate path component to prevent directory traversal attacks
@@ -451,21 +462,24 @@ router.post('/webhook', webhookLimiter, validateBody(slskdWebhookSchema), async 
 
     log.info('slskd webhook received', { event, username, filename });
 
-    // Validate path components to prevent traversal attacks
+    // directory/filename are the peer's full remote path (backslash-delimited
+    // for Windows peers) — reduce to the leaf segment before validating as a
+    // plain path component, same as the poll job does for the same payload shape.
+    const safeDirectory = slskdBasename(directory);
+    const safeFilename = slskdBasename(filename);
+
     if (!isPathComponentSafe(username)) {
       log.warn('Path traversal attempt in username', { username });
       res.status(400).json({ error: 'Invalid path in username' });
       return;
     }
-    
-    if (!isPathComponentSafe(directory)) {
+
+    if (!isPathComponentSafe(safeDirectory)) {
       log.warn('Path traversal attempt in directory', { directory });
       res.status(400).json({ error: 'Invalid path in directory' });
       return;
     }
-    
-    // Extract basename from filename to prevent traversal
-    const safeFilename = path.basename(filename);
+
     if (!isPathComponentSafe(safeFilename)) {
       log.warn('Path traversal attempt in filename', { filename });
       res.status(400).json({ error: 'Invalid path in filename' });
@@ -507,8 +521,11 @@ router.post('/webhook', webhookLimiter, validateBody(slskdWebhookSchema), async 
     const downloadDir = config.downloadDir || '/data/slskd/downloads';
     const musicLibraryDir = config.musicLibraryDir || '/data/plex/music';
 
-    // Build download path with validated components
-    const downloadPath = `${downloadDir}/${username}/${directory}/${safeFilename}`;
+    // Build download path with validated components. slskd never
+    // namespaces completed downloads by username and flattens the
+    // remote directory to just its leaf name — confirmed live 2026-07-21
+    // against real files on disk (see slskd-poll.ts for the same fix).
+    const downloadPath = `${downloadDir}/${safeDirectory}/${safeFilename}`;
 
     // Atomic status update - only update if still in expected state
     // This prevents race conditions where both webhook and poll job try to organize

@@ -125,8 +125,32 @@ export class SlskdSubscriptionProcessor {
             searchId = search.id;
           }
 
-          // Poll for results (simplified for testing)
-          const searchResult = await this.slskdService.getSearchResults(String(searchId));
+          // Poll until the search reaches a terminal state. A single
+          // immediate check here almost always saw 0 responses — slskd
+          // needs several seconds to gather peer responses (confirmed
+          // live: 0 responses immediately after creating a search, 19+
+          // after ~5s) — so this was the root cause of slskd_downloads
+          // never getting a single row despite searches genuinely
+          // succeeding: every call saw an empty response list and
+          // returned "no_results" before slskd had a chance to report
+          // anything. slskdService.searchWithPolling() already implements
+          // this correctly elsewhere in this file's own service — mirrored
+          // here rather than reused directly since search creation for
+          // this caller goes through the rate-limited queue path above,
+          // and searchWithPolling always creates its own new search.
+          const SEARCH_POLL_INTERVAL_MS = 1000;
+          const SEARCH_POLL_MAX_ATTEMPTS = 30;
+          const SEARCH_TERMINAL_STATES = ["Completed", "TimedOut", "Errored", "Cancelled"];
+
+          let searchResult = await this.slskdService.getSearchResults(String(searchId), true);
+          for (
+            let pollAttempt = 0;
+            pollAttempt < SEARCH_POLL_MAX_ATTEMPTS && !SEARCH_TERMINAL_STATES.includes(searchResult.state);
+            pollAttempt++
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, SEARCH_POLL_INTERVAL_MS));
+            searchResult = await this.slskdService.getSearchResults(String(searchId), true);
+          }
 
           if (searchResult.state === "Errored") {
             throw new Error("Search failed");

@@ -168,7 +168,7 @@ describe('SlskdPollJob', () => {
           username: 'user1',
           directories: [{
             directory: 'Album',
-            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+            files: [{ filename: '/music/track.flac', state: 'Completed, Succeeded' }],
           }],
         },
       ]);
@@ -208,7 +208,7 @@ describe('SlskdPollJob', () => {
           username: 'user1',
           directories: [{
             directory: 'Album',
-            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+            files: [{ filename: '/music/track.flac', state: 'Completed, Succeeded' }],
           }],
         },
       ]);
@@ -288,7 +288,7 @@ describe('SlskdPollJob', () => {
       await expect(pollSlskdDownloads()).resolves.not.toThrow();
     });
 
-    it('should skip downloads with path traversal in username', async () => {
+    it('ignores username when constructing the download path (no username-based traversal possible)', async () => {
       const { pollSlskdDownloads } = await import('../../src/jobs/slskd-poll.js');
 
       mockConnectionFindFirst.mockResolvedValue({
@@ -312,21 +312,31 @@ describe('SlskdPollJob', () => {
           username: '../../etc',
           directories: [{
             directory: 'cron.d',
-            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+            files: [{ filename: '/music/track.flac', state: 'Completed, Succeeded' }],
           }],
         },
       ]);
 
-      mockDownloadUpdateMany.mockResolvedValue({ count: 0 });
+      mockDownloadUpdateMany.mockResolvedValue({ count: 1 });
 
       await pollSlskdDownloads();
 
-      // Should NOT attempt to organize — path traversal detected
-      expect(mockDownloadUpdateMany).not.toHaveBeenCalled();
-      expect(mockOrganizeFile).not.toHaveBeenCalled();
+      // slskd never namespaces on-disk downloads by username, so username is not
+      // part of the constructed path at all — a malicious username can't escape
+      // downloadDir because it's never used to build one.
+      expect(mockDownloadUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            downloadPath: expect.stringContaining('cron.d'),
+          }),
+        })
+      );
+      const downloadPath = mockDownloadUpdateMany.mock.calls[0][0].data.downloadPath;
+      expect(downloadPath).not.toContain('etc');
+      expect(downloadPath).not.toContain('..');
     });
 
-    it('should skip downloads with path traversal in directory', async () => {
+    it('neutralizes traversal segments in directory by keeping only the leaf folder name', async () => {
       const { pollSlskdDownloads } = await import('../../src/jobs/slskd-poll.js');
 
       mockConnectionFindFirst.mockResolvedValue({
@@ -350,7 +360,51 @@ describe('SlskdPollJob', () => {
           username: 'normaluser',
           directories: [{
             directory: '../../../etc/cron.d',
-            files: [{ filename: '/music/track.flac', state: 'Completed' }],
+            files: [{ filename: '/music/track.flac', state: 'Completed, Succeeded' }],
+          }],
+        },
+      ]);
+
+      mockDownloadUpdateMany.mockResolvedValue({ count: 1 });
+
+      await pollSlskdDownloads();
+
+      // Only the final path segment ("cron.d") survives — the ".." components
+      // are discarded during leaf extraction, so the resulting path is genuinely
+      // safe rather than merely detected-and-rejected.
+      const downloadPath = mockDownloadUpdateMany.mock.calls[0][0].data.downloadPath;
+      expect(downloadPath).toContain('cron.d');
+      expect(downloadPath).not.toContain('etc');
+      expect(downloadPath).not.toContain('..');
+    });
+
+    it('still rejects a directory whose leaf segment is itself ".."', async () => {
+      const { pollSlskdDownloads } = await import('../../src/jobs/slskd-poll.js');
+
+      mockConnectionFindFirst.mockResolvedValue({
+        id: 'conn-1',
+        type: 'slskd',
+        enabled: true,
+        config: {
+          url: 'http://localhost:5030',
+          apiKey: 'test-key',
+          downloadDir: '/data/slskd/downloads',
+          musicLibraryDir: '/data/plex/music',
+        },
+      });
+
+      mockDownloadFindMany.mockResolvedValue([
+        { id: 1, username: 'normaluser', filename: '/music/track.flac', status: 'pending' },
+      ]);
+
+      mockGetDownloads.mockResolvedValue([
+        {
+          username: 'normaluser',
+          // leaf segment after splitting is literally ".." — still escapes downloadDir
+          directory: 'foo/..',
+          directories: [{
+            directory: 'foo/..',
+            files: [{ filename: '/music/track.flac', state: 'Completed, Succeeded' }],
           }],
         },
       ]);
@@ -359,7 +413,6 @@ describe('SlskdPollJob', () => {
 
       await pollSlskdDownloads();
 
-      // Should NOT attempt to organize — path traversal detected
       expect(mockDownloadUpdateMany).not.toHaveBeenCalled();
       expect(mockOrganizeFile).not.toHaveBeenCalled();
     });

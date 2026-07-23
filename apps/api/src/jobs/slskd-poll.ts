@@ -6,6 +6,19 @@ import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('SlskdPoll');
 
+/**
+ * slskd reports remote filenames/directories as the peer's full path using
+ * whatever separator the peer's OS uses — almost always Windows `\`, since
+ * most Soulseek peers are Windows clients (confirmed live 2026-07-21, e.g.
+ * "MyMusic\Tyler Childers\Can I Take My Hounds to Heaven_\1-05 ....flac").
+ * path.basename() only recognizes `/` on this Linux container, so it never
+ * strips those — this extracts just the final path segment either way.
+ */
+function slskdBasename(remotePath: string): string {
+  const segments = remotePath.split(/[\\/]+/).filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : remotePath;
+}
+
 interface SlskdConnectionConfig {
   url: string;
   apiKey: string;
@@ -53,7 +66,7 @@ export async function pollSlskdDownloads(): Promise<void> {
     for (const userDownload of slskdDownloads) {
       for (const dir of userDownload.directories) {
         for (const file of dir.files) {
-          const basename = path.basename(file.filename);
+          const basename = slskdBasename(file.filename);
           const key = `${userDownload.username}:${basename}`;
           slskdLookup.set(key, {
             state: file.state || 'None',
@@ -69,7 +82,7 @@ export async function pollSlskdDownloads(): Promise<void> {
         log.warn('Download has no filename', { downloadId: download.id });
         continue;
       }
-      const basename = path.basename(download.filename);
+      const basename = slskdBasename(download.filename);
       const key = `${download.username}:${basename}`;
       const slskdStatus = slskdLookup.get(key);
 
@@ -78,9 +91,33 @@ export async function pollSlskdDownloads(): Promise<void> {
         continue;
       }
 
-      if (slskdStatus.state === 'Completed') {
+      // slskd's real transfer states are compound strings, not the bare
+      // words this used to check for — confirmed live 2026-07-21:
+      // "Completed, Succeeded", "Completed, Errored", "Completed, TimedOut",
+      // "Completed, Aborted", "Completed, Rejected", "InProgress",
+      // "Queued, Remotely". A strict `state === 'Completed'` check never
+      // matched anything: 2,439 real successful downloads sat undetected,
+      // never organized into the library, because none of them were
+      // literally the string "Completed" on its own.
+      const isSuccess = slskdStatus.state === 'Completed, Succeeded';
+      const isFailed = [
+        'Completed, Errored',
+        'Completed, TimedOut',
+        'Completed, Aborted',
+        'Completed, Rejected',
+        'Errored',
+        'Cancelled',
+      ].includes(slskdStatus.state);
+
+      if (isSuccess) {
+        // slskd stores completed downloads flat on disk as
+        // {leaf-of-remote-directory}/{leaf-of-remote-filename} — it never
+        // namespaces by username and never preserves the peer's full nested
+        // path — confirmed live 2026-07-21 against real files on disk.
+        const directoryLeaf = slskdBasename(slskdStatus.directory);
+
         // Validate the constructed path stays within downloadDir (path traversal protection)
-        const relativePath = `${download.username}/${slskdStatus.directory}/${basename}`;
+        const relativePath = `${directoryLeaf}/${basename}`;
         if (!isPathSafe(relativePath, downloadDir)) {
           log.warn('Unsafe download path detected — possible path traversal', {
             downloadId: download.id,
@@ -138,8 +175,7 @@ export async function pollSlskdDownloads(): Promise<void> {
             data: { status: 'downloading' },
           });
         }
-      } else if (slskdStatus.state === 'Errored' || slskdStatus.state === 'Cancelled') {
-        // Failed or cancelled
+      } else if (isFailed) {
         await prisma.slskdDownload.update({
           where: { id: download.id },
           data: { status: 'failed', error: slskdStatus.state },

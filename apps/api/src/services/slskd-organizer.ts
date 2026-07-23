@@ -75,7 +75,21 @@ export async function moveFile(src: string, dest: string): Promise<void> {
       // Verify copy succeeded before deleting source
       const destStats = await fs.stat(dest);
       if (destStats.size > 0) {
-        await fs.unlink(src);
+        // Cleanup is best-effort: the copy into the library already
+        // succeeded, which is the part that actually matters. slskd's
+        // downloads volume can be owned by a different user (e.g. slskd
+        // running as root) than this container, so unlink can legitimately
+        // fail on permissions — that shouldn't fail the whole organize
+        // operation and re-copy the file on every future poll.
+        try {
+          await fs.unlink(src);
+        } catch (unlinkErr) {
+          logger.warn('Copied file to library but failed to remove source (leftover in downloads dir)', {
+            src,
+            dest,
+            error: unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr),
+          });
+        }
       } else {
         throw new Error('Copy verification failed: destination file is empty');
       }
