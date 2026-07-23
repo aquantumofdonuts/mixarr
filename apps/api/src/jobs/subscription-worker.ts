@@ -44,7 +44,15 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
   
   // Declare slskdProcessor outside try block so it's accessible in finally block for cleanup
   let slskdProcessor: SlskdSubscriptionProcessor | null = null;
-  
+
+  // Hoisted above the try block so the outer catch can report the artists that
+  // actually got processed before a fatal error, instead of always reporting 0
+  // (previously a single artist's error — e.g. a transient MusicBrainz 503 —
+  // aborted the whole run and the run was recorded as "0 added").
+  let added = 0;
+  let skipped = 0;
+  let queued = 0;
+
   // Create run record
   const run = await prisma.subscriptionRun.create({
     data: {
@@ -197,9 +205,6 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
     // Process artists based on resultHandling mode
     const resultHandling = subscription.resultHandling || 'preview';
-    let added = 0;
-    let skipped = 0;
-    let queued = 0;
     // Funnel metrics counters
     let alreadyInLibrary = 0;
     let noMbidFound = 0;
@@ -207,7 +212,14 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
     for (let i = 0; i < artists.length; i++) {
       const artist = artists[i];
-      
+
+      // Isolate this artist's processing: any unexpected error here (a
+      // MusicBrainz outage, a transient DB hiccup, etc.) must not abort the
+      // rest of the playlist/run. Previously this whole loop body ran
+      // outside any per-iteration try/catch, so a single failure propagated
+      // to the run-level catch and killed the entire subscription run.
+      try {
+
       // Check if already in library (skip if no Lidarr connection)
       if (lidarrCache && await lidarrCache.exists({ name: artist.name, mbid: artist.mbid })) {
         skipped++;
@@ -234,15 +246,26 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
       // Get MBID if not present; try strict match first, then lenient fallback
       // for unresolved names (single tokens, transliterations, romanised names).
+      // Each lookup gets its own try/catch: a MusicBrainz API error (e.g. the
+      // 503s seen in production) should degrade this one artist to
+      // "no_mbid_found" rather than throw and abort the whole run.
       let mbid = artist.mbid;
       if (!mbid) {
-        mbid = await musicbrainz.getMbidFromSpotifyArtist(artist.name) || undefined;
+        try {
+          mbid = await musicbrainz.getMbidFromSpotifyArtist(artist.name) || undefined;
+        } catch (mbErr) {
+          logger.warn(`MusicBrainz strict lookup failed for "${artist.name}"`, { error: mbErr instanceof Error ? mbErr.message : String(mbErr) });
+        }
       }
       if (!mbid) {
-        const lenient = await musicbrainz.findBestMatchLenient(artist.name);
-        if (lenient) {
-          mbid = lenient.id;
-          logger.info(`MBID fallback resolved "${artist.name}" → "${lenient.name}" (${mbid})`, { artistName: artist.name, resolvedName: lenient.name, mbid });
+        try {
+          const lenient = await musicbrainz.findBestMatchLenient(artist.name);
+          if (lenient) {
+            mbid = lenient.id;
+            logger.info(`MBID fallback resolved "${artist.name}" → "${lenient.name}" (${mbid})`, { artistName: artist.name, resolvedName: lenient.name, mbid });
+          }
+        } catch (mbErr) {
+          logger.warn(`MusicBrainz lenient lookup failed for "${artist.name}"`, { error: mbErr instanceof Error ? mbErr.message : String(mbErr) });
         }
       }
 
@@ -545,6 +568,34 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
         }
       }
 
+      } catch (artistErr) {
+        // Any error not already handled above (MusicBrainz lookups and the
+        // Lidarr add call each have their own local catch) lands here.
+        // Record this one artist as failed and keep processing the rest of
+        // the playlist instead of aborting the whole subscription run.
+        const artistErrMsg = artistErr instanceof Error ? artistErr.message : String(artistErr);
+        logger.error(`Unhandled error processing artist "${artist.name}" — skipping artist, continuing run`, {
+          subscriptionId,
+          error: artistErrMsg,
+        });
+        skipped++;
+        const sourcesArray = artist.source.includes(',') ? artist.source.split(',') : [artist.source];
+        await prisma.subscriptionResult.create({
+          data: {
+            subscriptionId,
+            runId: run.id,
+            itemType: 'artist',
+            name: artist.name,
+            mbid: artist.mbid,
+            status: 'failed',
+            skipReason: artistErrMsg,
+            sources: sourcesArray,
+            imageUrl: artistImageMap.get(artist.name),
+            matchCount: sourcesArray.length,
+          },
+        });
+      }
+
       await job.updateProgress({
         phase: 'processing',
         current: i + 1,
@@ -679,11 +730,18 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    // added/skipped/queued reflect whatever this run actually got through
+    // before hitting a fatal error (e.g. the playlist fetch itself failing,
+    // or a DB outage) — per-artist errors no longer reach this block, so
+    // this now only fires for genuinely run-fatal failures, and should
+    // report real partial progress rather than always claiming 0.
     await prisma.subscriptionRun.update({
       where: { id: run.id },
       data: {
         status: 'failed',
         errorMessage,
+        addedCount: added,
+        skippedCount: skipped,
         completedAt: new Date(),
       },
     });
@@ -691,10 +749,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     // Update subscription last run status to failed
     await prisma.subscription.update({
       where: { id: subscriptionId },
-      data: { 
+      data: {
         lastRun: new Date(),
         lastRunStatus: 'failed',
-        lastRunCount: 0,
+        lastRunCount: added + queued,
       },
     });
 
