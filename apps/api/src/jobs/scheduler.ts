@@ -310,6 +310,7 @@ async function ensureSoulseekEscalatedAtColumn(): Promise<void> {
     );
   } catch (error) {
     logger.error('Failed to ensure soulseek_diversions.escalated_at column exists', { error });
+    throw error;
   }
 }
 
