@@ -164,6 +164,36 @@ describe('useConstellation', () => {
     expect(result.current.streamToken).toEqual({ id: 'tok-1', generation: 3 });
   });
 
+  it('expandMore merge keeps the NEWER data for an existing node', async () => {
+    const seedResp: SeedResponse = {
+      focusId: 10,
+      // Node 11 seeded as NOT owned.
+      subgraph: subgraph(10, [node(10), node(11, { owned: false })], [edge(10, 11)]),
+      streamToken: { id: 'tok-1', generation: 1 },
+    };
+    const expandResp: ExpandResponse = {
+      personId: 11,
+      enqueued: true,
+      // Same personId 11 but now owned = true (fresher data must win).
+      subgraph: subgraph(11, [node(11, { owned: true })], []),
+    };
+    vi.mocked(api.get).mockImplementation(async (endpoint: string) =>
+      endpoint.startsWith('/api/constellation/expand') ? ok(expandResp) : ok(seedResp),
+    );
+
+    const { result } = renderHook(() => useConstellation({ type: 'artist', id: '10' }));
+    await waitFor(() => expect(result.current.focusId).toBe(10));
+    expect(result.current.nodes.find((n) => n.personId === 11)?.owned).toBe(false);
+
+    await act(async () => {
+      await result.current.expandMore(11);
+    });
+
+    // No duplicate node, and the merged node carries the newer owned=true.
+    expect(result.current.nodes.filter((n) => n.personId === 11)).toHaveLength(1);
+    expect(result.current.nodes.find((n) => n.personId === 11)?.owned).toBe(true);
+  });
+
   it('surfaces an error when seeding fails', async () => {
     vi.mocked(api.get).mockResolvedValue({ data: null, error: 'boom', status: 500 });
     const { result } = renderHook(() => useConstellation({ type: 'artist', id: '10' }));

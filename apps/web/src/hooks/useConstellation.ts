@@ -95,8 +95,12 @@ function expandUrl(personId: number, token: StreamToken | null): string {
  * focus, and the SSE stream token, and exposes `recenter` / `expandMore`.
  */
 export function useConstellation(seed: ConstellationSeed): UseConstellationResult {
-  const [nodes, setNodes] = useState<GraphNode[]>([]);
-  const [edges, setEdges] = useState<GraphEdge[]>([]);
+  // Nodes + edges live in one state slice so `mergeSubgraph` can update both
+  // atomically (an `expandMore` merge must not tear across two renders).
+  const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
+    nodes: [],
+    edges: [],
+  });
   const [focusId, setFocusId] = useState<number | null>(null);
   const [streamToken, setStreamToken] = useState<StreamToken | null>(null);
   const [loading, setLoading] = useState(false);
@@ -109,11 +113,20 @@ export function useConstellation(seed: ConstellationSeed): UseConstellationResul
     tokenRef.current = streamToken;
   }, [streamToken]);
 
+  // Tracks unmount so imperative callbacks (`recenter` / `expandMore`) don't
+  // setState after the component is gone.
+  const unmountedRef = useRef(false);
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
   /** Apply a fresh seed/re-center response, replacing the graph. */
   const applySeed = useCallback((data: SeedResponse) => {
     setFocusId(data.focusId);
-    setNodes(data.subgraph.nodes);
-    setEdges(data.subgraph.edges);
+    setGraph({ nodes: data.subgraph.nodes, edges: data.subgraph.edges });
     setStreamToken(data.streamToken);
   }, []);
 
@@ -126,8 +139,7 @@ export function useConstellation(seed: ConstellationSeed): UseConstellationResul
   // Initial seed / re-seed whenever the seed prop changes.
   useEffect(() => {
     if (seedType === null || seedId === null) {
-      setNodes([]);
-      setEdges([]);
+      setGraph({ nodes: [], edges: [] });
       setFocusId(null);
       setStreamToken(null);
       setError(null);
@@ -169,13 +181,15 @@ export function useConstellation(seed: ConstellationSeed): UseConstellationResul
         const { data, error: err } = await api.get<SeedResponse>(
           seedUrl(String(personId), tokenRef.current?.id),
         );
+        // Bail if the hook unmounted mid-request — no setState after unmount.
+        if (unmountedRef.current) return;
         if (err || !data) {
           setError(err ?? 'Failed to re-center constellation');
           return;
         }
         applySeed(data);
       } finally {
-        setLoading(false);
+        if (!unmountedRef.current) setLoading(false);
       }
     },
     [applySeed],
@@ -190,18 +204,18 @@ export function useConstellation(seed: ConstellationSeed): UseConstellationResul
     const { data, error: err } = await api.get<ExpandResponse>(
       expandUrl(personId, tokenRef.current),
     );
+    if (unmountedRef.current) return;
     if (err || !data) {
       setError(err ?? 'Failed to expand node');
       return;
     }
     const incoming = data.subgraph;
-    setNodes((prev) => mergeNodes(prev, incoming.nodes));
-    setEdges((prev) => mergeEdges(prev, incoming.edges));
+    setGraph((prev) => mergeSubgraph(prev, incoming));
   }, []);
 
   return {
-    nodes,
-    edges,
+    nodes: graph.nodes,
+    edges: graph.edges,
     focusId,
     streamToken,
     loading,

@@ -21,9 +21,24 @@ class MockEventSource {
     this.closed = true;
   }
 
+  /** Simulate a successful connection open. */
+  open(): void {
+    this.onopen?.(new Event('open'));
+  }
+
+  /** Simulate a transport error (native EventSource would then auto-reconnect). */
+  fail(): void {
+    this.onerror?.(new Event('error'));
+  }
+
   /** Simulate a server `data:` frame. */
   emit(data: unknown): void {
     this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+  }
+
+  /** Simulate a raw (possibly malformed) server `data:` frame. */
+  emitRaw(data: string): void {
+    this.onmessage?.({ data } as MessageEvent);
   }
 
   static latest(): MockEventSource {
@@ -119,5 +134,73 @@ describe('useFrontierStream', () => {
     const source = MockEventSource.latest();
     unmount();
     expect(source.closed).toBe(true);
+  });
+
+  it('ignores a malformed (non-JSON) frame without crashing or calling onNodes', () => {
+    const onNodes = vi.fn();
+    const { result } = renderHook(() => useFrontierStream(token('tok-1', 1), onNodes));
+
+    expect(() => {
+      act(() => {
+        MockEventSource.latest().emitRaw('{ this is : not json');
+      });
+    }).not.toThrow();
+
+    expect(onNodes).not.toHaveBeenCalled();
+    // A following well-formed frame is still processed.
+    act(() => {
+      MockEventSource.latest().emit({ generation: 1, personId: 7 });
+    });
+    expect(onNodes).toHaveBeenCalledWith({ generation: 1, personId: 7 });
+    expect(result.current.error).toBeNull();
+  });
+
+  it('reports connected after a successful open', () => {
+    const { result } = renderHook(() => useFrontierStream(token('tok-1', 1), vi.fn()));
+    expect(result.current.connected).toBe(false);
+    act(() => {
+      MockEventSource.latest().open();
+    });
+    expect(result.current.connected).toBe(true);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('closes the stream and surfaces an error after repeated errors past the cap', () => {
+    const { result } = renderHook(() => useFrontierStream(token('tok-1', 1), vi.fn()));
+    const source = MockEventSource.latest();
+
+    // Two errors: under the cap of 3 — still trying, not abandoned.
+    act(() => {
+      source.fail();
+      source.fail();
+    });
+    expect(source.closed).toBe(false);
+    expect(result.current.error).toBeNull();
+
+    // Third consecutive error hits the cap: closed + error surfaced.
+    act(() => {
+      source.fail();
+    });
+    expect(source.closed).toBe(true);
+    expect(result.current.connected).toBe(false);
+    expect(result.current.error).toBe('Live updates unavailable');
+  });
+
+  it('resets the error streak on a successful open between failures', () => {
+    const { result } = renderHook(() => useFrontierStream(token('tok-1', 1), vi.fn()));
+    const source = MockEventSource.latest();
+
+    act(() => {
+      source.fail();
+      source.fail();
+      // A reconnect succeeds → streak resets.
+      source.open();
+      // Two more errors: only 2 consecutive now, still under the cap.
+      source.fail();
+      source.fail();
+    });
+
+    expect(source.closed).toBe(false);
+    expect(result.current.error).toBeNull();
   });
 });
