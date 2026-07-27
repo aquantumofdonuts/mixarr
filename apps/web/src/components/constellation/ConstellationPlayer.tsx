@@ -68,11 +68,25 @@ export interface ConstellationPlayerProps {
 
 const PREVIEW_SECONDS = 30;
 
+/**
+ * A YouTube results-page link for an artist (+ optional track). Mirrors the
+ * backend's link-out (a plain search link, NOT an embed / Data API) so a broken
+ * Deezer preview can degrade to the same always-available bottom tier client-side.
+ */
+function youtubeSearchUrl(artist: string, track?: string): string {
+  const q = [artist, track].filter((s) => s && s.trim()).join(' ');
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
+}
+
 export function ConstellationPlayer({ request, onClose }: ConstellationPlayerProps) {
   const [state, setState] = useState<ResolveState>({ status: 'idle' });
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(PREVIEW_SECONDS);
+  // A resolved-but-broken Deezer preview (dead CDN / 404 on load or play). When
+  // set we swap the audio UI for a YouTube link-out so a broken preview is never
+  // a silent dead end.
+  const [previewFailed, setPreviewFailed] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   // Resolve the playback source whenever the request changes.
@@ -86,6 +100,7 @@ export function ConstellationPlayer({ request, onClose }: ConstellationPlayerPro
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(PREVIEW_SECONDS);
+    setPreviewFailed(false);
 
     const params = new URLSearchParams({ artist: request.artist });
     if (request.track) params.set('track', request.track);
@@ -130,9 +145,10 @@ export function ConstellationPlayer({ request, onClose }: ConstellationPlayerPro
     const el = audioRef.current;
     if (!el) return;
     if (el.paused) {
-      // play() returns a promise in real browsers; ignore rejections (autoplay
-      // policy / interrupted load) so a failed play never throws in the handler.
-      void Promise.resolve(el.play()).catch(() => {});
+      // play() returns a promise in real browsers. A rejection AFTER a user
+      // gesture (this click) means the media itself won't play — a broken/dead
+      // preview — so surface the YouTube fallback rather than swallow it.
+      void Promise.resolve(el.play()).catch(() => setPreviewFailed(true));
     } else {
       el.pause();
     }
@@ -171,7 +187,7 @@ export function ConstellationPlayer({ request, onClose }: ConstellationPlayerPro
         </p>
       )}
 
-      {state.status === 'ready' && state.result.source === 'deezer' && (
+      {state.status === 'ready' && state.result.source === 'deezer' && !previewFailed && (
         <>
           {state.result.coverUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -231,7 +247,41 @@ export function ConstellationPlayer({ request, onClose }: ConstellationPlayerPro
               const d = e.currentTarget.duration;
               if (Number.isFinite(d) && d > 0) setDuration(d);
             }}
+            // A dead CDN / 404 on the (non-empty) preview URL — fall back to a
+            // YouTube link-out rather than fail silently.
+            onError={() => setPreviewFailed(true)}
           />
+        </>
+      )}
+
+      {/* Deezer resolved but its preview URL is broken: honest link-out fallback. */}
+      {state.status === 'ready' && state.result.source === 'deezer' && previewFailed && (
+        <>
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-muted">
+            <Music className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <p className="truncate text-sm font-medium text-foreground">
+                {state.result.title}
+              </p>
+              <SourceBadge kind="youtube" />
+              {state.result.owned && <OwnedBadge />}
+            </div>
+            <p data-testid="player-preview-unavailable" className="text-xs text-muted-foreground">
+              Preview unavailable — open on YouTube instead.
+            </p>
+          </div>
+          <a
+            href={youtubeSearchUrl(request.artist, request.track)}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="player-youtube-link"
+            className="flex shrink-0 items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-accent"
+          >
+            <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            Open in YouTube
+          </a>
         </>
       )}
 

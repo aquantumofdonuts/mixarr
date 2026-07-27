@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Mock the api wrapper so no real fetch happens.
@@ -130,6 +130,52 @@ describe('ConstellationPlayer', () => {
     await screen.findByTestId('player-audio');
 
     unmount();
+    expect(pauseMock).toHaveBeenCalled();
+  });
+
+  it('falls back to a YouTube link-out when the deezer preview fails to load (dead CDN)', async () => {
+    mockGet.mockResolvedValue({ data: DEEZER, error: null, status: 200 });
+    render(<ConstellationPlayer request={playReq({ track: 'Closer' })} onClose={vi.fn()} />);
+
+    const audio = await screen.findByTestId('player-audio');
+    // The (non-empty) preview URL 404s / dies on load -> onError.
+    fireEvent.error(audio);
+
+    // Never a silent dead end: a visible note + a YouTube link-out from the
+    // current artist+track, and the audio UI is gone.
+    expect(await screen.findByTestId('player-preview-unavailable')).toBeInTheDocument();
+    const link = screen.getByTestId('player-youtube-link');
+    expect(link).toHaveAttribute(
+      'href',
+      `https://www.youtube.com/results?search_query=${encodeURIComponent('Nine Inch Nails Closer')}`,
+    );
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(screen.queryByTestId('player-audio')).not.toBeInTheDocument();
+  });
+
+  it('pauses the previous clip when the now-playing track changes (one clip at a time)', async () => {
+    const A = { ...DEEZER, previewUrl: 'https://cdn.deezer.com/A.mp3', title: 'Track A' };
+    const B = { ...DEEZER, previewUrl: 'https://cdn.deezer.com/B.mp3', title: 'Track B' };
+    mockGet
+      .mockResolvedValueOnce({ data: A, error: null, status: 200 })
+      .mockResolvedValueOnce({ data: B, error: null, status: 200 });
+
+    const { rerender } = render(
+      <ConstellationPlayer request={playReq({ track: 'A' })} onClose={vi.fn()} />,
+    );
+    const audioA = await screen.findByTestId('player-audio');
+    expect(audioA).toHaveAttribute('src', A.previewUrl);
+
+    // Only count pauses caused by the track change, not initial mount.
+    pauseMock.mockClear();
+
+    // Change the now-playing request to track B (a new request object).
+    rerender(<ConstellationPlayer request={playReq({ track: 'B' })} onClose={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('player-audio')).toHaveAttribute('src', B.previewUrl),
+    );
+    // Track A's element was paused as the source switched — no overlapping audio.
     expect(pauseMock).toHaveBeenCalled();
   });
 
