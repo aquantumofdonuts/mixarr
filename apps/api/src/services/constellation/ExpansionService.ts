@@ -68,25 +68,24 @@ interface Collab {
 /**
  * Builds the collaboration graph around a single person ("live path").
  *
- * Fullness representation (documented decision — no schema change):
- *   There is no per-person "fully expanded" boolean in the schema. Rather than
- *   add one (which would need a migration and approval) or abuse the per-user
- *   ConstellationOrbit table (expandPerson is user-agnostic), fullness is an
- *   injected predicate `isPersonFull` — the same "seam" philosophy as
- *   CreditSource. Within expandPerson(P), P is full by definition (we saw all of
- *   its collaborators), so an edge's `bothEndpointsFull` is true iff the OTHER
- *   endpoint Q is already-full per the predicate. The default predicate returns
- *   false, so in isolation edges are conservatively not-both-full (correct:
- *   freshly discovered Q's have not been expanded). Task 13 supplies the real
- *   fullness store/predicate. RECOMMENDATION for Task 13: add
- *   `fullyExpanded Boolean @default(false)` to ConstellationPerson as the
- *   backing store (flagged for approval; not changed here).
+ * Fullness representation:
+ *   Persisted via `ConstellationPerson.fullyExpanded`. Within expandPerson(P),
+ *   P is full once all its releases are processed, so P's person row is upserted
+ *   with `fullyExpanded: true`; collaborator (Q) rows stay default false until
+ *   they are themselves expanded. An edge's `bothEndpointsFull` is true iff BOTH
+ *   endpoints are full — here P is full, so it reduces to `isPersonFull(Q)`.
+ *   `isPersonFull` remains an injectable seam (tests can supply a fake); its
+ *   default reads the persisted `fullyExpanded` flag. Task 13's bridgeFill
+ *   recomputes edges once Q is later expanded.
  */
 export class ExpansionService {
   private readonly isPersonFull: (personId: number) => Promise<boolean>;
 
   constructor(private source: CreditSource, options: ExpansionOptions = {}) {
-    this.isPersonFull = options.isPersonFull ?? (async () => false);
+    this.isPersonFull =
+      options.isPersonFull ??
+      (async (id: number) =>
+        (await prisma.constellationPerson.findUnique({ where: { personId: id } }))?.fullyExpanded ?? false);
   }
 
   async expandPerson(personId: number): Promise<void> {
@@ -139,8 +138,8 @@ export class ExpansionService {
 
     const fetchedAt = new Date();
 
-    // Seed person node.
-    await this.upsertPerson(personId, seedName ?? `Artist ${personId}`);
+    // Seed person node — P is fully expanded once we reach here (set on create+update).
+    await this.upsertSeedPerson(personId, seedName ?? `Artist ${personId}`);
 
     // Seed genres, weighted by release count.
     for (const [genre, weight] of genreCounts) {
@@ -165,7 +164,7 @@ export class ExpansionService {
       const roleBitmask = rolesToBitmask(unionRoles);
       const bothEndpointsFull = await this.isPersonFull(qId);
 
-      await this.upsertPerson(qId, collab.name);
+      await this.upsertCollaboratorPerson(qId, collab.name);
 
       await this.upsertEdge(personId, qId, {
         weight,
@@ -186,10 +185,24 @@ export class ExpansionService {
     }
   }
 
-  private async upsertPerson(personId: number, displayName: string): Promise<void> {
+  /** The seed P: fully expanded once this method finishes — set on create AND update. */
+  private async upsertSeedPerson(personId: number, displayName: string): Promise<void> {
     await prisma.constellationPerson.upsert({
       where: { personId },
-      create: { personId, displayName },
+      create: { personId, displayName, fullyExpanded: true },
+      update: { displayName, fullyExpanded: true },
+    });
+  }
+
+  /**
+   * A collaborator Q: default false on create only. The update branch never
+   * touches `fullyExpanded`, so a Q that was already fully expanded by its own
+   * prior expansion is not clobbered back to false.
+   */
+  private async upsertCollaboratorPerson(personId: number, displayName: string): Promise<void> {
+    await prisma.constellationPerson.upsert({
+      where: { personId },
+      create: { personId, displayName, fullyExpanded: false },
       update: { displayName },
     });
   }

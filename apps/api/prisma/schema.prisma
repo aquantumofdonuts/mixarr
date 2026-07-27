@@ -531,10 +531,11 @@ enum NotificationType {
 // ============================================================================
 
 model ConstellationPerson {
-  personId    Int      @id @map("person_id") // = Discogs artist id
-  displayName String   @map("display_name") @db.VarChar(512)
-  type        String   @default("person") @db.VarChar(16) // person|group|blacklisted
-  createdAt   DateTime @default(now()) @map("created_at")
+  personId      Int      @id @map("person_id") // = Discogs artist id
+  displayName   String   @map("display_name") @db.VarChar(512)
+  type          String   @default("person") @db.VarChar(16) // person|group|blacklisted
+  fullyExpanded Boolean  @default(false) @map("fully_expanded")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@map("constellation_person")
 }

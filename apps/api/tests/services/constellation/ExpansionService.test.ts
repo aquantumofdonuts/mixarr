@@ -5,7 +5,10 @@ import type { BaseRole } from '../../../src/services/constellation/RoleTaxonomy.
 vi.mock('../../../src/lib/db.js', () => ({
   default: {
     constellationEdge: { upsert: vi.fn().mockResolvedValue({}) },
-    constellationPerson: { upsert: vi.fn().mockResolvedValue({}) },
+    constellationPerson: {
+      upsert: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     constellationGenre: { upsert: vi.fn().mockResolvedValue({}) },
   },
 }));
@@ -82,8 +85,14 @@ describe('ExpansionService.expandPerson', () => {
     vi.clearAllMocks();
     edgeUpsert().mockResolvedValue({} as any);
     vi.mocked(prisma.constellationPerson.upsert).mockResolvedValue({} as any);
+    vi.mocked(prisma.constellationPerson.findUnique).mockResolvedValue(null as any);
     vi.mocked(prisma.constellationGenre.upsert).mockResolvedValue({} as any);
   });
+
+  const personCall = (id: number) =>
+    vi
+      .mocked(prisma.constellationPerson.upsert)
+      .mock.calls.find(([arg]: any[]) => arg.where.personId === id)?.[0] as any | undefined;
 
   it('dedups reissues: shared master count is 1, not 2', async () => {
     await new ExpansionService(fakeSource(releases, creditsByRelease)).expandPerson(P);
@@ -153,14 +162,38 @@ describe('ExpansionService.expandPerson', () => {
     expect(jazz?.weight).toBe(1);
   });
 
-  it('sets bothEndpointsFull only when the collaborator is already full (injected predicate)', async () => {
+  it('persists P as fullyExpanded (create+update); collaborators are not marked full', async () => {
+    await new ExpansionService(fakeSource(releases, creditsByRelease)).expandPerson(P);
+
+    const seed = personCall(P);
+    expect(seed.create.fullyExpanded).toBe(true);
+    expect(seed.update.fullyExpanded).toBe(true);
+
+    const collab = personCall(10);
+    expect(collab.create.fullyExpanded).toBe(false);
+    // Collaborator update must NOT touch fullyExpanded (avoids clobbering a Q
+    // that was already fully expanded by its own prior expansion).
+    expect(collab.update.fullyExpanded).toBeUndefined();
+  });
+
+  it('sets bothEndpointsFull only when the collaborator is already full (injected seam)', async () => {
     const svc = new ExpansionService(fakeSource(releases, creditsByRelease), {
       isPersonFull: async (id: number) => id === 10, // X is already full, Y is not
     });
     await svc.expandPerson(P);
     expect(edgeCall(P, 10).create.bothEndpointsFull).toBe(true);
+    expect(edgeCall(P, 10).update.bothEndpointsFull).toBe(true);
     expect(edgeCall(10, P).create.bothEndpointsFull).toBe(true);
     expect(edgeCall(P, 20).create.bothEndpointsFull).toBe(false);
+  });
+
+  it('default predicate reads persisted fullyExpanded via findUnique', async () => {
+    vi.mocked(prisma.constellationPerson.findUnique).mockImplementation(
+      (async ({ where }: any) => (where.personId === 10 ? { fullyExpanded: true } : { fullyExpanded: false })) as any,
+    );
+    await new ExpansionService(fakeSource(releases, creditsByRelease)).expandPerson(P);
+    expect(edgeCall(P, 10).create.bothEndpointsFull).toBe(true); // Q=10 persisted full
+    expect(edgeCall(P, 20).create.bothEndpointsFull).toBe(false); // Q=20 not full
   });
 
   it('does not expand a blacklisted seed person', async () => {
