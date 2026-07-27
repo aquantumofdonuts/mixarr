@@ -186,6 +186,19 @@ describe('GET /seed', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it('coerces roleMask=0 to undefined (no filter) so a garbage URL cannot empty the graph', async () => {
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { type: 'artist', id: '42', roleMask: '0' } });
+    const res = mockRes();
+    await h.seed(req, res);
+
+    const call = (deps.graph!.subgraph as any).mock.calls[0];
+    expect(call[1].roleMask).toBeUndefined();
+  });
+
   it('passes roleMask=undefined (no filter) when the param is absent', async () => {
     const deps = makeDeps();
     (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
@@ -231,6 +244,19 @@ describe('GET /expand/:personId', () => {
     await h.expand(req, res);
 
     expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7, roleMask: 3 });
+  });
+
+  it('coerces expand roleMask=0 to undefined (no filter)', async () => {
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 5, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ params: { personId: '5' }, query: { roleMask: '0' } });
+    const res = mockRes();
+    await h.expand(req, res);
+
+    const call = (deps.graph!.subgraph as any).mock.calls[0];
+    expect(call[1].roleMask).toBeUndefined();
   });
 
   it('still returns the cached subgraph when the enqueue fails (guarded, no Redis)', async () => {

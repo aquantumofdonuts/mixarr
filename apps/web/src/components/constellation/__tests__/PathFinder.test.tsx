@@ -122,4 +122,17 @@ describe('PathFinder', () => {
     await userEvent.click(screen.getByRole('button', { name: /find path/i }));
     expect(mockGet).not.toHaveBeenCalled();
   });
+
+  it('blocks a from==to request (disabled button + hint, no query)', async () => {
+    render(<PathFinder />);
+    await fillIds('42', '42');
+
+    // The button is disabled and an honest hint is shown.
+    expect(screen.getByRole('button', { name: /find path/i })).toBeDisabled();
+    expect(screen.getByTestId('path-finder-same')).toBeInTheDocument();
+
+    // Even a forced click sends nothing.
+    await userEvent.click(screen.getByRole('button', { name: /find path/i }));
+    expect(mockGet).not.toHaveBeenCalled();
+  });
 });

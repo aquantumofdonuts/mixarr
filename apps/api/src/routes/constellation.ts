@@ -70,6 +70,21 @@ const MAX_PATH_DEGREES = 10;
 const HEARTBEAT_MS = 25_000;
 const MBID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Parse an optional `roleMask` query param into a positive bitmask or undefined.
+ *
+ * A missing/non-numeric value is undefined (no filter). Crucially, a hand-crafted
+ * `roleMask=0` parses to 0, which `GraphService.subgraph` would treat as "match
+ * no roles" and return an empty graph — so we coerce 0 (and, defensively, any
+ * non-positive value; `parseIntParam` already rejects negatives) to undefined.
+ * The result: a garbage/manual URL can never select "no roles".
+ */
+function parsePositiveRoleMask(raw: unknown): number | undefined {
+  const parsed = parseIntParam(typeof raw === 'string' ? raw : undefined);
+  if (parsed === null || parsed <= 0) return undefined;
+  return parsed;
+}
+
 // ---------------------------------------------------------------------------
 // Stream registry — in-process SSE push channel keyed by stream-token id.
 // ---------------------------------------------------------------------------
@@ -440,10 +455,10 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         const existingToken = typeof req.query.token === 'string' ? req.query.token : undefined;
         // Optional server-side role filter (bitmask over ROLE_BITS). Absent -> no
         // filter (all roles); the GraphService.subgraph already treats an
-        // undefined roleMask as "keep every edge".
-        const roleMask =
-          parseIntParam(typeof req.query.roleMask === 'string' ? req.query.roleMask : undefined) ??
-          undefined;
+        // undefined roleMask as "keep every edge". A hand-crafted roleMask=0 (or
+        // any non-positive value) is coerced to undefined so a garbage/manual URL
+        // can't select "no roles" and produce an empty graph.
+        const roleMask = parsePositiveRoleMask(req.query.roleMask);
 
         if (type === 'album') {
           res.status(400).json({ error: 'album seeds not yet supported' });
@@ -515,10 +530,8 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         const generation =
           parseIntParam(typeof req.query.generation === 'string' ? req.query.generation : undefined) ??
           undefined;
-        // Optional server-side role filter (see /seed) — absent means all roles.
-        const roleMask =
-          parseIntParam(typeof req.query.roleMask === 'string' ? req.query.roleMask : undefined) ??
-          undefined;
+        // Optional server-side role filter (see /seed) — absent (or 0) means all roles.
+        const roleMask = parsePositiveRoleMask(req.query.roleMask);
 
         const jobData: ConstellationExpandJobData = { artistId: personId };
         if (tokenId) {

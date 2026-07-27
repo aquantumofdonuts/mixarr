@@ -60,10 +60,14 @@ export function PathFinder({ onSelectPerson }: PathFinderProps) {
 
   const from = parseId(fromRaw);
   const to = parseId(toRaw);
-  const canSubmit = from !== null && to !== null && state.status !== 'searching';
+  // A path from an artist to itself is degenerate — block it client-side so we
+  // never send a from==to request (the backend would just echo a 0-degree path).
+  const sameEndpoints = from !== null && to !== null && from === to;
+  const canSubmit =
+    from !== null && to !== null && !sameEndpoints && state.status !== 'searching';
 
   const findPath = useCallback(async () => {
-    if (from === null || to === null) return;
+    if (from === null || to === null || from === to) return;
     setState({ status: 'searching' });
     const { data, error, status } = await api.get<PathResult>(pathUrl(from, to, mode));
 
@@ -144,6 +148,12 @@ export function PathFinder({ onSelectPerson }: PathFinderProps) {
       >
         Find path
       </button>
+
+      {sameEndpoints && (
+        <div data-testid="path-finder-same" className="text-muted-foreground">
+          Pick two different artists.
+        </div>
+      )}
 
       {state.status === 'searching' && (
         <div
