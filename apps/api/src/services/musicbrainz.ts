@@ -81,6 +81,16 @@ interface MusicBrainzSearchResult {
   offset: number;
 }
 
+interface MusicBrainzUrlLookup {
+  id: string;
+  resource: string;
+  relations?: Array<{
+    type?: string;
+    direction?: string;
+    artist?: MusicBrainzArtist;
+  }>;
+}
+
 interface MusicBrainzLabelSearchResult {
   labels: MusicBrainzLabel[];
   count: number;
@@ -134,6 +144,28 @@ export class MusicBrainzService {
       `/artist?query=${query}&limit=${limit}&fmt=json`
     );
     return result.artists || [];
+  }
+
+  /**
+   * Resolve an external resource URL to a MusicBrainz artist MBID via the
+   * MB `/url` lookup with `inc=artist-rels`. Used to map a Discogs artist page
+   * (`https://www.discogs.com/artist/{id}`) to its MB artist through the
+   * curated URL relationship — the clean, unambiguous join key.
+   *
+   * Returns the MBID of the first related artist, or null if the URL is not
+   * known to MusicBrainz or carries no artist relationship.
+   */
+  async lookupArtistMbidByUrl(resourceUrl: string): Promise<string | null> {
+    const encoded = encodeURIComponent(resourceUrl);
+    try {
+      const result = await this.request<MusicBrainzUrlLookup>(
+        `/url?resource=${encoded}&inc=artist-rels&fmt=json`
+      );
+      const rel = result.relations?.find(r => r.artist?.id);
+      return rel?.artist?.id ?? null;
+    } catch {
+      return null;
+    }
   }
 
   async getArtist(mbid: string): Promise<MusicBrainzArtist | null> {
