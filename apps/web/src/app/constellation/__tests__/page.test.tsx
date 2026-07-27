@@ -18,9 +18,13 @@ import userEvent from '@testing-library/user-event';
 const viewState = vi.hoisted(() => ({
   seed: undefined as unknown,
   playerAvailable: false,
+  // Incremented once per MOUNT (not per render), so a remount — which the page
+  // forces via a seed-derived `key` — is observable.
+  mounts: 0,
 }));
 
 vi.mock('@/components/constellation/ConstellationView', async () => {
+  const { useEffect } = await import('react');
   const { useConstellationPlayer } = await import(
     '@/components/constellation/ConstellationPlayer'
   );
@@ -28,6 +32,9 @@ vi.mock('@/components/constellation/ConstellationView', async () => {
     viewState.seed = seed;
     const player = useConstellationPlayer();
     viewState.playerAvailable = player !== null;
+    useEffect(() => {
+      viewState.mounts += 1;
+    }, []);
     return (
       <div data-testid="constellation-view" data-player={player ? 'yes' : 'no'}>
         constellation-view
@@ -51,6 +58,7 @@ import ConstellationPage from '../page';
 beforeEach(() => {
   viewState.seed = undefined;
   viewState.playerAvailable = false;
+  viewState.mounts = 0;
 });
 
 describe('ConstellationPage', () => {
@@ -87,6 +95,29 @@ describe('ConstellationPage', () => {
       'data-player',
       'yes',
     );
+  });
+
+  it('remounts the view when a different artist is loaded (resets walk state)', async () => {
+    const user = userEvent.setup();
+    render(<ConstellationPage />);
+
+    const input = screen.getByLabelText(/discogs artist id/i);
+    const load = screen.getByRole('button', { name: /load/i });
+
+    await user.type(input, '111');
+    await user.click(load);
+    expect(viewState.seed).toEqual({ type: 'artist', id: '111' });
+    expect(viewState.mounts).toBe(1);
+
+    // Load a genuinely different source artist.
+    await user.clear(input);
+    await user.type(input, '222');
+    await user.click(load);
+
+    // The seed prop updates to B, and the seed-derived `key` forces a fresh
+    // mount (breadcrumbs/selection/roleMask reset rather than lingering).
+    expect(viewState.seed).toEqual({ type: 'artist', id: '222' });
+    expect(viewState.mounts).toBe(2);
   });
 
   it('ignores non-numeric input (keeps the empty state)', async () => {

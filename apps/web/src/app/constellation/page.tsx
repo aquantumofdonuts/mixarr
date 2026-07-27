@@ -75,7 +75,10 @@ export default function ConstellationPage() {
           <CardContent className="p-0">
             <div className="relative h-[70vh] min-h-[420px] w-full overflow-hidden rounded-container">
               {seed ? (
-                <ConstellationView seed={seed} />
+                // Key on the seed so a genuinely NEW source artist remounts the
+                // view — resetting its internal walk state (breadcrumbs,
+                // selectedPerson, roleMask). The same-seed case is unaffected.
+                <ConstellationView key={`${seed.type}:${seed.id}`} seed={seed} />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-muted-foreground">
                   <Waypoints className="h-12 w-12 opacity-50" aria-hidden="true" />
