@@ -177,28 +177,87 @@ function makeMarkOrbitAdapter(prisma: {
 }
 
 /**
+ * Injectable resolvers for {@link buildSeedSources} so the seed wiring is
+ * unit-testable without the connections table / live services.
+ */
+export interface SeedSourceDeps {
+  /** The user's Lidarr library artists (each carries its MusicBrainz `foreignArtistId`). */
+  getLidarrArtists?: (userId: number) => Promise<Array<{ foreignArtistId: string }>>;
+  /** The user's Last.fm recent top artists (name + optional MBID). */
+  getLastfmTopArtists?: (userId: number) => Promise<Array<{ mbid?: string; name: string }>>;
+}
+
+/**
  * Build the tiered {@link SeedSource}s for a user.
  *
- * SEAM WIRING STATUS (documented TODO): the tiering + dedupe + crawl
- * orchestration is complete and tested; wiring each listening-history/library
- * service to its tier is deliberately deferred because it needs the user's
- * per-connection config and time-windowed queries that the settings layer
- * (Task 16) has not yet surfaced here. Each source below is a `getArtists`
- * closure over a service; fill them in as connections become available:
+ * WIRED (this task):
+ *   - `lib`     <- the user's Lidarr library artists, keyed by MBID
+ *                  (`foreignArtistId`); the collector resolves each MBID to a
+ *                  Discogs person id via IdentityService.mbidToDiscogs.
+ *   - `hist30d` <- the user's Last.fm top artists over the last month
+ *                  (a readily-available listening-history signal), as mbid/name
+ *                  refs; name-only refs are skipped by the collector (name→discogs
+ *                  resolution is out of scope), MBID-bearing refs resolve.
  *
- *   - hist1d / hist7d / hist30d  <- recent-play history windowed by recency:
- *       TautulliService.getTopArtists / LastfmService.getTopArtists (period) /
- *       ListenBrainzService listens. These return artist NAMES (+ sometimes an
- *       MBID); prefer the MBID and resolve it via IdentityService.mbidToDiscogs.
- *   - libtop  <- top library artists (Lidarr/Jellyfin), MBID-keyed.
- *   - lib     <- the rest of the library (Lidarr/Jellyfin), MBID-keyed.
+ * DEFERRED (documented TODO): finer recency windows and the other backends still
+ * need per-connection config / windowed queries not cleanly surfaced here:
+ *   - hist1d / hist7d  <- Tautulli / ListenBrainz recent-play windows, and
+ *                         Last.fm 7day; wire once those connections expose the
+ *                         windowed queries + username config uniformly.
+ *   - libtop           <- "top" slice of the library (Lidarr play stats /
+ *                         Jellyfin favourites) — no per-artist play-rank is
+ *                         exposed by the Lidarr artist list today.
  *
- * Until wired, this returns [] so a crawl for a user with no configured sources
- * is a well-defined no-op (runOrbitCrawl marks nothing and crawls nothing).
+ * Every source is a lazy `getArtists` closure that resolves its connection at
+ * call time and returns [] when the connection is absent, so a crawl for a user
+ * with no configured sources is a well-defined no-op.
  */
-function buildSeedSources(_userId: number): SeedSource[] {
-  // TODO(constellation): construct real SeedSources from the user's connections.
-  return [];
+export function buildSeedSources(userId: number, deps: SeedSourceDeps = {}): SeedSource[] {
+  const getLidarrArtists = deps.getLidarrArtists ?? defaultGetLidarrArtists;
+  const getLastfmTopArtists = deps.getLastfmTopArtists ?? defaultGetLastfmTopArtists;
+
+  return [
+    {
+      tier: 'hist30d',
+      getArtists: async () => {
+        const artists = await getLastfmTopArtists(userId);
+        return artists.map((a) => ({ mbid: a.mbid || undefined, name: a.name }));
+      },
+    },
+    {
+      tier: 'lib',
+      getArtists: async () => {
+        const artists = await getLidarrArtists(userId);
+        return artists
+          .filter((a) => !!a.foreignArtistId)
+          .map((a) => ({ mbid: a.foreignArtistId }));
+      },
+    },
+  ];
+}
+
+/** Default `lib` supplier: the user's Lidarr library artists. */
+async function defaultGetLidarrArtists(userId: number): Promise<Array<{ foreignArtistId: string }>> {
+  const { ConnectionResolver } = await import('../../lib/connection-resolver.js');
+  const lidarr = await ConnectionResolver.getLidarrService(userId);
+  if (!lidarr) return [];
+  return lidarr.getArtists();
+}
+
+/** Default `hist30d` supplier: the user's Last.fm top artists over the last month. */
+async function defaultGetLastfmTopArtists(
+  userId: number,
+): Promise<Array<{ mbid?: string; name: string }>> {
+  const { ConnectionResolver } = await import('../../lib/connection-resolver.js');
+  const conn = await ConnectionResolver.getConnection('lastfm', userId);
+  if (!conn) return [];
+  const cfg = conn.config as { apiKey?: string; username?: string };
+  if (!cfg.apiKey || !cfg.username) return [];
+
+  const { LastfmService } = await import('../../services/lastfm.js');
+  const service = new LastfmService({ apiKey: cfg.apiKey });
+  const { artists } = await service.getUserTopArtists(cfg.username, '1month', 100);
+  return artists.map((a) => ({ mbid: a.mbid || undefined, name: a.name }));
 }
 
 /**
@@ -238,6 +297,9 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
   const { IdentityService } = await import('../../services/constellation/IdentityService.js');
   const { OrbitCrawler } = await import('../../services/constellation/OrbitCrawler.js');
   const { OrbitSeedCollector } = await import('../../services/constellation/OrbitSeedCollector.js');
+  const { resolveConfiguredCreditSource } = await import(
+    '../../services/constellation/resolveCreditSource.js'
+  );
 
   const worker = new Worker(
     CONSTELLATION_QUEUE_NAMES.CRAWL,
@@ -250,10 +312,10 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
       }
 
       // The CreditSource for ExpansionService is supplied by the data-source
-      // layer (SQLite dump index or live Discogs adapter). Until Task 16 wires it
-      // through settings, it is resolved from the environment/registry.
-      // TODO(constellation): inject the configured CreditSource here.
-      const creditSource = await resolveCreditSource();
+      // layer per the user's "Setting-ON/OFF" configuration (SQLite dump index or
+      // live Discogs adapter). The live path uses the user's (else global) Discogs
+      // connection.
+      const creditSource = await resolveConfiguredCreditSource(userId);
       const expansionService = new ExpansionService(creditSource);
       const identity = new IdentityService();
 
@@ -264,23 +326,30 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
         isFull: makeIsFullAdapter(prisma),
       });
 
-      const result = await runOrbitCrawl({
-        userId,
-        collector,
-        sources,
-        crawler,
-        maxEdges: DEFAULT_MAX_EDGES,
-        markOrbit: makeMarkOrbitAdapter(prisma),
-      });
+      try {
+        const result = await runOrbitCrawl({
+          userId,
+          collector,
+          sources,
+          crawler,
+          maxEdges: DEFAULT_MAX_EDGES,
+          markOrbit: makeMarkOrbitAdapter(prisma),
+        });
 
-      // Settle every crawled seed's orbit status to 'crawled'.
-      await prisma.constellationOrbit.updateMany({
-        where: { userId, status: 'crawling' },
-        data: { status: 'crawled', lastCrawledAt: new Date() },
-      });
+        // Settle every crawled seed's orbit status to 'crawled'.
+        await prisma.constellationOrbit.updateMany({
+          where: { userId, status: 'crawling' },
+          data: { status: 'crawled', lastCrawledAt: new Date() },
+        });
 
-      void job.updateProgress({ phase: 'crawled', ...result });
-      return result;
+        void job.updateProgress({ phase: 'crawled', ...result });
+        return result;
+      } finally {
+        // The DumpIndexService (Setting-ON) opens a SQLite handle; release it when
+        // we own one. The live adapter has no handle (no-op).
+        const closable = creditSource as { close?: () => void };
+        if (typeof closable.close === 'function') closable.close();
+      }
     },
     {
       connection: createRedisConnection(),
@@ -299,14 +368,4 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
     logger.error(`Orbit crawl job ${job?.id} failed`, { error });
     io?.emit('constellation:crawl:failed', { jobId: job?.id, error: error?.message });
   });
-}
-
-/**
- * Resolve the CreditSource ExpansionService expands over. Placeholder until the
- * settings/data-source layer (Task 16) supplies the configured backend.
- */
-async function resolveCreditSource(): Promise<import('../../services/constellation/ExpansionService.js').CreditSource> {
-  // TODO(constellation): return the SQLite-index-backed or live Discogs adapter
-  // per the user's "Setting-ON/OFF" data-source configuration.
-  throw new Error('Constellation CreditSource is not configured');
 }
