@@ -103,6 +103,7 @@ function makeDeps(overrides: Partial<ConstellationDeps> = {}): ConstellationDeps
     getArtistReleases: vi.fn(),
     streams: new StreamRegistry(),
     subscribeToLidarr: vi.fn().mockResolvedValue({ added: true, target: 'artist' }),
+    searchTrackPreview: vi.fn().mockResolvedValue(null),
     ...overrides,
   };
 }
@@ -500,6 +501,95 @@ describe('GET /owned', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.owned).toEqual([3, 7]); // distinct
+  });
+});
+
+// ---- /play (playback resolution) --------------------------------------------
+
+describe('GET /play', () => {
+  it('returns source=deezer with the preview + cover when Deezer has a preview', async () => {
+    const deps = makeDeps({
+      searchTrackPreview: vi.fn().mockResolvedValue({
+        previewUrl: 'https://cdn.deezer.com/preview.mp3',
+        title: 'Closer',
+        artist: 'Nine Inch Nails',
+        coverUrl: 'https://cdn.deezer.com/cover_big.jpg',
+      }),
+    });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { artist: 'Nine Inch Nails', track: 'Closer' } });
+    const res = mockRes();
+    await h.play(req, res);
+
+    expect(deps.searchTrackPreview).toHaveBeenCalledWith('Nine Inch Nails', 'Closer');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      source: 'deezer',
+      previewUrl: 'https://cdn.deezer.com/preview.mp3',
+      title: 'Closer',
+      artist: 'Nine Inch Nails',
+      coverUrl: 'https://cdn.deezer.com/cover_big.jpg',
+    });
+  });
+
+  it('falls through to source=youtube with a correct search URL when there is no preview', async () => {
+    const deps = makeDeps({ searchTrackPreview: vi.fn().mockResolvedValue(null) });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { artist: 'Some Session Player', track: 'Deep Cut' } });
+    const res = mockRes();
+    await h.play(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.source).toBe('youtube');
+    expect(res.body.youtubeUrl).toBe(
+      `https://www.youtube.com/results?search_query=${encodeURIComponent('Some Session Player Deep Cut')}`,
+    );
+    // A link-out, never an embed / Data API.
+    expect(res.body.youtubeUrl).toContain('youtube.com/results?search_query=');
+  });
+
+  it('degrades to youtube (never 500s) when the Deezer search throws', async () => {
+    const deps = makeDeps({
+      searchTrackPreview: vi.fn().mockRejectedValue(new Error('Deezer API error: 503')),
+    });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { artist: 'Radiohead' } });
+    const res = mockRes();
+    await h.play(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.source).toBe('youtube');
+    // No track -> no trailing separator in the query.
+    expect(res.body.youtubeUrl).toBe(
+      `https://www.youtube.com/results?search_query=${encodeURIComponent('Radiohead')}`,
+    );
+  });
+
+  it('passes the owned flag through as an owned:true hint (badge, not a stream)', async () => {
+    const deps = makeDeps({ searchTrackPreview: vi.fn().mockResolvedValue(null) });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { artist: 'Aphex Twin', owned: 'true' } });
+    const res = mockRes();
+    await h.play(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.owned).toBe(true);
+  });
+
+  it('400s when the artist is missing', async () => {
+    const deps = makeDeps();
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: {} });
+    const res = mockRes();
+    await h.play(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(deps.searchTrackPreview).not.toHaveBeenCalled();
   });
 });
 

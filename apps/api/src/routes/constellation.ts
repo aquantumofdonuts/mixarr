@@ -56,6 +56,10 @@ import {
 import { rateLimit } from '../services/rate-limiter.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
 import { getLidarrServiceWithConfig } from '../lib/connection-resolver.js';
+import {
+  searchDeezerTrackPreview,
+  type DeezerTrackPreview,
+} from '../services/deezer.js';
 
 const log = createLogger('Constellation');
 
@@ -340,6 +344,47 @@ export async function subscribeToLidarrDefault(
 }
 
 // ---------------------------------------------------------------------------
+// Playback resolution (Design §8) — the honest player chain.
+// ---------------------------------------------------------------------------
+
+/**
+ * Injectable Deezer track-preview search seam (defaults to the real
+ * {@link searchDeezerTrackPreview}). Kept as a dep so the /play unit tests can
+ * mock the Deezer call without touching the network.
+ */
+export type SearchTrackPreview = (
+  artist: string,
+  track?: string,
+) => Promise<DeezerTrackPreview | null>;
+
+/** Response shape of GET /play (a discriminated union on `source`). */
+export type PlayResolution =
+  | {
+      source: 'deezer';
+      previewUrl: string;
+      title: string;
+      artist: string;
+      coverUrl?: string;
+      owned?: true;
+    }
+  | {
+      source: 'youtube';
+      youtubeUrl: string;
+      owned?: true;
+    };
+
+/**
+ * Build the YouTube search link-out for an artist (+ optional track). This is a
+ * plain results-page link — NOT the Data API and NOT an iframe embed (Design §8:
+ * quota/ToS reality). It is the always-available bottom tier of the chain, so a
+ * play affordance is never a dead button.
+ */
+function youtubeSearchUrl(artist: string, track?: string): string {
+  const q = [artist, track].filter((s) => s && s.trim()).join(' ');
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
+}
+
+// ---------------------------------------------------------------------------
 // Handlers (dependency-injected so they are unit-testable without Redis/DB).
 // ---------------------------------------------------------------------------
 
@@ -356,6 +401,8 @@ export interface ConstellationDeps {
   streams?: StreamRegistry;
   /** Injectable Lidarr-add seam (defaults to {@link subscribeToLidarrDefault}). */
   subscribeToLidarr?: SubscribeToLidarr;
+  /** Injectable Deezer track-preview search (defaults to the real service). */
+  searchTrackPreview?: SearchTrackPreview;
 }
 
 export interface ConstellationHandlers {
@@ -366,6 +413,7 @@ export interface ConstellationHandlers {
   subscribe(req: Request, res: Response): Promise<void>;
   stream(req: Request, res: Response): Promise<void>;
   owned(req: Request, res: Response): Promise<void>;
+  play(req: Request, res: Response): Promise<void>;
 }
 
 export function buildConstellationHandlers(deps: ConstellationDeps = {}): ConstellationHandlers {
@@ -375,6 +423,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
   const getArtistReleases = deps.getArtistReleases ?? fetchDiscogsArtistReleases;
   const streams = deps.streams ?? defaultStreams;
   const subscribeToLidarr = deps.subscribeToLidarr ?? subscribeToLidarrDefault;
+  const searchTrackPreview = deps.searchTrackPreview ?? searchDeezerTrackPreview;
 
   return {
     /**
@@ -672,6 +721,73 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         res.status(500).json({ error: error instanceof Error ? error.message : 'owned failed' });
       }
     },
+
+    /**
+     * GET /play?artist=<name>&track=<optional>&owned=<bool>
+     * Resolve a playback source down the honest chain (Design §8):
+     *   owned (badge only — full streaming is OUT OF SCOPE) → Deezer 30s preview
+     *   (in-app <audio>) → YouTube link-out (a results-page link, NEVER the Data
+     *   API / an embed — quota + ToS reality).
+     *
+     * ## OWNED is a hint, not a stream
+     * `owned=true` (the caller already knows the node is in the user's Plex/
+     * Jellyfin library) is passed straight through as an `owned: true` flag so the
+     * player can show an "in your library" badge. We deliberately do NOT attempt
+     * in-browser streaming from Plex/Jellyfin: their stream URLs need per-server
+     * auth + transcoding negotiation that is out of scope for this read surface.
+     * The reliable in-app tiers are the Deezer preview and the YouTube link-out.
+     *
+     * ## Graceful degradation
+     * A Deezer error OR a result with no preview falls through to the YouTube
+     * link-out — this endpoint never 500s on a missing preview, so the frontend
+     * play button is never dead: at worst it becomes a YouTube search link.
+     */
+    async play(req: Request, res: Response): Promise<void> {
+      const artist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+      const track =
+        typeof req.query.track === 'string' && req.query.track.trim()
+          ? req.query.track.trim()
+          : undefined;
+      const owned = req.query.owned === 'true' || req.query.owned === '1';
+
+      if (!artist) {
+        res.status(400).json({ error: 'artist is required' });
+        return;
+      }
+
+      // Best-effort Deezer preview. Any failure (HTTP error, timeout, malformed
+      // body) degrades to the YouTube link-out rather than erroring the request.
+      let preview: DeezerTrackPreview | null = null;
+      try {
+        preview = await searchTrackPreview(artist, track);
+      } catch (error) {
+        log.debug('deezer preview lookup failed; falling through to youtube', {
+          artist,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        preview = null;
+      }
+
+      if (preview && preview.previewUrl) {
+        const body: PlayResolution = {
+          source: 'deezer',
+          previewUrl: preview.previewUrl,
+          title: preview.title,
+          artist: preview.artist,
+          ...(preview.coverUrl ? { coverUrl: preview.coverUrl } : {}),
+          ...(owned ? { owned: true as const } : {}),
+        };
+        res.json(body);
+        return;
+      }
+
+      const body: PlayResolution = {
+        source: 'youtube',
+        youtubeUrl: youtubeSearchUrl(artist, track),
+        ...(owned ? { owned: true as const } : {}),
+      };
+      res.json(body);
+    },
   };
 }
 
@@ -692,6 +808,7 @@ export function createConstellationRouter(deps: ConstellationDeps = {}): Router 
   router.post('/person/:personId/subscribe', h.subscribe);
   router.get('/stream/:token', h.stream);
   router.get('/owned', h.owned);
+  router.get('/play', h.play);
 
   return router;
 }
