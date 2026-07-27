@@ -22,12 +22,21 @@ vi.mock('../../src/lib/logger.js', () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+// subscribeToLidarrDefault resolves the user's Lidarr connection through this
+// helper; mock it so the unit tests supply a fake LidarrService.
+vi.mock('../../src/lib/connection-resolver.js', () => ({
+  getLidarrServiceWithConfig: vi.fn(),
+}));
+
 import prisma from '../../src/lib/db.js';
+import { getLidarrServiceWithConfig } from '../../src/lib/connection-resolver.js';
 import {
   buildConstellationHandlers,
   createConstellationRouter,
   StreamRegistry,
   LidarrNotConfiguredError,
+  AlbumNotFoundError,
+  subscribeToLidarrDefault,
   type ConstellationDeps,
 } from '../../src/routes/constellation.js';
 
@@ -377,6 +386,99 @@ describe('POST /person/:personId/subscribe', () => {
     await h.subscribe(req, res);
     expect(res.statusCode).toBe(400);
     expect(deps.identity!.discogsToMbid).not.toHaveBeenCalled();
+  });
+});
+
+// ---- subscribeToLidarrDefault (real add path, mocked LidarrService) ----------
+
+describe('subscribeToLidarrDefault', () => {
+  function fakeLidarr() {
+    return {
+      getQualityProfiles: vi.fn().mockResolvedValue([]),
+      getMetadataProfiles: vi.fn().mockResolvedValue([]),
+      getRootFolders: vi.fn().mockResolvedValue([]),
+      searchAlbum: vi.fn().mockResolvedValue([]),
+      addAlbumWithCacheWarm: vi.fn().mockResolvedValue({}),
+      addArtistWithCacheWarm: vi.fn().mockResolvedValue({}),
+    };
+  }
+
+  it('adds the exact-title album belonging to the resolved artist', async () => {
+    const lidarr = fakeLidarr();
+    lidarr.searchAlbum.mockResolvedValue([
+      // A same-titled album by a DIFFERENT artist must be ignored.
+      { foreignAlbumId: 'wrong-album', title: 'Greatest Hits', artist: { foreignArtistId: 'other-mbid' } },
+      { foreignAlbumId: 'right-album', title: 'Greatest Hits', artist: { foreignArtistId: 'artist-mbid' } },
+    ]);
+    (getLidarrServiceWithConfig as any).mockResolvedValue({
+      service: lidarr,
+      config: { qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' },
+    });
+
+    const outcome = await subscribeToLidarrDefault({
+      userId: 7,
+      mbid: 'artist-mbid',
+      releaseTitle: 'Greatest Hits',
+    });
+
+    expect(outcome).toEqual({ added: true, target: 'album' });
+    expect(lidarr.addAlbumWithCacheWarm).toHaveBeenCalledWith(
+      'artist-mbid',
+      'right-album',
+      1,
+      2,
+      '/music',
+    );
+  });
+
+  it('fails cleanly (no wrong-artist add) when no album under the artist matches', async () => {
+    const lidarr = fakeLidarr();
+    // Only a same-titled album by a DIFFERENT artist exists.
+    lidarr.searchAlbum.mockResolvedValue([
+      { foreignAlbumId: 'wrong-album', title: 'Greatest Hits', artist: { foreignArtistId: 'other-mbid' } },
+    ]);
+    (getLidarrServiceWithConfig as any).mockResolvedValue({
+      service: lidarr,
+      config: { qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' },
+    });
+
+    await expect(
+      subscribeToLidarrDefault({ userId: 7, mbid: 'artist-mbid', releaseTitle: 'Greatest Hits' }),
+    ).rejects.toBeInstanceOf(AlbumNotFoundError);
+    expect(lidarr.addAlbumWithCacheWarm).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the first available profile/metadata/root-folder when config omits them', async () => {
+    const lidarr = fakeLidarr();
+    lidarr.getQualityProfiles.mockResolvedValue([{ id: 11 }]);
+    lidarr.getMetadataProfiles.mockResolvedValue([{ id: 22 }]);
+    lidarr.getRootFolders.mockResolvedValue([{ path: '/fallback' }]);
+    (getLidarrServiceWithConfig as any).mockResolvedValue({
+      service: lidarr,
+      config: {}, // no profile ids / root folder configured
+    });
+
+    const outcome = await subscribeToLidarrDefault({ userId: 7, mbid: 'artist-mbid' });
+
+    expect(outcome).toEqual({ added: true, target: 'artist' });
+    expect(lidarr.addArtistWithCacheWarm).toHaveBeenCalledWith(
+      'artist-mbid',
+      11,
+      22,
+      '/fallback',
+      true,
+      expect.any(Boolean),
+      false,
+      expect.any(String),
+      expect.any(String),
+    );
+  });
+
+  it('throws LidarrNotConfiguredError when the user has no Lidarr connection', async () => {
+    (getLidarrServiceWithConfig as any).mockResolvedValue(null);
+    await expect(
+      subscribeToLidarrDefault({ userId: 7, mbid: 'artist-mbid' }),
+    ).rejects.toBeInstanceOf(LidarrNotConfiguredError);
   });
 });
 

@@ -243,6 +243,18 @@ export class LidarrNotConfiguredError extends Error {
   }
 }
 
+/**
+ * Raised when a requested album can't be found UNDER the resolved artist in
+ * Lidarr. Mapped to 404 — we never fall back to a same-titled album belonging to
+ * a different artist (that would add the wrong release).
+ */
+export class AlbumNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AlbumNotFoundError';
+  }
+}
+
 export interface SubscribeToLidarrInput {
   userId: number;
   mbid: string;
@@ -295,17 +307,19 @@ export async function subscribeToLidarrDefault(
   }
 
   if (releaseTitle) {
-    // Album grain: find the release in Lidarr and monitor only it.
+    // Album grain: find the release in Lidarr and monitor only it. Match is
+    // STRICTLY scoped to the resolved artist's mbid — never fall back to another
+    // artist's same-titled album (e.g. "Greatest Hits", self-titled), which
+    // would add the wrong foreignAlbumId. If nothing under this artist matches
+    // the title, fail cleanly (the handler maps this to a 404).
     const wanted = releaseTitle.toLowerCase().trim();
-    const candidates = await lidarr.searchAlbum(releaseTitle);
+    const byArtist = (await lidarr.searchAlbum(releaseTitle)).filter(
+      (c) => c.artist?.foreignArtistId === mbid,
+    );
     const match =
-      candidates.find(
-        (c) => c.artist?.foreignArtistId === mbid && (c.title ?? '').toLowerCase().trim() === wanted,
-      ) ??
-      candidates.find((c) => c.artist?.foreignArtistId === mbid) ??
-      candidates.find((c) => (c.title ?? '').toLowerCase().trim() === wanted);
+      byArtist.find((c) => (c.title ?? '').toLowerCase().trim() === wanted) ?? byArtist[0];
     if (!match) {
-      throw new Error(`Could not find "${releaseTitle}" for this artist in Lidarr`);
+      throw new AlbumNotFoundError('Album not found for this artist in Lidarr');
     }
     await lidarr.addAlbumWithCacheWarm(mbid, match.foreignAlbumId, qpId, mpId, rfPath);
     return { added: true, target: 'album' };
@@ -572,6 +586,10 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         } catch (error) {
           if (error instanceof LidarrNotConfiguredError) {
             res.status(400).json({ error: error.message });
+            return;
+          }
+          if (error instanceof AlbumNotFoundError) {
+            res.status(404).json({ error: error.message });
             return;
           }
           const message = error instanceof Error ? error.message : 'Failed to add to Lidarr';
