@@ -10,7 +10,14 @@ vi.mock('../../../src/lib/db.js', () => ({
   },
 }));
 
+// Mock the logger so budget-exhaustion warnings are observable (and silent).
+vi.mock('../../../src/lib/logger.js', () => {
+  const warn = vi.fn();
+  return { createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() }) };
+});
+
 import prisma from '../../../src/lib/db.js';
+import { createLogger } from '../../../src/lib/logger.js';
 import { GraphService } from '../../../src/services/constellation/GraphService.js';
 
 type EdgeRow = {
@@ -371,6 +378,71 @@ describe('GraphService.path', () => {
     const adj: Adj = { 1: [{ target: 2 }], 2: [{ target: 1 }], 3: [{ target: 4 }] }; // {1,2} | {3,4}
     expect(await new GraphService({ getNeighbors: fakeNeighbors(adj) }).path(1, 4, { mode: 'shortest' })).toBeNull();
     expect(await new GraphService({ getNeighbors: fakeNeighbors(adj) }).path(1, 4, { mode: 'interesting' })).toBeNull();
+  });
+
+  it('from == to: degrees 0 in both modes with no getNeighbors expansion', async () => {
+    const getNeighbors = fakeNeighbors({ 7: [{ target: 8 }] });
+    const svc = new GraphService({ getNeighbors });
+
+    const shortest = await svc.path(7, 7, { mode: 'shortest' });
+    expect(shortest).toMatchObject({ nodes: [7], degrees: 0, mode: 'shortest' });
+
+    const interesting = await svc.path(7, 7, { mode: 'interesting' });
+    expect(interesting).toMatchObject({ nodes: [7], degrees: 0, mode: 'interesting' });
+
+    expect(getNeighbors).not.toHaveBeenCalled();
+  });
+
+  it('interesting: depth cap is max+2 inclusive (returns a max+2 path)', async () => {
+    // max=2 -> depth cap 4 hops. Only route 1->2->3->4->5 is exactly 4 hops.
+    const getNeighbors = fakeNeighbors({
+      1: [{ target: 2, bridge: 0.5 }], 2: [{ target: 3, bridge: 0.5 }],
+      3: [{ target: 4, bridge: 0.5 }], 4: [{ target: 5, bridge: 0.5 }],
+    });
+    const res = await new GraphService({ getNeighbors }).path(1, 5, { mode: 'interesting', max: 2 });
+    expect(res).not.toBeNull();
+    expect(res!.nodes).toEqual([1, 2, 3, 4, 5]);
+    expect(res!.degrees).toBe(4); // == max + 2
+    expect(res!.totalBridge).toBeCloseTo(2.0, 10);
+  });
+
+  it('interesting: depth cap is max+3 exclusive (null when the only path is max+3)', async () => {
+    // max=2 -> depth cap 4 hops. Only route 1->..->6 is 5 hops (max+3) -> unreachable.
+    const getNeighbors = fakeNeighbors({
+      1: [{ target: 2 }], 2: [{ target: 3 }], 3: [{ target: 4 }], 4: [{ target: 5 }], 5: [{ target: 6 }],
+    });
+    const res = await new GraphService({ getNeighbors }).path(1, 6, { mode: 'interesting', max: 2 });
+    expect(res).toBeNull();
+  });
+
+  it('self-loop: a node edge to itself does not loop forever or produce a bogus path', async () => {
+    // Node 2 has a self-loop; the real route is 1->2->3.
+    const adj: Adj = { 1: [{ target: 2 }], 2: [{ target: 2 }, { target: 3 }] };
+    const shortest = await new GraphService({ getNeighbors: fakeNeighbors(adj) }).path(1, 3, { mode: 'shortest' });
+    expect(shortest).toEqual({ nodes: [1, 2, 3], degrees: 2, mode: 'shortest' });
+
+    const interesting = await new GraphService({ getNeighbors: fakeNeighbors(adj) }).path(1, 3, {
+      mode: 'interesting',
+    });
+    expect(interesting!.nodes).toEqual([1, 2, 3]);
+    expect(interesting!.degrees).toBe(2);
+  });
+
+  it('interesting: budget too small -> null AND a budget-exhaustion warning is logged', async () => {
+    const warn = (createLogger('x') as unknown as { warn: ReturnType<typeof vi.fn> }).warn;
+    warn.mockClear();
+
+    // A real 1->2->3->4->5 path exists, but a budget of 1 expansion cannot reach it.
+    const getNeighbors = fakeNeighbors({
+      1: [{ target: 2 }], 2: [{ target: 3 }], 3: [{ target: 4 }], 4: [{ target: 5 }],
+    });
+    const res = await new GraphService({ getNeighbors }).path(1, 5, {
+      mode: 'interesting',
+      candidateBudget: 1,
+    });
+    expect(res).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/candidate budget/i);
   });
 });
 

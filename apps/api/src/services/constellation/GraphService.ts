@@ -1,5 +1,8 @@
 import prisma from '../../lib/db.js';
+import { createLogger } from '../../lib/logger.js';
 import { bridgeScore } from './BridgeScore.js';
+
+const logger = createLogger('GraphService');
 
 export interface GraphNode {
   personId: number;
@@ -404,6 +407,7 @@ export class GraphService {
     const maxDepth = max + 2; // hops allowed for the "interesting" (longer) route
     let best: { nodes: number[]; totalBridge: number } | null = null;
     let expansions = 0;
+    let budgetExhausted = false;
 
     // LIFO stack of partial simple paths; each carries its running bridge sum.
     const stack: Array<{ path: number[]; bridgeSum: number; onPath: Set<number> }> = [
@@ -411,7 +415,10 @@ export class GraphService {
     ];
 
     while (stack.length) {
-      if (expansions >= budget) break; // hard bound -> guaranteed termination
+      if (expansions >= budget) {
+        budgetExhausted = true; // stopped by the bound, not by exhausting the graph
+        break;
+      }
       const frame = stack.pop()!;
       const last = frame.path[frame.path.length - 1];
 
@@ -438,7 +445,15 @@ export class GraphService {
       }
     }
 
-    if (!best) return null;
+    if (!best) {
+      if (budgetExhausted) {
+        // Distinguish "budget too small" from "genuinely no path" in the field.
+        logger.warn(
+          `interesting path ${fromId}->${toId} gave up: candidate budget (${budget} expansions) exhausted before reaching target (max ${maxDepth} hops)`,
+        );
+      }
+      return null;
+    }
     return { nodes: best.nodes, degrees: best.nodes.length - 1, mode: 'interesting', totalBridge: best.totalBridge };
   }
 }
