@@ -167,6 +167,32 @@ export interface DiscogsCredit {
   masterId: number | null;
 }
 
+/**
+ * One item from the Discogs `/artists/{id}/releases` listing. The listing mixes
+ * `type: 'release'` (a concrete release, `id` is the release id) and
+ * `type: 'master'` (`id` is the master id, `main_release` is its representative
+ * release id). Every field is optional because it is untrusted external data.
+ */
+export interface DiscogsArtistReleaseItem {
+  id: number;
+  type: 'release' | 'master';
+  title?: string;
+  year?: number;
+  role?: string;
+  /** Present on `type: 'master'` items — the representative release id. */
+  main_release?: number;
+  /** Occasionally present on `type: 'release'` items. */
+  master_id?: number;
+}
+
+interface DiscogsArtistReleasesResponse {
+  pagination: DiscogsPagination;
+  releases: DiscogsArtistReleaseItem[];
+}
+
+/** Default page cap for {@link DiscogsService.getArtistReleases} (100/page). */
+const DEFAULT_ARTIST_RELEASES_MAX_PAGES = 5;
+
 export class DiscogsService {
   private token: string;
   private baseUrl = 'https://api.discogs.com';
@@ -257,6 +283,38 @@ export class DiscogsService {
    */
   async getArtist(artistId: number): Promise<DiscogsArtist> {
     return this.request<DiscogsArtist>(`/artists/${artistId}`);
+  }
+
+  /**
+   * List an artist's releases from `/artists/{id}/releases`, following pagination
+   * up to `maxPages` (default {@link DEFAULT_ARTIST_RELEASES_MAX_PAGES}) at 100
+   * items/page. The page cap bounds the live-Discogs API cost per artist (a prolific
+   * artist can otherwise span dozens of pages); it is the live analog of the
+   * data-dump index and is governed at a higher level by the `dailyApiBudget` setting.
+   *
+   * Returns the raw listing items; {@link LiveDiscogsCreditSource} maps them onto
+   * the {@link CreditSource} shape.
+   *
+   * @param artistId - Discogs artist id
+   * @param opts.maxPages - hard cap on pages fetched (default 5)
+   */
+  async getArtistReleases(
+    artistId: number,
+    opts: { maxPages?: number } = {},
+  ): Promise<DiscogsArtistReleaseItem[]> {
+    const maxPages = opts.maxPages ?? DEFAULT_ARTIST_RELEASES_MAX_PAGES;
+    const all: DiscogsArtistReleaseItem[] = [];
+
+    for (let page = 1; page <= maxPages; page++) {
+      const response = await this.request<DiscogsArtistReleasesResponse>(
+        `/artists/${artistId}/releases?page=${page}&per_page=100`,
+      );
+      all.push(...(response.releases ?? []));
+      const totalPages = response.pagination?.pages ?? 1;
+      if (page >= totalPages) break;
+    }
+
+    return all;
   }
 
   /**
