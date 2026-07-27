@@ -280,14 +280,34 @@ describe('moveFile', () => {
 
   it('should rethrow non-EXDEV errors', async () => {
     const { moveFile } = await import('../../src/services/slskd-organizer.js');
-    
+
     mockRename.mockRejectedValueOnce(
       Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
     );
     mockMkdir.mockResolvedValue(undefined);
-    
+
     await expect(moveFile('/nonexistent/file.mp3', '/dest/file.mp3')).rejects.toThrow('ENOENT');
     expect(mockCopyFile).not.toHaveBeenCalled();
+  });
+
+  it('should not throw when source cleanup fails after a successful copy', async () => {
+    const { moveFile } = await import('../../src/services/slskd-organizer.js');
+
+    mockRename.mockRejectedValueOnce(
+      Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' })
+    );
+    mockCopyFile.mockResolvedValue(undefined);
+    mockStat.mockResolvedValue({ size: 1000 } as any);
+    mockUnlink.mockRejectedValueOnce(
+      Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    );
+    mockMkdir.mockResolvedValue(undefined);
+
+    // The copy into the library already succeeded — a permissions failure
+    // cleaning up the source (e.g. a downloads volume owned by a different
+    // user) should not fail the whole operation.
+    await expect(moveFile('/src/file.mp3', '/dest/file.mp3')).resolves.toBeUndefined();
+    expect(mockCopyFile).toHaveBeenCalledWith('/src/file.mp3', '/dest/file.mp3');
   });
 });
 
