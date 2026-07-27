@@ -5,8 +5,12 @@
  * depth from realistic seeds reaches essentially all of Discogs, so depth alone
  * is not a usable bound — a few tiers "explode" to the whole universe. The hard
  * bound here is a materialized-EDGE budget (`maxEdges`): we fill nearer tiers
- * first (breadth-first) and stop the moment the budget is spent, no matter how
- * connected the graph is. `maxDepth` is only a soft secondary guard.
+ * first (breadth-first) and stop once the budget is spent. That budget bounds
+ * the crawl whenever expansions report `edgesCreated > 0`. The one corner it
+ * does not cover is an ever-fresh infinite graph whose expansions all report
+ * `edgesCreated: 0` (so the running total never advances) — for that, `maxDepth`
+ * is the backstop, and it is clamped to `MAX_DEPTH_CAP` so termination is
+ * guaranteed even if a caller passes `maxDepth: Infinity`.
  *
  * PURE ALGORITHM OVER INJECTED SEAMS: this class references no Prisma, no
  * network, and no concrete service — mirroring the `CreditSource` seam
@@ -75,6 +79,15 @@ interface QueueEntry {
 
 const DEFAULT_MAX_DEPTH = 3;
 
+/**
+ * Absolute ceiling on the effective maxDepth, regardless of what a caller
+ * requests. This is the termination backstop for the pathological case where
+ * every expansion reports `edgesCreated: 0` on an ever-fresh infinite graph:
+ * the edge budget never advances, so depth becomes the only thing that can stop
+ * the crawl. Clamping guarantees termination even for `maxDepth: Infinity`.
+ */
+const MAX_DEPTH_CAP = 8;
+
 export class OrbitCrawler {
   constructor(private deps: OrbitDeps) {}
 
@@ -89,7 +102,7 @@ export class OrbitCrawler {
    * orbit performs ZERO `expand` calls and returns `edgesMaterialized: 0`.
    */
   async crawl(seeds: number[], opts: CrawlOptions): Promise<CrawlResult> {
-    const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
+    const maxDepth = Math.min(opts.maxDepth ?? DEFAULT_MAX_DEPTH, MAX_DEPTH_CAP);
     const { maxEdges } = opts;
 
     // `visited` guards against expanding (or re-enqueuing) the same person twice

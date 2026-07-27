@@ -119,6 +119,26 @@ describe('OrbitCrawler', () => {
     expect(expandOrder).toEqual([1]);
   });
 
+  it('does no work when maxEdges is 0 (budget already spent)', async () => {
+    const { deps, expandOrder } = fakeDeps({ 1: [2], 2: [] });
+    const crawler = new OrbitCrawler(deps);
+
+    const result = await crawler.crawl([1], { maxEdges: 0 });
+
+    expect(expandOrder).toEqual([]);
+    expect(result).toEqual({ personsExpanded: 0, edgesMaterialized: 0 });
+  });
+
+  it('does no work when given empty seeds', async () => {
+    const { deps, expandOrder } = fakeDeps({ 1: [2] });
+    const crawler = new OrbitCrawler(deps);
+
+    const result = await crawler.crawl([], { maxEdges: 1000 });
+
+    expect(expandOrder).toEqual([]);
+    expect(result).toEqual({ personsExpanded: 0, edgesMaterialized: 0 });
+  });
+
   it('does not expand neighbors beyond maxDepth', async () => {
     // chain: 1 -> 2 -> 3 -> 4 -> 5
     const { deps, expandOrder } = fakeDeps({ 1: [2], 2: [3], 3: [4], 4: [5], 5: [] });
