@@ -129,6 +129,36 @@ settingsRouter.put('/preferences', validateBody(updatePreferencesSchema), async 
   }
 });
 
+// Admin: Get Collaboration Constellation settings (merged over defaults).
+// Registered BEFORE the catch-all PUT /:key so those verbs are not shadowed.
+settingsRouter.get('/constellation', requireAdmin, async (_req, res) => {
+  try {
+    const settings = await SettingsService.getConstellationSettings();
+    res.json({ settings });
+  } catch (error) {
+    logger.error('Failed to fetch constellation settings', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    res.status(500).json({ error: 'Failed to fetch constellation settings' });
+  }
+});
+
+// Admin: Update Collaboration Constellation settings (partial merge).
+settingsRouter.put('/constellation', requireAdmin, async (req, res) => {
+  try {
+    const updates = (req.body?.settings ?? req.body ?? {}) as Record<string, unknown>;
+    const merged = await SettingsService.updateConstellationSettings(updates);
+    res.json({ success: true, settings: merged });
+  } catch (error) {
+    logger.error('Failed to update constellation settings', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    res.status(500).json({ error: 'Failed to update constellation settings' });
+  }
+});
+
 // Update user setting (must come after /preferences to avoid shadowing)
 settingsRouter.put('/:key', validateParams(userSettingKeySchema), async (req, res) => {
   const { key } = req.params;
