@@ -20,11 +20,15 @@
  *   `EventEmitter`, keyed by opaque stream-token id. No Redis, no socket.io — the
  *   SSE endpoint is leak-free (listener removed + heartbeat cleared on close) and
  *   unit-testable. The expand worker publishes newly-expanded nodes by importing
- *   {@link publishToStream}. NOTE: the `constellation-expand` worker does not yet
- *   exist (queue only); wiring the worker's per-node output into
- *   `publishToStream(token, generation, payload)` is the one integration point left
- *   for the running worker. Everything else (token minting, generation framing,
- *   the publish/subscribe primitive) is implemented here.
+ *   {@link publishToStream}. DEFERRED WORK (Task 16): the `constellation-expand`
+ *   worker does not yet exist (this router only enqueues the job). Two things
+ *   remain for that task: (1) BUILD the expand worker that consumes
+ *   `constellation-expand` jobs, and (2) have it call
+ *   `publishToStream(job.data.tokenId, job.data.generation, node)` for each
+ *   newly-expanded node — using the `tokenId`/`generation` this router now threads
+ *   through the job payload. Everything on this side (token minting + user-scoping,
+ *   generation framing, the payload correlation fields, and the publish/subscribe
+ *   primitive) is implemented here.
  * - **Generation (re-center race guard, §4.2)**: a stream token is `{id, generation}`.
  *   `/seed` mints a fresh token; re-centering with `?token=<id>` bumps that id's
  *   generation. Every SSE event carries the generation it was published with, so a
@@ -56,6 +60,8 @@ const log = createLogger('Constellation');
 
 const DISCOGS_API_TIMEOUT = 15_000;
 const DEFAULT_MAX_DEGREES = 6;
+/** Hard ceiling on requested path degrees (DoS guard on traversal cost). */
+const MAX_PATH_DEGREES = 10;
 const HEARTBEAT_MS = 25_000;
 const MBID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -68,41 +74,70 @@ export interface StreamToken {
   generation: number;
 }
 
+/** Raised when a token is accessed by a user that does not own it. */
+export class StreamTokenForbiddenError extends Error {
+  constructor(tokenId: string) {
+    super(`stream token ${tokenId} does not belong to this user`);
+    this.name = 'StreamTokenForbiddenError';
+  }
+}
+
+interface TokenState {
+  generation: number;
+  userId: number;
+}
+
 /**
  * In-process pub/sub over a single {@link EventEmitter}, keyed by opaque
- * stream-token id. `mint` issues a token; `bump` advances an existing token's
- * generation on re-center; `subscribe` returns an unsubscribe fn (leak-free SSE);
- * `publish` fans a payload out to subscribers, stamping the generation.
+ * stream-token id. `mint` issues a token bound to the minting user; `bump`
+ * advances an existing token's generation on re-center; `subscribe` returns an
+ * unsubscribe fn (leak-free SSE); `publish` fans a payload out to subscribers,
+ * stamping the generation.
+ *
+ * Tokens are USER-SCOPED: a token remembers the userId that minted it, and
+ * `bump`/`ownerOf` let the route layer reject cross-user access (IDOR/DoS guard).
  */
 export class StreamRegistry {
   private readonly emitter = new EventEmitter();
-  private readonly generations = new Map<string, number>();
+  private readonly tokens = new Map<string, TokenState>();
 
   constructor() {
     // SSE fan-out can attach many short-lived listeners; lift the warn ceiling.
     this.emitter.setMaxListeners(0);
   }
 
-  /** Issue a brand-new stream token (generation 1). */
-  mint(): StreamToken {
+  /** Issue a brand-new stream token (generation 1) bound to `userId`. */
+  mint(userId: number): StreamToken {
     const id = randomUUID();
-    this.generations.set(id, 1);
+    this.tokens.set(id, { generation: 1, userId });
     return { id, generation: 1 };
   }
 
   /**
    * Advance an existing token's generation (re-center). Returns the new token;
-   * if the id is unknown (e.g. process restart), it is minted at generation 1.
+   * if the id is unknown (e.g. process restart), it is minted at generation 1 for
+   * `userId`. Throws {@link StreamTokenForbiddenError} if the token exists but
+   * belongs to a different user.
    */
-  bump(id: string): StreamToken {
-    const next = (this.generations.get(id) ?? 0) + 1;
-    this.generations.set(id, next);
-    return { id, generation: next };
+  bump(id: string, userId: number): StreamToken {
+    const existing = this.tokens.get(id);
+    if (!existing) {
+      // Unknown id (e.g. process restart) — mint fresh for this caller.
+      return this.mint(userId);
+    }
+    if (existing.userId !== userId) throw new StreamTokenForbiddenError(id);
+    existing.generation += 1;
+    return { id, generation: existing.generation };
+  }
+
+  /** The userId that owns a token, or undefined if the token was never minted. */
+  ownerOf(id: string): number | undefined {
+    return this.tokens.get(id)?.userId;
   }
 
   /** Current generation for a token id, or undefined if never minted. */
   currentGeneration(id: string): number | undefined {
-    return this.generations.get(id);
+    return this.tokens.get(id)?.generation;
   }
 
   /** Subscribe to a token's events; returns an unsubscribe function. */
@@ -267,7 +302,19 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         }
 
         const subgraph = await graph.subgraph(focusId, { userId });
-        const streamToken = existingToken ? streams.bump(existingToken) : streams.mint();
+
+        // User-scoped tokens: a re-center (?token=) may only bump the caller's own
+        // token; a token owned by another user is rejected (IDOR/DoS guard).
+        let streamToken: StreamToken;
+        try {
+          streamToken = existingToken ? streams.bump(existingToken, userId) : streams.mint(userId);
+        } catch (error) {
+          if (error instanceof StreamTokenForbiddenError) {
+            res.status(403).json({ error: 'stream token belongs to another user' });
+            return;
+          }
+          throw error;
+        }
 
         res.json({ focusId, subgraph, streamToken });
       } catch (error) {
@@ -277,9 +324,11 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
     },
 
     /**
-     * GET /expand/:personId
+     * GET /expand/:personId[?token=<id>&generation=<n>]
      * Optimistic: enqueue a background expand job (guarded so a missing Redis in
      * tests never throws) and return the currently-cached subgraph immediately.
+     * When a stream token is supplied it is threaded into the job payload so the
+     * expand worker (Task 16) can push results to the correct SSE stream.
      */
     async expand(req: Request, res: Response): Promise<void> {
       try {
@@ -290,9 +339,20 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           return;
         }
 
+        const tokenId = typeof req.query.token === 'string' ? req.query.token : undefined;
+        const generation =
+          parseIntParam(typeof req.query.generation === 'string' ? req.query.generation : undefined) ??
+          undefined;
+
+        const jobData: ConstellationExpandJobData = { artistId: personId };
+        if (tokenId) {
+          jobData.tokenId = tokenId;
+          if (generation !== undefined) jobData.generation = generation;
+        }
+
         let enqueued = false;
         try {
-          await expandQueue.add(CONSTELLATION_QUEUE_NAMES.EXPAND, { artistId: personId });
+          await expandQueue.add(CONSTELLATION_QUEUE_NAMES.EXPAND, jobData);
           enqueued = true;
         } catch (error) {
           // Redis down / queue unavailable must not fail the optimistic read.
@@ -328,11 +388,14 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           res.status(400).json({ error: "mode must be 'shortest' or 'interesting'" });
           return;
         }
-        const max = parseIntParam(typeof req.query.max === 'string' ? req.query.max : undefined) ?? undefined;
+        // Clamp the degree bound so a caller can't request an expensive
+        // huge-degree traversal.
+        const parsedMax = parseIntParam(typeof req.query.max === 'string' ? req.query.max : undefined);
+        const max = Math.min(parsedMax ?? DEFAULT_MAX_DEGREES, MAX_PATH_DEGREES);
 
         const result = await graph.path(from, to, { mode: rawMode, max });
         if (result === null) {
-          res.status(404).json({ error: `no path within ${max ?? DEFAULT_MAX_DEGREES} degrees` });
+          res.status(404).json({ error: `no path within ${max} degrees` });
           return;
         }
         res.json(result);
@@ -368,9 +431,19 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
      * (listener + heartbeat) on client close — leak-free.
      */
     async stream(req: Request, res: Response): Promise<void> {
+      const userId = req.user!.id;
       const token = req.params.token;
       if (!token) {
         res.status(400).json({ error: 'stream token is required' });
+        return;
+      }
+
+      // User-scoped: an existing token owned by a different user is rejected. A
+      // not-yet-minted token id is allowed (the SSE may connect before /seed's
+      // response is processed; the owner check only fires for a known mismatch).
+      const owner = streams.ownerOf(token);
+      if (owner !== undefined && owner !== userId) {
+        res.status(403).json({ error: 'stream token belongs to another user' });
         return;
       }
 

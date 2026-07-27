@@ -208,9 +208,22 @@ describe('GET /path', () => {
     const res = mockRes();
     await h.path(req, res);
 
-    expect(deps.graph!.path).toHaveBeenCalledWith(1, 3, { mode: 'shortest', max: undefined });
+    // Unspecified max falls back to the default degree bound (6).
+    expect(deps.graph!.path).toHaveBeenCalledWith(1, 3, { mode: 'shortest', max: 6 });
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual(result);
+  });
+
+  it('clamps an excessive max to the degree ceiling (10)', async () => {
+    const deps = makeDeps();
+    (deps.graph!.path as any).mockResolvedValue({ nodes: [1, 2], degrees: 1, mode: 'shortest' });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { from: '1', to: '2', max: '999' } });
+    const res = mockRes();
+    await h.path(req, res);
+
+    expect(deps.graph!.path).toHaveBeenCalledWith(1, 2, { mode: 'shortest', max: 10 });
   });
 
   it('404s when no path is found', async () => {
@@ -299,6 +312,115 @@ describe('GET /stream/:token (SSE)', () => {
     // close -> cleanup, no dangling listener
     req.emitClose();
     expect(streams.listenerCount(token)).toBe(0);
+  });
+});
+
+// ---- invalid params (400) ---------------------------------------------------
+
+describe('invalid params', () => {
+  it('400s on non-numeric personId for /expand', async () => {
+    const deps = makeDeps();
+    const h = buildConstellationHandlers(deps);
+    const req = mockReq({ params: { personId: 'abc' } });
+    const res = mockRes();
+    await h.expand(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(deps.expandQueue!.add).not.toHaveBeenCalled();
+  });
+
+  it('400s on non-numeric personId for /releases', async () => {
+    const deps = makeDeps();
+    const h = buildConstellationHandlers(deps);
+    const req = mockReq({ params: { personId: 'abc' } });
+    const res = mockRes();
+    await h.releases(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(deps.getArtistReleases).not.toHaveBeenCalled();
+  });
+
+  it('400s when from or to is missing on /path', async () => {
+    const deps = makeDeps();
+    const h = buildConstellationHandlers(deps);
+    const req = mockReq({ query: { from: '1' } }); // no `to`
+    const res = mockRes();
+    await h.path(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(deps.graph!.path).not.toHaveBeenCalled();
+  });
+
+  it('400s on an invalid mode on /path', async () => {
+    const deps = makeDeps();
+    const h = buildConstellationHandlers(deps);
+    const req = mockReq({ query: { from: '1', to: '2', mode: 'sideways' } });
+    const res = mockRes();
+    await h.path(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(deps.graph!.path).not.toHaveBeenCalled();
+  });
+});
+
+// ---- token threading through /expand ---------------------------------------
+
+describe('GET /expand with a stream token', () => {
+  it('threads tokenId + generation into the enqueued job payload', async () => {
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 5, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ params: { personId: '5' }, query: { token: 'tok-9', generation: '3' } });
+    const res = mockRes();
+    await h.expand(req, res);
+
+    expect(deps.expandQueue!.add).toHaveBeenCalledWith('constellation-expand', {
+      artistId: 5,
+      tokenId: 'tok-9',
+      generation: 3,
+    });
+  });
+});
+
+// ---- token user-scoping (IDOR) ----------------------------------------------
+
+describe('stream token user-scoping', () => {
+  it('403s when user B opens a stream for a token minted by user A', async () => {
+    const streams = new StreamRegistry();
+    const deps = makeDeps({ streams });
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 1, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    // User A (id 7, the mockReq default) seeds and mints a token.
+    const seedReq = mockReq({ query: { id: '1' } });
+    const seedRes = mockRes();
+    await h.seed(seedReq, seedRes);
+    const tokenA = seedRes.body.streamToken.id as string;
+
+    // User B (id 99) tries to open that stream.
+    const streamReq = mockReq({ user: { id: 99 }, params: { token: tokenA } });
+    const streamRes = mockRes();
+    await h.stream(streamReq, streamRes);
+
+    expect(streamRes.statusCode).toBe(403);
+    expect(streams.listenerCount(tokenA)).toBe(0); // never attached
+  });
+
+  it("403s when user B re-centers (/seed?token=) with user A's token", async () => {
+    const streams = new StreamRegistry();
+    const deps = makeDeps({ streams });
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 1, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const seedReq = mockReq({ query: { id: '1' } }); // user A (id 7)
+    const seedRes = mockRes();
+    await h.seed(seedReq, seedRes);
+    const tokenA = seedRes.body.streamToken.id as string;
+
+    const bumpReq = mockReq({ user: { id: 99 }, query: { id: '2', token: tokenA } });
+    const bumpRes = mockRes();
+    await h.seed(bumpReq, bumpRes);
+
+    expect(bumpRes.statusCode).toBe(403);
+    // user A's token generation is untouched
+    expect(streams.currentGeneration(tokenA)).toBe(1);
   });
 });
 

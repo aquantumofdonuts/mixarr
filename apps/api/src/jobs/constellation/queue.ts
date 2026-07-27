@@ -47,9 +47,16 @@ export interface ConstellationCrawlJobData {
   maxDepth?: number;
 }
 
-/** Payload for an on-demand node-expansion job. */
+/**
+ * Payload for an on-demand node-expansion job. `tokenId`/`generation` correlate
+ * the expansion to the client's SSE stream (Task 15): the expand worker (Task 16)
+ * publishes each newly-expanded node with `publishToStream(tokenId, generation, node)`
+ * so only the re-center that requested it receives the push.
+ */
 export interface ConstellationExpandJobData {
   artistId: number;
+  tokenId?: string;
+  generation?: number;
 }
 
 // Shared job options — mirror the throughput/retention posture of the existing
