@@ -22,11 +22,20 @@
  *                       UI later offers a manual "link to MusicBrainz" picker.
  *
  * ## Design decisions
- * - **Corroboration threshold:** ≥ 1 normalized-title match between the MB
- *   candidate's release-group titles and the Discogs artist's release titles.
- *   A single shared record is strong evidence two credits are the same person
- *   given the name already matched; higher thresholds discard legitimate matches
- *   for artists with short or partially-catalogued discographies.
+ * - **Corroboration threshold:** ≥ 1 NON-GENERIC normalized-title match between
+ *   the MB candidate's release-group titles and the Discogs artist's release
+ *   titles. A single shared *distinctive* record is strong evidence two credits
+ *   are the same person given the name already matched; higher thresholds
+ *   discard legitimate matches for artists with short or partially-catalogued
+ *   discographies.
+ * - **Generic-title stoplist:** titles like "Greatest Hits", "Live", "Untitled"
+ *   recur across unrelated artists and must NOT count toward overlap, or two
+ *   different same-named people get fused (and the wrong MBID cached forever,
+ *   driving a wrong Lidarr add). See {@link GENERIC_TITLES}.
+ * - **Uniqueness rule:** compute non-generic overlap for EVERY candidate. Accept
+ *   (corroborated) only if EXACTLY ONE candidate has ≥1 non-generic overlap.
+ *   Zero overlapping candidates → manual. Two or more overlapping candidates →
+ *   ambiguous → manual (never arbitrarily pick the top-scored one).
  * - **Title normalization:** lowercase, strip punctuation/symbols to spaces,
  *   collapse whitespace, trim. (`normalizeTitle`.) This makes "Blue Album!" and
  *   "blue album" compare equal across the two catalogues.
@@ -49,6 +58,27 @@ const DISCOGS_API_TIMEOUT = 15_000;
 const IDENTITY_SOURCE = 'mb';
 
 export type IdentityConfidence = 'linked' | 'corroborated' | 'manual';
+
+/**
+ * Normalized release titles too generic to corroborate identity — they recur
+ * across unrelated artists, so a shared occurrence proves nothing. Excluded from
+ * the overlap comparison. (Values are already {@link normalizeTitle}-normalized.)
+ */
+const GENERIC_TITLES = new Set<string>([
+  'greatest hits',
+  'the best of',
+  'best of',
+  'live',
+  'untitled',
+  'demo',
+  'demos',
+  'compilation',
+  'unreleased',
+  'singles',
+  'ep',
+  's t', // "s/t"
+  'self titled',
+]);
 
 export interface DiscogsToMbidResult {
   mbid: string | null;
@@ -137,33 +167,53 @@ export class IdentityService {
       return { mbid: linkedMbid, confidence: 'linked', needsManual: false };
     }
 
-    // 3. Corroborated — name search confirmed by discography overlap.
+    // 3. Corroborated — name search confirmed by a UNIQUE non-generic
+    //    discography overlap. MB calls here degrade to manual on failure
+    //    (matching the linked path) rather than throwing to the caller.
     if (name) {
-      const candidates = await this.mb.searchArtist(name, 5);
-      if (candidates.length > 0) {
+      try {
+        const candidates = await this.mb.searchArtist(name, 5);
+        if (candidates.length === 0) {
+          // No name candidate at all — manual (the user can search).
+          return { mbid: null, confidence: null, needsManual: true };
+        }
+
         const discogsTitles = new Set(
           (await this.getDiscogsReleaseTitles(discogsArtistId))
             .map(normalizeTitle)
-            .filter(t => t.length > 0)
+            .filter(t => t.length > 0 && !GENERIC_TITLES.has(t))
         );
 
         if (discogsTitles.size > 0) {
+          // Compute non-generic overlap for EVERY candidate; only a unique
+          // overlapping candidate is safe to accept.
+          const overlapping: string[] = [];
           for (const candidate of candidates) {
             const { releaseGroups } = await this.mb.getArtistReleases(candidate.id);
-            const overlap = releaseGroups.some(rg => discogsTitles.has(normalizeTitle(rg.title)));
-            if (overlap) {
-              await this.cache(discogsArtistId, candidate.id, 'corroborated');
-              return { mbid: candidate.id, confidence: 'corroborated', needsManual: false };
-            }
+            const hasOverlap = releaseGroups.some(rg => {
+              const t = normalizeTitle(rg.title);
+              return t.length > 0 && !GENERIC_TITLES.has(t) && discogsTitles.has(t);
+            });
+            if (hasOverlap) overlapping.push(candidate.id);
           }
+
+          if (overlapping.length === 1) {
+            await this.cache(discogsArtistId, overlapping[0], 'corroborated');
+            return { mbid: overlapping[0], confidence: 'corroborated', needsManual: false };
+          }
+          // Zero → no corroboration; ≥2 → ambiguous. Either way, manual.
         }
 
-        // 4. Name matched but nothing corroborated — ambiguous. Do NOT cache.
+        // Name matched but nothing uniquely corroborated — do NOT cache.
+        return { mbid: null, confidence: null, needsManual: true };
+      } catch (error) {
+        // MusicBrainz outage mid-corroboration — degrade to manual.
+        logger.debug(`Corroboration failed for discogs artist ${discogsArtistId}: ${error}`);
         return { mbid: null, confidence: null, needsManual: true };
       }
     }
 
-    // 5. Nothing matched at all — manual (the user can search).
+    // 4. Nothing matched at all — manual (the user can search).
     return { mbid: null, confidence: null, needsManual: true };
   }
 

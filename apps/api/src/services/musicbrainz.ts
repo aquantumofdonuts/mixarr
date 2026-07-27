@@ -152,8 +152,10 @@ export class MusicBrainzService {
    * (`https://www.discogs.com/artist/{id}`) to its MB artist through the
    * curated URL relationship — the clean, unambiguous join key.
    *
-   * Returns the MBID of the first related artist, or null if the URL is not
-   * known to MusicBrainz or carries no artist relationship.
+   * Returns the MBID of the single related artist, or null if the URL is not
+   * known to MusicBrainz, carries no artist relationship, or resolves to TWO OR
+   * MORE distinct artists (ambiguous — the caller falls through to a
+   * corroborated/manual path rather than picking one arbitrarily).
    */
   async lookupArtistMbidByUrl(resourceUrl: string): Promise<string | null> {
     const encoded = encodeURIComponent(resourceUrl);
@@ -161,8 +163,14 @@ export class MusicBrainzService {
       const result = await this.request<MusicBrainzUrlLookup>(
         `/url?resource=${encoded}&inc=artist-rels&fmt=json`
       );
-      const rel = result.relations?.find(r => r.artist?.id);
-      return rel?.artist?.id ?? null;
+      const distinctIds = new Set(
+        (result.relations ?? [])
+          .map(r => r.artist?.id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      );
+      // Exactly one distinct artist is an unambiguous join key; anything else
+      // (none, or several) is not linkable.
+      return distinctIds.size === 1 ? [...distinctIds][0] : null;
     } catch {
       return null;
     }
