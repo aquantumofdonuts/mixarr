@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DumpIndexService } from '../../../src/services/constellation/DumpIndexService.js';
 
 /**
@@ -80,21 +83,107 @@ describe('DumpIndexService', () => {
     idx.close();
   });
 
-  it('creates schema idempotently (opening/initializing twice does not error)', () => {
-    const first = new DumpIndexService(':memory:');
-    first.upsertArtist(1, 'Alice');
-    first.close();
-    // A brand-new in-memory instance re-creates the schema without error.
-    expect(() => {
-      const second = new DumpIndexService(':memory:');
-      second.close();
-    }).not.toThrow();
-  });
-
   it('returns an empty array for an unknown artist or release', async () => {
     const idx = seed();
     expect(await idx.getArtistReleases(999)).toEqual([]);
     expect(await idx.getReleaseCredits(999)).toEqual([]);
     idx.close();
+  });
+
+  it('getArtistReleases returns a release that has a credit but NO release_meta (LEFT JOIN)', async () => {
+    const idx = new DumpIndexService(':memory:');
+    idx.upsertArtist(1, 'Alice');
+    // Credit exists, but setReleaseMeta was never called for release 500.
+    idx.addCredit({ releaseId: 500, artistId: 1, role: 'Bass', masterId: null });
+    const releases = await idx.getArtistReleases(1);
+    // An INNER JOIN regression would drop this row entirely.
+    expect(releases).toEqual([{ releaseId: 500, masterId: null, year: null, genres: [] }]);
+    idx.close();
+  });
+
+  it('deduplicates identical credit and artist_release rows via INSERT OR IGNORE', async () => {
+    const idx = new DumpIndexService(':memory:');
+    idx.upsertArtist(1, 'Alice');
+    idx.setReleaseMeta({ releaseId: 100, masterId: 900, year: 2000, genres: [] });
+    // The dump can emit the exact same line twice.
+    idx.addCredit({ releaseId: 100, artistId: 1, role: 'Bass', masterId: 900 });
+    idx.addCredit({ releaseId: 100, artistId: 1, role: 'Bass', masterId: 900 });
+    // One link row per pair (not duplicated).
+    expect(await idx.getArtistReleases(1)).toEqual([
+      { releaseId: 100, masterId: 900, year: 2000, genres: [] },
+    ]);
+    const credits = await idx.getReleaseCredits(100);
+    expect(credits).toHaveLength(1);
+    expect(credits[0].roles).toEqual(['performer']);
+    idx.close();
+  });
+
+  describe('file-based persistence + real idempotency', () => {
+    let dir: string;
+
+    afterEach(() => {
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('persists to a real file and re-opening re-runs initSchema without error', async () => {
+      dir = mkdtempSync(join(tmpdir(), 'dumpindex-'));
+      const dbPath = join(dir, 'index.db');
+
+      // First session: write and close.
+      const first = new DumpIndexService(dbPath);
+      first.upsertArtist(1, 'Alice');
+      first.setReleaseMeta({ releaseId: 100, masterId: 900, year: 1999, genres: ['Rock'] });
+      first.addCredit({ releaseId: 100, artistId: 1, role: 'Producer', masterId: 900 });
+      first.setIndexVersion(3);
+      first.close();
+
+      expect(existsSync(dbPath)).toBe(true);
+
+      // Second session on the SAME file: initSchema runs over a populated
+      // schema (the real idempotency check) and must not throw.
+      const second = new DumpIndexService(dbPath);
+      try {
+        expect(second.getIndexVersion()).toBe(3);
+        expect(await second.getArtistReleases(1)).toEqual([
+          { releaseId: 100, masterId: 900, year: 1999, genres: ['Rock'] },
+        ]);
+        const credits = await second.getReleaseCredits(100);
+        expect(credits).toEqual([{ artistId: 1, name: 'Alice', roles: ['producer'], masterId: 900 }]);
+      } finally {
+        second.close();
+      }
+    });
+  });
+
+  describe('transaction()', () => {
+    it('commits all writes made inside one transaction', async () => {
+      const idx = new DumpIndexService(':memory:');
+      idx.setReleaseMeta({ releaseId: 100, masterId: 900, year: 2000, genres: [] });
+      idx.transaction((db) => {
+        db.upsertArtist(1, 'Alice');
+        db.upsertArtist(2, 'Bob');
+        db.addCredit({ releaseId: 100, artistId: 1, role: 'Bass', masterId: 900 });
+        db.addCredit({ releaseId: 100, artistId: 2, role: 'Guitar', masterId: 900 });
+      });
+      const credits = await idx.getReleaseCredits(100);
+      expect(credits.map((c) => c.artistId).sort()).toEqual([1, 2]);
+      idx.close();
+    });
+
+    it('rolls back every write when the transaction body throws', async () => {
+      const idx = new DumpIndexService(':memory:');
+      idx.setReleaseMeta({ releaseId: 100, masterId: 900, year: 2000, genres: [] });
+      expect(() =>
+        idx.transaction((db) => {
+          db.upsertArtist(1, 'Alice');
+          db.addCredit({ releaseId: 100, artistId: 1, role: 'Bass', masterId: 900 });
+          throw new Error('boom');
+        }),
+      ).toThrow('boom');
+      // No partial rows survived the rollback.
+      expect(await idx.getArtistReleases(1)).toEqual([]);
+      expect(await idx.getReleaseCredits(100)).toEqual([]);
+      idx.close();
+    });
   });
 });

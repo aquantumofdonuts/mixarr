@@ -21,6 +21,11 @@ import { normalizeRole, type BaseRole } from './RoleTaxonomy.js';
  * async {@link CreditSource} interface by wrapping the synchronous queries in
  * `async` methods (they return already-resolved Promises). This is fine because
  * the index is consumed inside background workers.
+ *
+ * Lifecycle: the CONSUMER owns the database handle. Whoever constructs a
+ * DumpIndexService must call {@link close} when done — in a `finally` block so
+ * the handle is released even on error (the Task 8 import worker and the Task 9
+ * crawler both do this).
  */
 export class DumpIndexService implements CreditSource {
   private readonly db: BetterSqliteDatabase;
@@ -28,6 +33,7 @@ export class DumpIndexService implements CreditSource {
   // Prepared statements — created once, reused for every call (fast path).
   private readonly stmtUpsertArtist: Statement;
   private readonly stmtAddCredit: Statement;
+  private readonly stmtLinkArtistRelease: Statement;
   private readonly stmtSetReleaseMeta: Statement;
   private readonly stmtSetMeta: Statement;
   private readonly stmtGetMeta: Statement;
@@ -50,7 +56,10 @@ export class DumpIndexService implements CreditSource {
       'INSERT INTO artist (id, name) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name',
     );
     this.stmtAddCredit = this.db.prepare(
-      'INSERT INTO release_credit (release_id, artist_id, role, master_id) VALUES (?, ?, ?, ?)',
+      'INSERT OR IGNORE INTO release_credit (release_id, artist_id, role, master_id) VALUES (?, ?, ?, ?)',
+    );
+    this.stmtLinkArtistRelease = this.db.prepare(
+      'INSERT OR IGNORE INTO artist_release (artist_id, release_id) VALUES (?, ?)',
     );
     this.stmtSetReleaseMeta = this.db.prepare(
       `INSERT INTO release_meta (release_id, master_id, year, genres) VALUES (@releaseId, @masterId, @year, @genres)
@@ -84,14 +93,16 @@ export class DumpIndexService implements CreditSource {
       );
       CREATE TABLE IF NOT EXISTS artist_release (
         artist_id INTEGER,
-        release_id INTEGER
+        release_id INTEGER,
+        UNIQUE(artist_id, release_id)
       );
       CREATE INDEX IF NOT EXISTS idx_artist_release_artist_id ON artist_release (artist_id);
       CREATE TABLE IF NOT EXISTS release_credit (
         release_id INTEGER,
         artist_id INTEGER,
         role TEXT,
-        master_id INTEGER
+        master_id INTEGER,
+        UNIQUE(release_id, artist_id, role)
       );
       CREATE INDEX IF NOT EXISTS idx_release_credit_release_id ON release_credit (release_id);
       CREATE TABLE IF NOT EXISTS release_meta (
@@ -124,7 +135,7 @@ export class DumpIndexService implements CreditSource {
    */
   addCredit(credit: { releaseId: number; artistId: number; role: string; masterId: number | null }): void {
     this.stmtAddCredit.run(credit.releaseId, credit.artistId, credit.role, credit.masterId);
-    this.stmtLinkArtistRelease().run(credit.artistId, credit.releaseId, credit.artistId, credit.releaseId);
+    this.stmtLinkArtistRelease.run(credit.artistId, credit.releaseId);
   }
 
   /** Insert or replace the metadata (master/year/genres) for a release. */
@@ -153,23 +164,6 @@ export class DumpIndexService implements CreditSource {
   /** Close the underlying database handle. */
   close(): void {
     this.db.close();
-  }
-
-  // artist_release has no unique constraint (a person can legitimately hold
-  // multiple credits on a release, but we only want one link row per pair).
-  // Guard the insert so re-adding credits does not duplicate the link.
-  private _stmtLinkArtistRelease?: Statement;
-  private stmtLinkArtistRelease(): Statement {
-    if (!this._stmtLinkArtistRelease) {
-      this._stmtLinkArtistRelease = this.db.prepare(
-        `INSERT INTO artist_release (artist_id, release_id)
-         SELECT ?, ?
-         WHERE NOT EXISTS (
-           SELECT 1 FROM artist_release WHERE artist_id = ? AND release_id = ?
-         )`,
-      );
-    }
-    return this._stmtLinkArtistRelease;
   }
 
   // ---------------------------------------------------------------------------
