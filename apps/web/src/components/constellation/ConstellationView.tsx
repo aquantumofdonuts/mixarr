@@ -97,7 +97,9 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
   // The person whose acquisition panel is open. Selecting a node opens this (the
   // acquisition grain: the node action lands the user in the panel where they
   // pick artist-vs-album, rather than blind-subscribing).
-  const [selectedPerson, setSelectedPerson] = useState<Breadcrumb | null>(null);
+  const [selectedPerson, setSelectedPerson] = useState<
+    (Breadcrumb & { owned: boolean }) | null
+  >(null);
 
   const onFrame = useCallback((payload: StreamPayload) => {
     const incomingNodes = Array.isArray(payload.nodes) ? (payload.nodes as GraphNode[]) : [];
@@ -142,7 +144,7 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       if (!Number.isFinite(personId)) return;
       // Selecting a node ALWAYS opens its acquisition panel (the grain fix): the
       // user chooses artist-vs-album there rather than blind-subscribing.
-      setSelectedPerson({ personId, displayName: node.name });
+      setSelectedPerson({ personId, displayName: node.name, owned: Boolean(node.owned) });
       // Clicking the node we're already centred on only opens the panel — no
       // redundant re-seed, no breadcrumb.
       if (personId === focusId) return;
@@ -266,6 +268,7 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       <PersonPanel
         personId={selectedPerson?.personId ?? null}
         displayName={selectedPerson?.displayName}
+        owned={selectedPerson?.owned}
         onClose={() => setSelectedPerson(null)}
       />
     </div>

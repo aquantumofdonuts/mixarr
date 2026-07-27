@@ -97,6 +97,29 @@ export interface SubscribeResponse {
 }
 
 /**
+ * `GET /api/constellation/play` response — the resolved playback source (Design
+ * §8 chain). A discriminated union on `source`:
+ *  - `deezer`  → an in-app 30s `<audio>` preview (`previewUrl` + cover/title).
+ *  - `youtube` → a results-page link-out (`youtubeUrl`); NOT an embed / Data API.
+ * `owned` is a badge hint only ("in your library") — full library streaming is
+ * out of scope, so it never carries a stream URL.
+ */
+export type PlayResponse =
+  | {
+      source: 'deezer';
+      previewUrl: string;
+      title: string;
+      artist: string;
+      coverUrl?: string;
+      owned?: boolean;
+    }
+  | {
+      source: 'youtube';
+      youtubeUrl: string;
+      owned?: boolean;
+    };
+
+/**
  * A single background-expand SSE payload. Carries the `generation` it was
  * published with plus the newly-expanded node/edge data. The exact node/edge
  * fields depend on the expand worker (Task 16); the generation field is the

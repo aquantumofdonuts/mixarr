@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import X from 'lucide-react/dist/esm/icons/x';
+import Play from 'lucide-react/dist/esm/icons/play';
 import { api } from '@/lib/api';
+import { useConstellationPlayer } from './ConstellationPlayer';
 import type {
   ReleaseItem,
   ReleasesResponse,
@@ -27,6 +29,8 @@ export interface PersonPanelProps {
   personId: number | null;
   /** The node's display name (for the header + MusicBrainz search link). */
   displayName?: string;
+  /** Whether this person is in the user's library (drives the player's owned badge). */
+  owned?: boolean;
   onClose: () => void;
 }
 
@@ -44,7 +48,8 @@ function musicBrainzSearchUrl(name: string): string {
   return `https://musicbrainz.org/search?query=${encodeURIComponent(name)}&type=artist&method=indexed`;
 }
 
-export function PersonPanel({ personId, displayName, onClose }: PersonPanelProps) {
+export function PersonPanel({ personId, displayName, owned, onClose }: PersonPanelProps) {
+  const player = useConstellationPlayer();
   const [releases, setReleases] = useState<ReleaseItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +142,19 @@ export function PersonPanel({ personId, displayName, onClose }: PersonPanelProps
     [subscribe],
   );
 
+  // Play affordance (Design §8): the header ▶ plays the person's representative
+  // track (their name as the artist), and each release row has a ▶ that plays
+  // `{artist: name, track: release.title}`. Both only render when a page-level
+  // player is mounted (the context provides `play`); otherwise they are hidden.
+  const playArtist = useCallback(
+    () => player?.play({ artist: name, owned }),
+    [player, name, owned],
+  );
+  const playRelease = useCallback(
+    (release: ReleaseItem) => player?.play({ artist: name, track: release.title, owned }),
+    [player, name, owned],
+  );
+
   if (personId === null) return null;
 
   return (
@@ -153,15 +171,28 @@ export function PersonPanel({ personId, displayName, onClose }: PersonPanelProps
           <h2 className="truncate text-lg font-semibold text-foreground">{name}</h2>
           <p className="text-xs text-muted-foreground">Discography</p>
         </div>
-        <button
-          ref={closeButtonRef}
-          type="button"
-          onClick={onClose}
-          aria-label="Close panel"
-          className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {player && (
+            <button
+              type="button"
+              onClick={playArtist}
+              aria-label={`Play ${name}`}
+              data-testid="person-panel-play"
+              className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Play className="h-5 w-5" />
+            </button>
+          )}
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close panel"
+            className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
       </div>
 
       {/* Whole-artist monitor (the coarse grain) */}
@@ -236,18 +267,31 @@ export function PersonPanel({ personId, displayName, onClose }: PersonPanelProps
                     )}
                     {state.status === 'needsManual' && <NeedsManualNotice name={name} />}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => addRelease(release)}
-                    disabled={state.status === 'pending' || state.status === 'added'}
-                    className="shrink-0 rounded-lg border border-border px-2 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-60"
-                  >
-                    {state.status === 'pending'
-                      ? 'Adding…'
-                      : state.status === 'added'
-                        ? 'Added'
-                        : 'Add to Lidarr'}
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {player && (
+                      <button
+                        type="button"
+                        onClick={() => playRelease(release)}
+                        aria-label={`Play ${release.title}`}
+                        data-testid={`person-panel-play-release-${release.releaseId}`}
+                        className="rounded-lg border border-border p-1 text-foreground hover:bg-accent"
+                      >
+                        <Play className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => addRelease(release)}
+                      disabled={state.status === 'pending' || state.status === 'added'}
+                      className="rounded-lg border border-border px-2 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-60"
+                    >
+                      {state.status === 'pending'
+                        ? 'Adding…'
+                        : state.status === 'added'
+                          ? 'Added'
+                          : 'Add to Lidarr'}
+                    </button>
+                  </div>
                 </li>
               );
             })}
