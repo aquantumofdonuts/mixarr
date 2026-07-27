@@ -37,6 +37,8 @@ vi.mock('../../src/services/settings.service.js', () => ({
     updateUserPreferences: vi.fn().mockResolvedValue({}),
     getGlobalSettings: vi.fn().mockResolvedValue([]),
     setGlobalSetting: vi.fn().mockResolvedValue(undefined),
+    getConstellationSettings: vi.fn().mockResolvedValue({}),
+    updateConstellationSettings: vi.fn().mockImplementation(async (u: any) => u),
   },
 }));
 
@@ -661,6 +663,63 @@ describe('Settings API', () => {
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
       });
+    });
+  });
+
+  describe('PUT /api/settings/constellation', () => {
+    function buildApp() {
+      const app = express();
+      app.use(express.json());
+      app.use((req: any, _res: any, next: any) => {
+        req.isAuthenticated = () => true;
+        req.user = { id: 1, role: 'admin', username: 'admin' };
+        next();
+      });
+      app.use('/', settingsRouter);
+      return app;
+    }
+
+    it('persists a valid partial update', async () => {
+      const response = await request(buildApp())
+        .put('/constellation')
+        .send({ constellationIndexEnabled: true, orbitEdgeBudget: 1000, indexRefresh: 'off' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(SettingsService.updateConstellationSettings).toHaveBeenCalledWith({
+        constellationIndexEnabled: true,
+        orbitEdgeBudget: 1000,
+        indexRefresh: 'off',
+      });
+    });
+
+    it('rejects a negative budget (400) and never persists', async () => {
+      const response = await request(buildApp())
+        .put('/constellation')
+        .send({ orbitEdgeBudget: -5 });
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe('VALIDATION_ERROR');
+      expect(SettingsService.updateConstellationSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects a garbage indexRefresh enum (400)', async () => {
+      const response = await request(buildApp())
+        .put('/constellation')
+        .send({ indexRefresh: 'weekly' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe('VALIDATION_ERROR');
+      expect(SettingsService.updateConstellationSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects unknown keys (400)', async () => {
+      const response = await request(buildApp())
+        .put('/constellation')
+        .send({ bogusKey: 1 });
+
+      expect(response.status).toBe(400);
+      expect(SettingsService.updateConstellationSettings).not.toHaveBeenCalled();
     });
   });
 });

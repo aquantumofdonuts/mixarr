@@ -137,6 +137,20 @@ app.use('/api', apiLimiter);
 // Make io available to routes
 app.set('io', io);
 
+// Boot the Collaboration Constellation background workers (guarded: each
+// registerXWorker dynamically imports bullmq/redis internally, so no Redis is
+// touched until called here). Skipped under test to avoid opening connections.
+if (process.env.NODE_ENV !== 'test') {
+  const { registerDumpImportWorker } = await import('./jobs/constellation/dump-import-worker.js');
+  const { registerOrbitCrawlWorker } = await import('./jobs/constellation/orbit-crawl-worker.js');
+  const { registerConstellationExpandWorker } = await import(
+    './jobs/constellation/constellation-expand-worker.js'
+  );
+  await registerDumpImportWorker(io);
+  await registerOrbitCrawlWorker(io);
+  await registerConstellationExpandWorker(io);
+}
+
 // Routes
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);

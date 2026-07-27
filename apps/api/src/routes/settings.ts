@@ -11,6 +11,7 @@ import {
   updatePreferencesSchema,
   globalSettingKeySchema,
   bulkUpdateGlobalSettingsSchema,
+  updateConstellationSettingsSchema,
 } from '../schemas/settings.js';
 
 const logger = createLogger('SettingsRoute');
@@ -144,11 +145,14 @@ settingsRouter.get('/constellation', requireAdmin, async (_req, res) => {
   }
 });
 
-// Admin: Update Collaboration Constellation settings (partial merge).
-settingsRouter.put('/constellation', requireAdmin, async (req, res) => {
+// Admin: Update Collaboration Constellation settings (partial merge, validated).
+settingsRouter.put(
+  '/constellation',
+  requireAdmin,
+  validateBody(updateConstellationSettingsSchema),
+  async (req, res) => {
   try {
-    const updates = (req.body?.settings ?? req.body ?? {}) as Record<string, unknown>;
-    const merged = await SettingsService.updateConstellationSettings(updates);
+    const merged = await SettingsService.updateConstellationSettings(req.body);
     res.json({ success: true, settings: merged });
   } catch (error) {
     logger.error('Failed to update constellation settings', {
@@ -157,7 +161,8 @@ settingsRouter.put('/constellation', requireAdmin, async (req, res) => {
     });
     res.status(500).json({ error: 'Failed to update constellation settings' });
   }
-});
+  },
+);
 
 // Update user setting (must come after /preferences to avoid shadowing)
 settingsRouter.put('/:key', validateParams(userSettingKeySchema), async (req, res) => {

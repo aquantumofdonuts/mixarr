@@ -109,25 +109,28 @@ export async function registerConstellationExpandWorker(io?: SocketIOServer): Pr
       const expansionService = new ExpansionService(creditSource);
       const graph = new GraphService();
 
-      const result = await runExpandJob({
-        artistId,
-        tokenId,
-        generation,
-        expandService: expansionService,
-        // Read the freshly-materialized subgraph around the expanded person.
-        getNeighbors: async (id) => {
-          const sub = await graph.subgraph(id);
-          return { nodes: sub.nodes, edges: sub.edges };
-        },
-        publish: publishToStream,
-      });
+      try {
+        const result = await runExpandJob({
+          artistId,
+          tokenId,
+          generation,
+          expandService: expansionService,
+          // Read the freshly-materialized subgraph around the expanded person.
+          getNeighbors: async (id) => {
+            const sub = await graph.subgraph(id);
+            return { nodes: sub.nodes, edges: sub.edges };
+          },
+          publish: publishToStream,
+        });
 
-      // The DumpIndexService opens a SQLite handle; release it when we own one.
-      const closable = creditSource as { close?: () => void };
-      if (typeof closable.close === 'function') closable.close();
-
-      void job.updateProgress({ phase: 'expanded', ...result });
-      return result;
+        void job.updateProgress({ phase: 'expanded', ...result });
+        return result;
+      } finally {
+        // The DumpIndexService (Setting-ON) opens a SQLite handle; release it when
+        // we own one, even if expand/read throws. The live adapter is a no-op.
+        const closable = creditSource as { close?: () => void };
+        if (typeof closable.close === 'function') closable.close();
+      }
     },
     {
       connection: createRedisConnection(),

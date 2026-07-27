@@ -9,8 +9,10 @@
 import { rateLimit } from './rate-limiter.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
 import { normalizeRole, type BaseRole } from './constellation/RoleTaxonomy.js';
+import { createLogger } from '../lib/logger.js';
 
 const API_TIMEOUT = 15_000;
+const discogsLog = createLogger('Discogs');
 
 interface DiscogsPagination {
   page: number;
@@ -312,6 +314,14 @@ export class DiscogsService {
       all.push(...(response.releases ?? []));
       const totalPages = response.pagination?.pages ?? 1;
       if (page >= totalPages) break;
+      if (page >= maxPages && totalPages > maxPages) {
+        // Prolific artist: releases beyond the page cap are dropped. Log for
+        // observability (the cap bounds live-Discogs API cost per artist).
+        discogsLog.debug(
+          `Artist ${artistId} releases truncated at page cap ${maxPages}/${totalPages} ` +
+            `(${response.pagination?.items ?? 'unknown'} total items); dropping remaining pages`,
+        );
+      }
     }
 
     return all;
