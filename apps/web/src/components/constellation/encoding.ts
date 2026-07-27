@@ -61,6 +61,56 @@ export function genreColor(genre: string | null): string {
   return GENRE_PALETTE[key] ?? NEUTRAL_GENRE_COLOR;
 }
 
+/**
+ * Canonical genre → swatch color list for the controls legend / highlight
+ * picker. Synonyms (rap/soul/edm…) are collapsed to their canonical spelling so
+ * the legend shows one entry per hue, in a stable display order.
+ */
+export const GENRE_LEGEND: ReadonlyArray<{ genre: string; color: string }> = Object.freeze(
+  [
+    'rock',
+    'metal',
+    'punk',
+    'pop',
+    'hip hop',
+    'electronic',
+    'r&b',
+    'funk',
+    'jazz',
+    'blues',
+    'classical',
+    'country',
+    'folk',
+    'reggae',
+    'indie',
+    'latin',
+  ].map((genre) => ({ genre, color: genreColor(genre) })),
+);
+
+/**
+ * Opacity applied to a node that does NOT match the active genre highlight.
+ * Non-matching nodes are dimmed (not hidden) so the field's structure is still
+ * legible while the highlighted genre is traced across it.
+ */
+export const GENRE_DIMMED_ALPHA = 0.12;
+
+/**
+ * Per-node alpha for the genre-highlight overlay. When no genre is highlighted
+ * (`highlight === null`) every node paints at full opacity; otherwise nodes
+ * whose (normalised) genre differs from the highlight are dimmed. `null`-genre
+ * nodes never match a specific highlight, so they dim too.
+ */
+export function genreHighlightAlpha(
+  nodeGenre: string | null,
+  highlight: string | null,
+): number {
+  if (highlight === null) return 1;
+  if (nodeGenre === null) return GENRE_DIMMED_ALPHA;
+  return nodeGenre.trim().toLowerCase() === highlight.trim().toLowerCase()
+    ? 1
+    : GENRE_DIMMED_ALPHA;
+}
+
 // ---------------------------------------------------------------------------
 // Prominence -> node radius
 // ---------------------------------------------------------------------------

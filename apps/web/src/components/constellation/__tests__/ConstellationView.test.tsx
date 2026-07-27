@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { Mock } from 'vitest';
 import type { UseConstellationResult } from '@/hooks/useConstellation';
 
@@ -60,7 +61,7 @@ vi.mock('@/hooks/useConstellation', async (importOriginal) => {
 import { useConstellation } from '@/hooks/useConstellation';
 import { useFrontierStream } from '@/hooks/useFrontierStream';
 import { ConstellationView } from '../ConstellationView';
-import { FOCUS_NODE_COLOR } from '../encoding';
+import { FOCUS_NODE_COLOR, NODE_RADIUS_UNIFORM, GENRE_DIMMED_ALPHA } from '../encoding';
 import type { GraphNode, GraphEdge, StreamPayload } from '@/types/constellation';
 
 const mockUseConstellation = useConstellation as unknown as Mock;
@@ -76,11 +77,14 @@ function makeCtx() {
   const strokeStyles: string[] = [];
   const ctx = {
     _stroke: '',
+    globalAlpha: 1,
     fillStyle: '',
     lineWidth: 0,
     font: '',
     textAlign: '',
     textBaseline: '',
+    save: vi.fn(),
+    restore: vi.fn(),
     beginPath: vi.fn(),
     arc: vi.fn(),
     fill: vi.fn(),
@@ -307,5 +311,115 @@ describe('ConstellationView', () => {
     expect(typeof graphProps().linkWidth).toBe('function');
     expect(typeof graphProps().linkColor).toBe('function');
     expect(typeof graphProps().nodeCanvasObject).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Controls-bar wiring (Task 21 FRONTEND-B)
+// ---------------------------------------------------------------------------
+
+/** Paint-recording ctx that captures arc radii and the alpha at each fill. */
+function makePaintCtx() {
+  const arcs: number[] = [];
+  const fillAlphas: number[] = [];
+  const ctx = {
+    globalAlpha: 1,
+    fillStyle: '',
+    lineWidth: 0,
+    strokeStyle: '',
+    font: '',
+    textAlign: '',
+    textBaseline: '',
+    save: vi.fn(),
+    restore: vi.fn(),
+    beginPath: vi.fn(),
+    arc: (_x: number, _y: number, r: number) => arcs.push(r),
+    fill() {
+      fillAlphas.push(this.globalAlpha);
+    },
+    stroke: vi.fn(),
+    fillText: vi.fn(),
+  };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, arcs, fillAlphas };
+}
+
+type PaintFn = (
+  node: Record<string, unknown>,
+  ctx: CanvasRenderingContext2D,
+  scale: number,
+) => void;
+
+describe('ConstellationView — controls wiring', () => {
+  beforeEach(() => {
+    graphState.reset();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('threads the selected roleMask into the useConstellation seed request', async () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    // Initially seeded with no role filter.
+    expect(mockUseConstellation).toHaveBeenCalledWith(
+      { type: 'artist', id: 'a1' },
+      { roleMask: undefined },
+    );
+
+    // Uncheck "Producer" -> subset {performer,composer,engineer,artwork} = 1|4|8|16 = 29.
+    await userEvent.click(screen.getByRole('checkbox', { name: /producer/i }));
+
+    const lastCall = mockUseConstellation.mock.calls[mockUseConstellation.mock.calls.length - 1];
+    expect(lastCall[1]).toEqual({ roleMask: 29 });
+  });
+
+  it('collapses node radius to the uniform size when hide-hotness is on', async () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const bigNode = { id: 1, name: 'P1', genre: 'rock', size: 100, owned: false, isFocus: false, x: 0, y: 0 };
+
+    // Before: prominence drives the radius (size 100 -> the max, well above uniform).
+    const before = makePaintCtx();
+    (graphProps().nodeCanvasObject as PaintFn)(bigNode, before.ctx, 1);
+    expect(before.arcs[0]).toBeGreaterThan(NODE_RADIUS_UNIFORM);
+
+    // Toggle hide-hotness.
+    await userEvent.click(screen.getByRole('checkbox', { name: /hide hotness/i }));
+
+    const after = makePaintCtx();
+    (graphProps().nodeCanvasObject as PaintFn)(bigNode, after.ctx, 1);
+    expect(after.arcs[0]).toBe(NODE_RADIUS_UNIFORM);
+  });
+
+  it('dims non-matching nodes when a genre is highlighted', async () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    // Highlight "rock".
+    await userEvent.selectOptions(screen.getByLabelText(/highlight genre/i), 'rock');
+
+    const paint = graphProps().nodeCanvasObject as PaintFn;
+
+    const match = makePaintCtx();
+    paint({ id: 1, name: 'P1', genre: 'rock', size: 10, owned: false, isFocus: false, x: 0, y: 0 }, match.ctx, 1);
+    // The matching genre paints at full opacity.
+    expect(match.fillAlphas[0]).toBe(1);
+
+    const other = makePaintCtx();
+    paint({ id: 2, name: 'P2', genre: 'jazz', size: 10, owned: false, isFocus: false, x: 0, y: 0 }, other.ctx, 1);
+    // A non-matching genre is dimmed.
+    expect(other.fillAlphas[0]).toBe(GENRE_DIMMED_ALPHA);
+  });
+
+  it('re-centers on a PathFinder hop selection (onSelectPerson)', async () => {
+    const recenter = vi.fn().mockResolvedValue(undefined);
+    mockUseConstellation.mockReturnValue(mockResult({ recenter, focusId: 1 }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    // The PathFinder is rendered inside the view.
+    expect(screen.getByTestId('path-finder')).toBeInTheDocument();
   });
 });

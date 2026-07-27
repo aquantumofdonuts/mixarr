@@ -14,6 +14,15 @@ import type {
 /** Seed the graph is centred on. `null` means "no graph loaded". */
 export type ConstellationSeed = { type: 'artist'; id: string } | null;
 
+/**
+ * Options for the data hook. `roleMask` is the server-side role filter (bitmask
+ * over ROLE_BITS); changing it triggers a re-seed so the filter is applied by the
+ * backend's `subgraph`. `undefined` means "all roles" (no filter).
+ */
+export interface UseConstellationOptions {
+  roleMask?: number;
+}
+
 export interface UseConstellationResult {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -70,20 +79,25 @@ export function mergeSubgraph(
 // Endpoint builders
 // ---------------------------------------------------------------------------
 
-function seedUrl(id: string, tokenId?: string): string {
+function seedUrl(id: string, tokenId?: string, roleMask?: number): string {
   const params = new URLSearchParams({ type: 'artist', id });
   if (tokenId) params.set('token', tokenId);
+  // Server-side role filter (bitmask over ROLE_BITS). Only sent when set — an
+  // undefined mask means "all roles" and the server omits the filter entirely.
+  if (roleMask !== undefined) params.set('roleMask', String(roleMask));
   return `/api/constellation/seed?${params.toString()}`;
 }
 
-function expandUrl(personId: number, token: StreamToken | null): string {
+function expandUrl(personId: number, token: StreamToken | null, roleMask?: number): string {
   const base = `/api/constellation/expand/${personId}`;
-  if (!token) return base;
-  const params = new URLSearchParams({
-    token: token.id,
-    generation: String(token.generation),
-  });
-  return `${base}?${params.toString()}`;
+  const params = new URLSearchParams();
+  if (token) {
+    params.set('token', token.id);
+    params.set('generation', String(token.generation));
+  }
+  if (roleMask !== undefined) params.set('roleMask', String(roleMask));
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +108,11 @@ function expandUrl(personId: number, token: StreamToken | null): string {
  * Data hook for the constellation graph. Owns the current node/edge sets, the
  * focus, and the SSE stream token, and exposes `recenter` / `expandMore`.
  */
-export function useConstellation(seed: ConstellationSeed): UseConstellationResult {
+export function useConstellation(
+  seed: ConstellationSeed,
+  options: UseConstellationOptions = {},
+): UseConstellationResult {
+  const { roleMask } = options;
   // Nodes + edges live in one state slice so `mergeSubgraph` can update both
   // atomically (an `expandMore` merge must not tear across two renders).
   const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
@@ -112,6 +130,13 @@ export function useConstellation(seed: ConstellationSeed): UseConstellationResul
   useEffect(() => {
     tokenRef.current = streamToken;
   }, [streamToken]);
+
+  // Latest roleMask in a ref so `recenter` / `expandMore` apply the current
+  // server-side filter without being recreated on every mask change.
+  const roleMaskRef = useRef<number | undefined>(roleMask);
+  useEffect(() => {
+    roleMaskRef.current = roleMask;
+  }, [roleMask]);
 
   // Tracks unmount so imperative callbacks (`recenter` / `expandMore`) don't
   // setState after the component is gone.
@@ -151,7 +176,7 @@ export function useConstellation(seed: ConstellationSeed): UseConstellationResul
     setError(null);
 
     api
-      .get<SeedResponse>(seedUrl(seedId))
+      .get<SeedResponse>(seedUrl(seedId, undefined, roleMask))
       .then(({ data, error: err }) => {
         if (cancelled) return;
         if (err || !data) {
@@ -167,7 +192,9 @@ export function useConstellation(seed: ConstellationSeed): UseConstellationResul
     return () => {
       cancelled = true;
     };
-  }, [seedType, seedId, applySeed]);
+    // roleMask is a dependency: changing the server-side role filter must re-seed
+    // so the backend re-computes the filtered subgraph.
+  }, [seedType, seedId, roleMask, applySeed]);
 
   /**
    * Re-center on `personId`: re-seed with the current token id so the backend
@@ -179,7 +206,7 @@ export function useConstellation(seed: ConstellationSeed): UseConstellationResul
       setError(null);
       try {
         const { data, error: err } = await api.get<SeedResponse>(
-          seedUrl(String(personId), tokenRef.current?.id),
+          seedUrl(String(personId), tokenRef.current?.id, roleMaskRef.current),
         );
         // Bail if the hook unmounted mid-request — no setState after unmount.
         if (unmountedRef.current) return;
@@ -202,7 +229,7 @@ export function useConstellation(seed: ConstellationSeed): UseConstellationResul
    */
   const expandMore = useCallback(async (personId: number) => {
     const { data, error: err } = await api.get<ExpandResponse>(
-      expandUrl(personId, tokenRef.current),
+      expandUrl(personId, tokenRef.current, roleMaskRef.current),
     );
     if (unmountedRef.current) return;
     if (err || !data) {

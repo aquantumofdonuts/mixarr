@@ -5,6 +5,9 @@ import {
   edgeWidth,
   edgeColor,
   ownedRingStyle,
+  genreHighlightAlpha,
+  GENRE_DIMMED_ALPHA,
+  GENRE_LEGEND,
   NEUTRAL_GENRE_COLOR,
   NODE_RADIUS_MIN,
   NODE_RADIUS_MAX,
@@ -130,6 +133,34 @@ describe('edgeColor', () => {
 
   it('renders normal (non-bridge) edges in the neutral color', () => {
     expect(edgeColor({ bridge: null, bridgeConfident: false }, false)).toBe(NEUTRAL_EDGE_COLOR);
+  });
+});
+
+describe('genreHighlightAlpha', () => {
+  it('is fully opaque for every node when nothing is highlighted', () => {
+    expect(genreHighlightAlpha('rock', null)).toBe(1);
+    expect(genreHighlightAlpha(null, null)).toBe(1);
+  });
+
+  it('keeps the matching genre fully opaque and dims the rest', () => {
+    expect(genreHighlightAlpha('rock', 'rock')).toBe(1);
+    expect(genreHighlightAlpha('Rock', 'rock')).toBe(1); // case-insensitive
+    expect(genreHighlightAlpha('jazz', 'rock')).toBe(GENRE_DIMMED_ALPHA);
+  });
+
+  it('dims null-genre nodes against a specific highlight', () => {
+    expect(genreHighlightAlpha(null, 'rock')).toBe(GENRE_DIMMED_ALPHA);
+  });
+});
+
+describe('GENRE_LEGEND', () => {
+  it('lists canonical genres with their palette colors', () => {
+    expect(GENRE_LEGEND.length).toBeGreaterThan(0);
+    for (const entry of GENRE_LEGEND) {
+      expect(typeof entry.genre).toBe('string');
+      expect(entry.color).toBe(genreColor(entry.genre));
+    }
+    expect(GENRE_LEGEND.map((e) => e.genre)).toContain('rock');
   });
 });
 

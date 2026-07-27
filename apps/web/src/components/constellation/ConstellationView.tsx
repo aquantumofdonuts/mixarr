@@ -14,6 +14,7 @@ import { useFrontierStream } from '@/hooks/useFrontierStream';
 import type { GraphNode, GraphEdge, StreamPayload } from '@/types/constellation';
 import {
   genreColor,
+  genreHighlightAlpha,
   nodeRadius,
   edgeWidth,
   edgeColor,
@@ -21,6 +22,8 @@ import {
   FOCUS_NODE_COLOR,
 } from './encoding';
 import { PersonPanel } from './PersonPanel';
+import { ConstellationControls } from './ConstellationControls';
+import { PathFinder } from './PathFinder';
 
 /**
  * A single visited focus person in the re-center walk.
@@ -79,8 +82,16 @@ const EMPTY_STREAM: { nodes: GraphNode[]; edges: GraphEdge[] } = { nodes: [], ed
  * the frontier SSE and are merged into the field.
  */
 export function ConstellationView({ seed }: ConstellationViewProps) {
+  // Controls-bar state (Design §5). `roleMask` is the SERVER-SIDE role filter —
+  // it is passed into the data hook so a change re-seeds through the backend's
+  // filtered `subgraph`. `hideHotness` and `genreHighlight` are CLIENT-SIDE paint
+  // adjustments only (no re-fetch).
+  const [roleMask, setRoleMask] = useState<number | undefined>(undefined);
+  const [hideHotness, setHideHotness] = useState(false);
+  const [genreHighlight, setGenreHighlight] = useState<string | null>(null);
+
   const { nodes, edges, focusId, streamToken, loading, error, recenter } =
-    useConstellation(seed);
+    useConstellation(seed, { roleMask });
 
   // Nodes/edges pushed by the background-expand SSE stream, merged locally on top
   // of the hook's seed subgraph. Reset whenever the stream token (generation)
@@ -160,12 +171,34 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
     [recenter, focusId],
   );
 
+  /**
+   * Recenter the field on a person chosen from the PathFinder chain. Mirrors a
+   * node click's re-center (breadcrumb + re-seed) without opening the panel.
+   */
+  const handleSelectPerson = useCallback(
+    (personId: number) => {
+      if (!Number.isFinite(personId) || personId === focusId) return;
+      setBreadcrumbs((prev) => {
+        if (prev.length > 0 && prev[prev.length - 1].personId === personId) return prev;
+        return [...prev, { personId, displayName: String(personId) }];
+      });
+      void recenter(personId);
+    },
+    [recenter, focusId],
+  );
+
   /** Custom node paint: genre fill, prominence radius, owned ring, label. */
   const paintNode = useCallback(
     (node: NodeObject<CanvasNode>, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const x = node.x ?? 0;
       const y = node.y ?? 0;
-      const radius = nodeRadius(node.size);
+      // Hide-hotness collapses the prominence size channel to a uniform radius.
+      const radius = nodeRadius(node.size, { hideHotness });
+
+      // Genre highlight dims every node whose genre != the highlighted one, so a
+      // single genre can be traced across the dense field (client-side only).
+      ctx.save();
+      ctx.globalAlpha = genreHighlightAlpha(node.genre, genreHighlight);
 
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, 2 * Math.PI);
@@ -199,12 +232,27 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
         ctx.fillStyle = 'rgba(230, 230, 235, 0.9)';
         ctx.fillText(node.name, x, y + radius + 1);
       }
+
+      ctx.restore();
     },
-    [],
+    [hideHotness, genreHighlight],
   );
 
   return (
     <div className="relative h-full w-full">
+      <div className="pointer-events-none absolute right-2 top-2 z-10 flex max-h-[calc(100%-1rem)] w-64 max-w-[70%] flex-col gap-2 overflow-auto">
+        <div className="pointer-events-auto">
+          <ConstellationControls
+            onRoleMaskChange={setRoleMask}
+            onHideHotnessChange={setHideHotness}
+            onGenreHighlightChange={setGenreHighlight}
+          />
+        </div>
+        <div className="pointer-events-auto">
+          <PathFinder onSelectPerson={handleSelectPerson} />
+        </div>
+      </div>
+
       {breadcrumbs.length > 0 && (
         <nav
           aria-label="Constellation trail"
@@ -239,7 +287,7 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       {loading && (
         <div
           data-testid="constellation-loading"
-          className="absolute right-2 top-2 z-10 flex items-center gap-2 rounded-container bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur"
+          className="absolute bottom-2 right-2 z-10 flex items-center gap-2 rounded-container bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur"
         >
           <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-primary" />
           Loading…
@@ -253,7 +301,7 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
           const x = node.x ?? 0;
           const y = node.y ?? 0;
           ctx.beginPath();
-          ctx.arc(x, y, nodeRadius(node.size), 0, 2 * Math.PI);
+          ctx.arc(x, y, nodeRadius(node.size, { hideHotness }), 0, 2 * Math.PI);
           ctx.fillStyle = color;
           ctx.fill();
         }}

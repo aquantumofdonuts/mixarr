@@ -194,6 +194,58 @@ describe('useConstellation', () => {
     expect(result.current.nodes.find((n) => n.personId === 11)?.owned).toBe(true);
   });
 
+  it('includes the roleMask in the seed request when provided', async () => {
+    const resp: SeedResponse = {
+      focusId: 10,
+      subgraph: subgraph(10, [node(10)], []),
+      streamToken: { id: 'tok-1', generation: 1 },
+    };
+    vi.mocked(api.get).mockResolvedValue(ok(resp));
+
+    const { result } = renderHook(() =>
+      useConstellation({ type: 'artist', id: '10' }, { roleMask: 6 }),
+    );
+
+    await waitFor(() => expect(result.current.focusId).toBe(10));
+    expect(api.get).toHaveBeenCalledWith('/api/constellation/seed?type=artist&id=10&roleMask=6');
+  });
+
+  it('omits roleMask from the seed request when undefined (all roles)', async () => {
+    const resp: SeedResponse = {
+      focusId: 10,
+      subgraph: subgraph(10, [node(10)], []),
+      streamToken: { id: 'tok-1', generation: 1 },
+    };
+    vi.mocked(api.get).mockResolvedValue(ok(resp));
+
+    const { result } = renderHook(() => useConstellation({ type: 'artist', id: '10' }));
+
+    await waitFor(() => expect(result.current.focusId).toBe(10));
+    expect(api.get).toHaveBeenCalledWith('/api/constellation/seed?type=artist&id=10');
+  });
+
+  it('re-seeds when the roleMask changes', async () => {
+    const resp: SeedResponse = {
+      focusId: 10,
+      subgraph: subgraph(10, [node(10)], []),
+      streamToken: { id: 'tok-1', generation: 1 },
+    };
+    vi.mocked(api.get).mockResolvedValue(ok(resp));
+
+    const { result, rerender } = renderHook(
+      ({ mask }: { mask?: number }) =>
+        useConstellation({ type: 'artist', id: '10' }, { roleMask: mask }),
+      { initialProps: { mask: undefined as number | undefined } },
+    );
+    await waitFor(() => expect(result.current.focusId).toBe(10));
+    expect(api.get).toHaveBeenLastCalledWith('/api/constellation/seed?type=artist&id=10');
+
+    rerender({ mask: 3 });
+    await waitFor(() =>
+      expect(api.get).toHaveBeenLastCalledWith('/api/constellation/seed?type=artist&id=10&roleMask=3'),
+    );
+  });
+
   it('surfaces an error when seeding fails', async () => {
     vi.mocked(api.get).mockResolvedValue({ data: null, error: 'boom', status: 500 });
     const { result } = renderHook(() => useConstellation({ type: 'artist', id: '10' }));
