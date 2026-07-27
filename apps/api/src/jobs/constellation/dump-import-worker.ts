@@ -287,6 +287,29 @@ export async function runDumpImport(
 }
 
 /**
+ * Resolve the on-disk index path the importer writes to.
+ *
+ * The DEFAULT comes from the constellation SETTINGS (`constellationIndexPath`,
+ * default `/data/constellation/index.db`) so the writer here agrees with the
+ * reader ({@link resolveCreditSource}, which reads the same setting). The
+ * `CONSTELLATION_INDEX_PATH` environment variable is an OPTIONAL override that
+ * takes precedence when set (deployments that pin the path outside settings).
+ *
+ * Kept as a small standalone async helper so it is unit-testable by mocking
+ * `SettingsService.getConstellationSettings` — no Redis/BullMQ required.
+ */
+export async function resolveIndexPath(): Promise<string> {
+  const envOverride = process.env.CONSTELLATION_INDEX_PATH?.trim();
+  if (envOverride) return envOverride;
+
+  const { SettingsService } = await import('../../services/settings.service.js');
+  const settings = await SettingsService.getConstellationSettings();
+  const indexPath = settings.constellationIndexPath?.trim();
+  if (!indexPath) throw new Error('Constellation index path is not configured');
+  return indexPath;
+}
+
+/**
  * Register the BullMQ worker for the `constellation-import` queue. Called at app
  * startup — NOT at module import time — so tests never open a Redis connection.
  *
@@ -303,10 +326,9 @@ export async function registerDumpImportWorker(io?: SocketIOServer): Promise<voi
     CONSTELLATION_QUEUE_NAMES.IMPORT,
     async (job) => {
       const { filePath } = job.data as { filePath: string };
-      // The on-disk index path is supplied by the settings layer (Task 16); until
-      // then it comes from the environment.
-      const indexPath = process.env.CONSTELLATION_INDEX_PATH ?? '';
-      if (!indexPath) throw new Error('Constellation index path is not configured');
+      // Writer & reader agree on the path via the constellation settings; an env
+      // override wins when set. See {@link resolveIndexPath}.
+      const indexPath = await resolveIndexPath();
 
       const index = new DumpIndexService(indexPath);
       try {

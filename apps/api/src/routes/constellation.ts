@@ -19,16 +19,13 @@
  * - **SSE push source**: an in-process {@link StreamRegistry} over Node's
  *   `EventEmitter`, keyed by opaque stream-token id. No Redis, no socket.io — the
  *   SSE endpoint is leak-free (listener removed + heartbeat cleared on close) and
- *   unit-testable. The expand worker publishes newly-expanded nodes by importing
- *   {@link publishToStream}. DEFERRED WORK (Task 16): the `constellation-expand`
- *   worker does not yet exist (this router only enqueues the job). Two things
- *   remain for that task: (1) BUILD the expand worker that consumes
- *   `constellation-expand` jobs, and (2) have it call
- *   `publishToStream(job.data.tokenId, job.data.generation, node)` for each
- *   newly-expanded node — using the `tokenId`/`generation` this router now threads
- *   through the job payload. Everything on this side (token minting + user-scoping,
- *   generation framing, the payload correlation fields, and the publish/subscribe
- *   primitive) is implemented here.
+ *   unit-testable. The `constellation-expand` worker
+ *   (`jobs/constellation/constellation-expand-worker.ts`) consumes
+ *   `constellation-expand` jobs and publishes each newly-expanded node by calling
+ *   `publishToStream(job.data.tokenId, job.data.generation, node)` — using the
+ *   `tokenId`/`generation` this router threads through the job payload. Everything
+ *   on this side (token minting + user-scoping, generation framing, the payload
+ *   correlation fields, and the publish/subscribe primitive) is implemented here.
  * - **Generation (re-center race guard, §4.2)**: a stream token is `{id, generation}`.
  *   `/seed` mints a fresh token; re-centering with `?token=<id>` bumps that id's
  *   generation. Every SSE event carries the generation it was published with, so a

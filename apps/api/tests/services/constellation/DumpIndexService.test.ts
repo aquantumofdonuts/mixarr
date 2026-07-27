@@ -155,6 +155,47 @@ describe('DumpIndexService', () => {
     });
   });
 
+  describe('parent-directory creation', () => {
+    let dir: string;
+
+    afterEach(() => {
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('creates a missing parent directory for a file path and opens the DB', async () => {
+      // Root temp dir exists; the NESTED parent of the db file does NOT yet.
+      dir = mkdtempSync(join(tmpdir(), 'constellation-'));
+      const dbPath = join(dir, 'nested', 'index.db');
+      expect(existsSync(join(dir, 'nested'))).toBe(false);
+
+      // Constructor must mkdir -p the parent and open without an
+      // "unable to open database file" error.
+      const idx = new DumpIndexService(dbPath);
+      try {
+        expect(existsSync(dbPath)).toBe(true);
+        idx.upsertArtist(1, 'Alice');
+        idx.setReleaseMeta({ releaseId: 100, masterId: null, year: 2000, genres: [] });
+        idx.addCredit({ releaseId: 100, artistId: 1, role: 'Bass', masterId: null });
+        expect(await idx.getArtistReleases(1)).toEqual([
+          { releaseId: 100, masterId: null, year: 2000, genres: [] },
+        ]);
+      } finally {
+        idx.close();
+      }
+    });
+
+    it(':memory: opens without touching the filesystem (no mkdir)', () => {
+      // A ':memory:' DB must not create a directory named ':memory:' anywhere.
+      const idx = new DumpIndexService(':memory:');
+      try {
+        expect(existsSync(':memory:')).toBe(false);
+        expect(idx.getIndexVersion()).toBeNull();
+      } finally {
+        idx.close();
+      }
+    });
+  });
+
   describe('transaction()', () => {
     it('commits all writes made inside one transaction', async () => {
       const idx = new DumpIndexService(':memory:');

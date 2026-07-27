@@ -1,5 +1,7 @@
 import Database from 'better-sqlite3';
 import type { Database as BetterSqliteDatabase, Statement } from 'better-sqlite3';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { CreditSource } from './ExpansionService.js';
 import { normalizeRole, type BaseRole } from './RoleTaxonomy.js';
 
@@ -42,10 +44,17 @@ export class DumpIndexService implements CreditSource {
 
   /**
    * @param path Filesystem path to the SQLite database, or `:memory:` for an
-   *   ephemeral in-memory DB (used by tests). No production path is hardcoded;
-   *   the settings layer (Task 16) is responsible for supplying one.
+   *   ephemeral in-memory DB (used by tests). The path is supplied by the
+   *   constellation settings layer (`constellationIndexPath`). For a file path,
+   *   the parent directory is created if missing (better-sqlite3 will not create
+   *   it and would otherwise throw "unable to open database file").
    */
   constructor(path: string) {
+    // better-sqlite3 does not create parent dirs; ensure they exist for file
+    // paths (but never mkdir for the in-memory sentinel).
+    if (path !== ':memory:') {
+      mkdirSync(dirname(path), { recursive: true });
+    }
     this.db = new Database(path);
     // WAL improves concurrent read/write throughput for on-disk databases.
     // (No-op / harmless for :memory:.)
