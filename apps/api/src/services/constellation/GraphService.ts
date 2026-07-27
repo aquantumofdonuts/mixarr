@@ -154,7 +154,10 @@ export class GraphService {
     // 4) Batched lookups: names, genres, owned.
     const [persons, genres, owned] = await Promise.all([
       prisma.constellationPerson.findMany({ where: { personId: { in: allNodeIds } } }),
-      prisma.constellationGenre.findMany({ where: { personId: { in: allNodeIds } } }),
+      prisma.constellationGenre.findMany({
+        where: { personId: { in: allNodeIds } },
+        orderBy: [{ weight: 'desc' }, { genre: 'asc' }],
+      }),
       opts.userId !== undefined
         ? prisma.constellationOwned.findMany({
             where: { userId: opts.userId, personId: { in: allNodeIds } },
@@ -178,18 +181,23 @@ export class GraphService {
     const ownedSet = new Set<number>();
     for (const o of owned as Array<{ personId: number }>) ownedSet.add(o.personId);
 
-    const nodes: GraphNode[] = [];
-    for (const id of allNodeIds) {
+    // Gather popularity for all nodes in parallel (the seam may hit Last.fm).
+    const { getPopularity } = this.deps;
+    const popularities = getPopularity
+      ? await Promise.all(allNodeIds.map((id) => getPopularity(id)))
+      : [];
+
+    const nodes: GraphNode[] = allNodeIds.map((id, i) => {
       const creditProminence = prominence.get(id) ?? 0;
-      const popularity = this.deps.getPopularity ? await this.deps.getPopularity(id) : undefined;
-      nodes.push({
+      const popularity = getPopularity ? popularities[i] : 0;
+      return {
         personId: id,
         displayName: nameById.get(id) ?? '',
         genre: domGenre.get(id)?.genre ?? null,
-        size: Math.max(creditProminence, popularity ?? 0),
+        size: Math.max(creditProminence, popularity),
         owned: ownedSet.has(id),
-      });
-    }
+      };
+    });
 
     // Edges = ring-1 + used ring-2, deduped by directed (source, target).
     const edges: GraphEdge[] = [];
@@ -252,7 +260,9 @@ export class GraphService {
       }
     }
 
-    for (const [a, b] of pairs) {
+    // Compute each pair's update payload first (pure), then fire the writes in
+    // parallel rather than awaiting them serially.
+    const updates = pairs.map(([a, b]) => {
       const where = {
         OR: [
           { sourcePersonId: a, targetPersonId: b },
@@ -266,10 +276,10 @@ export class GraphService {
           true,
           true,
         );
-        await prisma.constellationEdge.updateMany({ where, data: { bridge: score, bridgeConfident: true } });
-      } else {
-        await prisma.constellationEdge.updateMany({ where, data: { bridgeConfident: false } });
+        return prisma.constellationEdge.updateMany({ where, data: { bridge: score, bridgeConfident: true } });
       }
-    }
+      return prisma.constellationEdge.updateMany({ where, data: { bridgeConfident: false } });
+    });
+    await Promise.all(updates);
   }
 }

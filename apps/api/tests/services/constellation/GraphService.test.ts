@@ -183,6 +183,74 @@ describe('GraphService.subgraph', () => {
     expect(noUser.nodes.every((n) => n.owned === false)).toBe(true);
   });
 
+  it('DANGLING-EDGE INVARIANT: every edge source & target is a present node (incl. maxNodes trim)', async () => {
+    const store: Store = {
+      edges: [
+        edge(1, 2, 5), edge(1, 3, 4),
+        edge(2, 10, 3), edge(2, 11, 2),
+        edge(3, 20, 3), edge(3, 21, 2),
+      ],
+      persons: [1, 2, 3, 10, 11, 20, 21].map((id) => person(id)),
+      genres: [],
+      owned: [],
+    };
+    installStore(store);
+
+    // maxNodes 4 trims ring-2 to a single node -> edges must not reference trimmed nodes.
+    const res = await new GraphService().subgraph(1, { topN: 2, maxNodes: 4 });
+    const nodeIds = new Set(res.nodes.map((n) => n.personId));
+    for (const e of res.edges) {
+      expect(nodeIds.has(e.source)).toBe(true);
+      expect(nodeIds.has(e.target)).toBe(true);
+    }
+  });
+
+  it('EMPTY FOCUS: focus with no outgoing edges -> just the focus node, no edges, no throw', async () => {
+    const store: Store = {
+      edges: [],
+      persons: [person(1)],
+      genres: [],
+      owned: [],
+    };
+    installStore(store);
+
+    const res = await new GraphService().subgraph(1, {});
+    expect(res.nodes.map((n) => n.personId)).toEqual([1]);
+    expect(res.edges).toEqual([]);
+  });
+
+  it('NONEXISTENT FOCUS: no ConstellationPerson row -> focus node with empty displayName, no throw', async () => {
+    const store: Store = {
+      edges: [],
+      persons: [],
+      genres: [],
+      owned: [],
+    };
+    installStore(store);
+
+    const res = await new GraphService().subgraph(999, {});
+    expect(res.nodes).toHaveLength(1);
+    expect(res.nodes[0]).toMatchObject({ personId: 999, displayName: '', genre: null, owned: false });
+    expect(res.edges).toEqual([]);
+  });
+
+  it('roleMask=0 excludes all edges (focus only), distinct from roleMask=undefined (full ring-1)', async () => {
+    const store: Store = {
+      edges: [edge(1, 2, 5, 1), edge(1, 3, 4, 2)],
+      persons: [1, 2, 3].map((id) => person(id)),
+      genres: [],
+      owned: [],
+    };
+    installStore(store);
+
+    const masked = await new GraphService().subgraph(1, { roleMask: 0 });
+    expect(masked.nodes.map((n) => n.personId)).toEqual([1]);
+    expect(masked.edges).toEqual([]);
+
+    const unfiltered = await new GraphService().subgraph(1, {});
+    expect(unfiltered.nodes.map((n) => n.personId).sort((a, b) => a - b)).toEqual([1, 2, 3]);
+  });
+
   it('caps total nodes at maxNodes, stopping ring-2 growth', async () => {
     const store: Store = {
       edges: [
