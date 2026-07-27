@@ -172,6 +172,34 @@ describe('GET /seed', () => {
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toMatch(/album/i);
   });
+
+  it('threads a roleMask query param into subgraph (server-side role filter)', async () => {
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { type: 'artist', id: '42', roleMask: '6' } });
+    const res = mockRes();
+    await h.seed(req, res);
+
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(42, { userId: 7, roleMask: 6 });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('passes roleMask=undefined (no filter) when the param is absent', async () => {
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { type: 'artist', id: '42' } });
+    const res = mockRes();
+    await h.seed(req, res);
+
+    const call = (deps.graph!.subgraph as any).mock.calls[0];
+    expect(call[0]).toBe(42);
+    expect(call[1].userId).toBe(7);
+    expect(call[1].roleMask).toBeUndefined();
+  });
 });
 
 // ---- /expand ----------------------------------------------------------------
@@ -191,6 +219,18 @@ describe('GET /expand/:personId', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.enqueued).toBe(true);
     expect(res.body.subgraph).toBeDefined();
+  });
+
+  it('threads a roleMask query param into the expand subgraph (server-side role filter)', async () => {
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 5, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ params: { personId: '5' }, query: { roleMask: '3' } });
+    const res = mockRes();
+    await h.expand(req, res);
+
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7, roleMask: 3 });
   });
 
   it('still returns the cached subgraph when the enqueue fails (guarded, no Redis)', async () => {

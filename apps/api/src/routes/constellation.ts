@@ -438,6 +438,12 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         const type = (typeof req.query.type === 'string' ? req.query.type : 'artist').toLowerCase();
         const id = typeof req.query.id === 'string' ? req.query.id.trim() : '';
         const existingToken = typeof req.query.token === 'string' ? req.query.token : undefined;
+        // Optional server-side role filter (bitmask over ROLE_BITS). Absent -> no
+        // filter (all roles); the GraphService.subgraph already treats an
+        // undefined roleMask as "keep every edge".
+        const roleMask =
+          parseIntParam(typeof req.query.roleMask === 'string' ? req.query.roleMask : undefined) ??
+          undefined;
 
         if (type === 'album') {
           res.status(400).json({ error: 'album seeds not yet supported' });
@@ -467,7 +473,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           return;
         }
 
-        const subgraph = await graph.subgraph(focusId, { userId });
+        const subgraph = await graph.subgraph(focusId, { userId, roleMask });
 
         // User-scoped tokens: a re-center (?token=) may only bump the caller's own
         // token; a token owned by another user is rejected (IDOR/DoS guard).
@@ -509,6 +515,10 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         const generation =
           parseIntParam(typeof req.query.generation === 'string' ? req.query.generation : undefined) ??
           undefined;
+        // Optional server-side role filter (see /seed) — absent means all roles.
+        const roleMask =
+          parseIntParam(typeof req.query.roleMask === 'string' ? req.query.roleMask : undefined) ??
+          undefined;
 
         const jobData: ConstellationExpandJobData = { artistId: personId };
         if (tokenId) {
@@ -528,7 +538,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           });
         }
 
-        const subgraph = await graph.subgraph(personId, { userId });
+        const subgraph = await graph.subgraph(personId, { userId, roleMask });
         res.json({ personId, enqueued, subgraph });
       } catch (error) {
         log.error('expand failed', { error: error instanceof Error ? error.message : String(error) });
