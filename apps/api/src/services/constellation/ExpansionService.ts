@@ -1,7 +1,10 @@
 import prisma from '../../lib/db.js';
+import { createLogger } from '../../lib/logger.js';
 import type { BaseRole } from './RoleTaxonomy.js';
 import { roleWeight, rolesToBitmask } from './RoleTaxonomy.js';
-import type { ReleaseRef } from './MasterDedup.js';
+import { masterKey } from './MasterDedup.js';
+
+const logger = createLogger('ExpansionService');
 
 /**
  * The injectable seam that decouples ExpansionService from any concrete data
@@ -26,6 +29,8 @@ export interface CreditSource {
 export interface ExpansionOptions {
   /** Returns true if `personId` has already been fully expanded elsewhere. */
   isPersonFull?: (personId: number) => Promise<boolean>;
+  /** Reference year for recency decay. Defaults to the current UTC year. */
+  nowYear?: number;
 }
 
 // Discogs non-person entities that must never become nodes/edges.
@@ -37,10 +42,6 @@ function isBlacklisted(artistId: number, name: string | undefined): boolean {
   if (name && BLACKLIST_NAME.test(name.trim())) return true;
   return false;
 }
-
-// Stable master key: releases with a masterId collapse onto it; null-master
-// releases key on their own release id. (Mirrors MasterDedup.masterKey.)
-const masterKey = (r: ReleaseRef) => (r.masterId != null ? `m${r.masterId}` : `r${r.releaseId}`);
 
 const RECENCY_FLOOR = 0.3;
 const RECENCY_PER_YEAR = 0.02;
@@ -80,33 +81,52 @@ interface Collab {
  */
 export class ExpansionService {
   private readonly isPersonFull: (personId: number) => Promise<boolean>;
+  private readonly nowYear: number;
 
   constructor(private source: CreditSource, options: ExpansionOptions = {}) {
     this.isPersonFull =
       options.isPersonFull ??
       (async (id: number) =>
         (await prisma.constellationPerson.findUnique({ where: { personId: id } }))?.fullyExpanded ?? false);
+    this.nowYear = options.nowYear ?? new Date().getUTCFullYear();
   }
 
   async expandPerson(personId: number): Promise<void> {
     // Never expand a blacklisted seed (id-based; we have no name for the seed here).
     if (isBlacklisted(personId, undefined)) return;
 
-    const nowYear = new Date().getUTCFullYear();
+    const nowYear = this.nowYear;
     const releases = await this.source.getArtistReleases(personId);
 
     const collaborators = new Map<number, Collab>();
-    const genreCounts = new Map<string, number>();
+    // Genre affinity counts each genre at most once per DISTINCT master, so
+    // reissues do not inflate it (consistent with edge reissue dedup).
+    const genreMasters = new Map<string, Set<string>>();
     let seedName: string | undefined;
 
     for (const release of releases) {
       const key = masterKey(release);
 
-      for (const genre of release.genres) {
-        genreCounts.set(genre, (genreCounts.get(genre) ?? 0) + 1);
+      for (const genre of release.genres ?? []) {
+        let masters = genreMasters.get(genre);
+        if (!masters) {
+          masters = new Set<string>();
+          genreMasters.set(genre, masters);
+        }
+        masters.add(key);
       }
 
-      const credits = await this.source.getReleaseCredits(release.releaseId);
+      let credits: Awaited<ReturnType<CreditSource['getReleaseCredits']>>;
+      try {
+        credits = await this.source.getReleaseCredits(release.releaseId);
+      } catch (err) {
+        // A single failing/malformed release must not abort the whole expansion
+        // (nor leave P without fullyExpanded=true). Log and skip it.
+        logger.warn(
+          `Skipping release ${release.releaseId} for person ${personId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        continue;
+      }
       for (const credit of credits) {
         if (credit.artistId === personId) {
           seedName = seedName ?? credit.name;
@@ -141,8 +161,9 @@ export class ExpansionService {
     // Seed person node — P is fully expanded once we reach here (set on create+update).
     await this.upsertSeedPerson(personId, seedName ?? `Artist ${personId}`);
 
-    // Seed genres, weighted by release count.
-    for (const [genre, weight] of genreCounts) {
+    // Seed genres, weighted by number of distinct masters carrying each genre.
+    for (const [genre, masters] of genreMasters) {
+      const weight = masters.size;
       await prisma.constellationGenre.upsert({
         where: { personId_genre: { personId, genre } },
         create: { personId, genre, weight },

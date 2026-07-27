@@ -1,7 +1,7 @@
 export interface ReleaseRef { releaseId: number; masterId: number | null; }
 
 // A stable key per master; null-master releases key on their own release id.
-const masterKey = (r: ReleaseRef) => (r.masterId != null ? `m${r.masterId}` : `r${r.releaseId}`);
+export const masterKey = (r: ReleaseRef) => (r.masterId != null ? `m${r.masterId}` : `r${r.releaseId}`);
 
 export function dedupToMasters(releases: ReleaseRef[]): Set<string> {
   return new Set(releases.map(masterKey));

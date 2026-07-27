@@ -151,14 +151,15 @@ describe('ExpansionService.expandPerson', () => {
     expect(upsertedIds).not.toContain(40);
   });
 
-  it('writes weighted genre rows for P from its releases', async () => {
+  it('weights genres by distinct master (reissues do not inflate affinity)', async () => {
     await new ExpansionService(fakeSource(releases, creditsByRelease)).expandPerson(P);
     const genreCalls = vi
       .mocked(prisma.constellationGenre.upsert)
       .mock.calls.map(([arg]: any[]) => arg.create);
     const rock = genreCalls.find((c: any) => c.genre === 'Rock');
     const jazz = genreCalls.find((c: any) => c.genre === 'Jazz');
-    expect(rock?.weight).toBe(2); // two Rock releases
+    // Two Rock releases share master 100 -> counts once. Jazz on master 200.
+    expect(rock?.weight).toBe(1);
     expect(jazz?.weight).toBe(1);
   });
 
@@ -200,5 +201,66 @@ describe('ExpansionService.expandPerson', () => {
     await new ExpansionService(fakeSource(releases, creditsByRelease)).expandPerson(194);
     expect(edgeUpsert()).not.toHaveBeenCalled();
     expect(vi.mocked(prisma.constellationPerson.upsert)).not.toHaveBeenCalled();
+  });
+
+  it('never creates a P->P self-edge', async () => {
+    await new ExpansionService(fakeSource(releases, creditsByRelease)).expandPerson(P);
+    const selfEdge = edgeUpsert().mock.calls.find(([arg]: any[]) => {
+      const key = arg.where.sourcePersonId_targetPersonId;
+      return key.sourcePersonId === key.targetPersonId;
+    });
+    expect(selfEdge).toBeUndefined();
+    expect(edgeCall(P, P)).toBeUndefined();
+  });
+
+  it('survives a single failing release: other edges still produced, P still fully expanded', async () => {
+    // Release 3 (which carries Y) rejects; releases 1 & 2 (X) still succeed.
+    const source: CreditSource = {
+      getArtistReleases: async () => releases,
+      getReleaseCredits: async (releaseId: number) => {
+        if (releaseId === 3) throw new Error('boom');
+        return creditsByRelease[releaseId] ?? [];
+      },
+    };
+    await new ExpansionService(source).expandPerson(P);
+
+    // X's edge (from the surviving releases) is still produced.
+    expect(edgeCall(P, 10)).toBeDefined();
+    expect(edgeCall(10, P)).toBeDefined();
+    // Y came only from the failing release -> no edge.
+    expect(edgeCall(P, 20)).toBeUndefined();
+    // P is still upserted as fully expanded despite the failure.
+    const seed = personCall(P);
+    expect(seed.create.fullyExpanded).toBe(true);
+    expect(seed.update.fullyExpanded).toBe(true);
+  });
+
+  it('handles an empty release list: P fully expanded, no edges, no throw', async () => {
+    const source: CreditSource = {
+      getArtistReleases: async () => [],
+      getReleaseCredits: async () => [],
+    };
+    await new ExpansionService(source).expandPerson(P);
+    expect(edgeUpsert()).not.toHaveBeenCalled();
+    const seed = personCall(P);
+    expect(seed.create.fullyExpanded).toBe(true);
+    expect(seed.update.fullyExpanded).toBe(true);
+  });
+
+  it('applies recency decay through expandPerson via injected nowYear', async () => {
+    // A dated collaborator: release from year 2000, evaluated at nowYear 2020.
+    const datedReleases: Release[] = [{ releaseId: 5, masterId: 500, year: 2000, genres: [] }];
+    const datedCredits: Record<number, Credit[]> = {
+      5: [
+        { artistId: P, name: 'Person P', roles: ['performer'], masterId: 500 },
+        { artistId: 50, name: 'W', roles: ['performer'], masterId: 500 },
+      ],
+    };
+    await new ExpansionService(fakeSource(datedReleases, datedCredits), { nowYear: 2020 }).expandPerson(P);
+
+    const pw = edgeCall(P, 50);
+    // decay(2000, 2020) = 1 - 20*0.02 = 0.6; weight = 1 * 1.0 * 0.6
+    expect(pw.create.weight).toBeCloseTo(0.6, 10);
+    expect(pw.create.weight).toBeLessThan(1);
   });
 });

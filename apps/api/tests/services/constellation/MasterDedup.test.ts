@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dedupToMasters, sharedMasterCount } from '../../../src/services/constellation/MasterDedup.js';
+import { dedupToMasters, sharedMasterCount, masterKey } from '../../../src/services/constellation/MasterDedup.js';
 
 describe('MasterDedup', () => {
   it('collapses many releases of the same master to one', () => {
@@ -20,6 +20,10 @@ describe('MasterDedup', () => {
   });
   it('counts zero shared masters for disjoint lists', () => {
     expect(sharedMasterCount([{ releaseId: 1, masterId: 100 }], [{ releaseId: 2, masterId: 200 }])).toBe(0);
+  });
+  it('exposes masterKey: master-keyed when masterId present, release-keyed when null', () => {
+    expect(masterKey({ releaseId: 2, masterId: 100 })).toBe('m100');
+    expect(masterKey({ releaseId: 7, masterId: null })).toBe('r7');
   });
   it('keeps two distinct null-master releases separate', () => {
     // Deliberate: null-master releases key on their own release id, so they never collapse together.
