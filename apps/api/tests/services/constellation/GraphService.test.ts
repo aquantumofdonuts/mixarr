@@ -273,6 +273,107 @@ describe('GraphService.subgraph', () => {
   });
 });
 
+describe('GraphService.path', () => {
+  type NbEdge = { target: number; bridge?: number | null; weight?: number };
+  type Adj = Record<number, NbEdge[]>;
+
+  /** Build an injectable getNeighbors seam from an adjacency map (no Prisma). */
+  function fakeNeighbors(adj: Adj) {
+    return vi.fn(async (id: number) =>
+      (adj[id] ?? []).map((e) => ({
+        target: e.target,
+        bridge: e.bridge ?? null,
+        weight: e.weight ?? 1,
+      })));
+  }
+
+  it('shortest: returns a reachable 3-hop path with degrees 3, mode shortest', async () => {
+    const getNeighbors = fakeNeighbors({ 1: [{ target: 2 }], 2: [{ target: 3 }], 3: [{ target: 4 }] });
+    const res = await new GraphService({ getNeighbors }).path(1, 4, { mode: 'shortest' });
+    expect(res).toEqual({ nodes: [1, 2, 3, 4], degrees: 3, mode: 'shortest' });
+  });
+
+  it('shortest: bails to null when the target is only reachable past max', async () => {
+    // Linear chain 1->2->3->4->5->6 (5 hops); max=3 must NOT reach 6.
+    const getNeighbors = fakeNeighbors({
+      1: [{ target: 2 }], 2: [{ target: 3 }], 3: [{ target: 4 }], 4: [{ target: 5 }], 5: [{ target: 6 }],
+    });
+    const res = await new GraphService({ getNeighbors }).path(1, 6, { mode: 'shortest', max: 3 });
+    expect(res).toBeNull();
+    // must NOT have traversed the whole chain: 4 and 5 are never expanded within 3 hops.
+    const expanded = getNeighbors.mock.calls.map((c) => c[0]);
+    expect(expanded).not.toContain(5);
+  });
+
+  it('shortest: routes through a hub (2-hop) rather than the longer non-hub path', async () => {
+    const getNeighbors = fakeNeighbors({
+      1: [{ target: 99 }, { target: 2 }],
+      99: [{ target: 5 }], // hub: 1->99->5 = 2 hops
+      2: [{ target: 3 }], 3: [{ target: 4 }], 4: [{ target: 5 }], // long path: 1->2->3->4->5 = 4 hops
+    });
+    const res = await new GraphService({ getNeighbors }).path(1, 5, { mode: 'shortest' });
+    expect(res).toEqual({ nodes: [1, 99, 5], degrees: 2, mode: 'shortest' });
+  });
+
+  it('interesting: prefers the LONGER high-bridge chain over the short low-bridge hub route', async () => {
+    const adj: Adj = {
+      // Short, boring hub route: 1->9->5, cumulative bridge 0.
+      1: [{ target: 9, bridge: 0 }, { target: 2, bridge: 0.9 }],
+      9: [{ target: 5, bridge: 0 }],
+      // Longer boundary-crossing chain: 1->2->3->4->5, cumulative bridge 3.6.
+      2: [{ target: 3, bridge: 0.9 }],
+      3: [{ target: 4, bridge: 0.9 }],
+      4: [{ target: 5, bridge: 0.9 }],
+    };
+    const interesting = await new GraphService({ getNeighbors: fakeNeighbors(adj) }).path(1, 5, {
+      mode: 'interesting',
+    });
+    expect(interesting).not.toBeNull();
+    expect(interesting!.nodes).toEqual([1, 2, 3, 4, 5]);
+    expect(interesting!.degrees).toBe(4);
+    expect(interesting!.mode).toBe('interesting');
+    expect(interesting!.totalBridge).toBeCloseTo(3.6, 10);
+
+    // Same graph, shortest mode -> the boring 2-hop hub route with ~zero bridge.
+    const shortest = await new GraphService({ getNeighbors: fakeNeighbors(adj) }).path(1, 5, {
+      mode: 'shortest',
+    });
+    expect(shortest).toEqual({ nodes: [1, 9, 5], degrees: 2, mode: 'shortest' });
+    expect(interesting!.totalBridge!).toBeGreaterThan(0);
+  });
+
+  it('interesting: candidate budget bounds the search on a dense graph and still returns a valid path', async () => {
+    // Fully-connected 7-clique: unbounded simple-path enumeration explodes.
+    const ids = [1, 2, 3, 4, 5, 6, 7];
+    const adj: Adj = {};
+    for (const a of ids) adj[a] = ids.filter((b) => b !== a).map((b) => ({ target: b, bridge: 0.1 }));
+    const getNeighbors = fakeNeighbors(adj);
+
+    const budget = 25;
+    const res = await new GraphService({ getNeighbors }).path(1, 7, {
+      mode: 'interesting',
+      candidateBudget: budget,
+    });
+
+    // Budget respected: getNeighbors (= node expansions) never exceeds the budget.
+    expect(getNeighbors.mock.calls.length).toBeLessThanOrEqual(budget);
+
+    // Still returns a VALID simple from->to path within max+2 hops.
+    expect(res).not.toBeNull();
+    expect(res!.nodes[0]).toBe(1);
+    expect(res!.nodes[res!.nodes.length - 1]).toBe(7);
+    expect(res!.degrees).toBe(res!.nodes.length - 1);
+    expect(res!.degrees).toBeLessThanOrEqual(6 + 2); // default max(6) + 2
+    expect(new Set(res!.nodes).size).toBe(res!.nodes.length); // simple path, no repeats
+  });
+
+  it('returns null in both modes when from and to are disconnected', async () => {
+    const adj: Adj = { 1: [{ target: 2 }], 2: [{ target: 1 }], 3: [{ target: 4 }] }; // {1,2} | {3,4}
+    expect(await new GraphService({ getNeighbors: fakeNeighbors(adj) }).path(1, 4, { mode: 'shortest' })).toBeNull();
+    expect(await new GraphService({ getNeighbors: fakeNeighbors(adj) }).path(1, 4, { mode: 'interesting' })).toBeNull();
+  });
+});
+
 describe('GraphService.bridgeFill', () => {
   it('fills the bridge (both directions) when both endpoints are fully expanded', async () => {
     const store: Store = {

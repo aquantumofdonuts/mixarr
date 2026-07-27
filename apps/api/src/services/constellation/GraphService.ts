@@ -39,8 +39,38 @@ export interface SubgraphOpts {
  */
 export type GetPopularity = (personId: number) => Promise<number>;
 
+/**
+ * Neighbour seam for path finding (mirrors the CreditSource philosophy). Returns
+ * the outgoing edges of `personId` as {target, bridge, weight}. Defaults to a
+ * real `ConstellationEdge` read (sourcePersonId = personId); tests inject a fake
+ * in-memory graph so `path` is unit-testable without Prisma.
+ */
+export type GetNeighbors = (
+  personId: number,
+) => Promise<Array<{ target: number; bridge: number | null; weight: number }>>;
+
 export interface GraphServiceDeps {
   getPopularity?: GetPopularity;
+  getNeighbors?: GetNeighbors;
+}
+
+export interface PathResult {
+  nodes: number[];
+  degrees: number;
+  mode: 'shortest' | 'interesting';
+  totalBridge?: number;
+}
+
+export interface PathOpts {
+  mode?: 'shortest' | 'interesting';
+  /** Max degrees (hops) for shortest; interesting may run to max + 2. Default 6. */
+  max?: number;
+  /**
+   * Interesting-mode bound: the search performs at most this many node
+   * expansions (getNeighbors calls). Default 500. This is what keeps the
+   * bridge-ranked enumeration from exploding on a small-world graph.
+   */
+  candidateBudget?: number;
 }
 
 type EdgeRow = {
@@ -54,6 +84,8 @@ type EdgeRow = {
 
 const DEFAULT_TOP_N = 8;
 const DEFAULT_MAX_NODES = 50;
+const DEFAULT_MAX_DEGREES = 6;
+const DEFAULT_CANDIDATE_BUDGET = 500;
 
 /**
  * Read/traversal layer over the constellation graph.
@@ -281,5 +313,132 @@ export class GraphService {
       return prisma.constellationEdge.updateMany({ where, data: { bridgeConfident: false } });
     });
     await Promise.all(updates);
+  }
+
+  /** Default neighbour seam: outgoing ConstellationEdge rows for `personId`. */
+  private async defaultGetNeighbors(
+    personId: number,
+  ): Promise<Array<{ target: number; bridge: number | null; weight: number }>> {
+    const rows = (await prisma.constellationEdge.findMany({
+      where: { sourcePersonId: personId },
+    })) as EdgeRow[];
+    return rows.map((e) => ({ target: e.targetPersonId, bridge: e.bridge, weight: e.weight }));
+  }
+
+  /**
+   * Two "six degrees" modes over the SAME edge data (design §7).
+   *
+   * - `shortest` (default): bounded, cycle-safe layered BFS. Returns the fewest-hop
+   *   path from `fromId` to `toId` within `max` degrees (default 6), or `null` if
+   *   unreachable within `max` (it bails — it does NOT traverse further). Cheap; the
+   *   shortest route typically threads through hubs.
+   *
+   * - `interesting`: bounded, bridge-ranked path enumeration. Explores simple paths
+   *   up to `max + 2` degrees via depth-first search and returns the one with the
+   *   highest cumulative bridge score (sum of edge `bridge`, null treated as 0),
+   *   surfacing boundary-crossing chains even when they are longer than the shortest
+   *   route. TERMINATION: the search performs at most `candidateBudget` node
+   *   expansions (getNeighbors calls, default 500); combined with simple-path
+   *   (no-revisit) pruning and the `max + 2` depth cap this provably terminates and
+   *   cannot blow up exponentially on a small-world graph.
+   */
+  async path(fromId: number, toId: number, opts: PathOpts = {}): Promise<PathResult | null> {
+    const mode = opts.mode ?? 'shortest';
+    const max = opts.max ?? DEFAULT_MAX_DEGREES;
+    const getNeighbors = this.deps.getNeighbors ?? ((id: number) => this.defaultGetNeighbors(id));
+
+    if (fromId === toId) {
+      return mode === 'interesting'
+        ? { nodes: [fromId], degrees: 0, mode, totalBridge: 0 }
+        : { nodes: [fromId], degrees: 0, mode };
+    }
+
+    return mode === 'interesting'
+      ? this.interestingPath(fromId, toId, max, opts.candidateBudget ?? DEFAULT_CANDIDATE_BUDGET, getNeighbors)
+      : this.shortestPath(fromId, toId, max, getNeighbors);
+  }
+
+  /** Layered BFS: fewest hops, cycle-safe, bails to null past `max` degrees. */
+  private async shortestPath(
+    fromId: number,
+    toId: number,
+    max: number,
+    getNeighbors: GetNeighbors,
+  ): Promise<PathResult | null> {
+    const visited = new Set<number>([fromId]);
+    let frontier: number[][] = [[fromId]];
+
+    while (frontier.length) {
+      const next: number[][] = [];
+      for (const path of frontier) {
+        const hops = path.length - 1;
+        if (hops >= max) continue; // extending would exceed the degree budget
+        const last = path[path.length - 1];
+        for (const nb of await getNeighbors(last)) {
+          if (nb.target === toId) {
+            return { nodes: [...path, toId], degrees: hops + 1, mode: 'shortest' };
+          }
+          if (!visited.has(nb.target)) {
+            visited.add(nb.target);
+            next.push([...path, nb.target]);
+          }
+        }
+      }
+      frontier = next;
+    }
+    return null;
+  }
+
+  /**
+   * Bounded DFS over simple paths (length <= max + 2), ranked by cumulative bridge.
+   * At most `budget` node expansions are performed, so getNeighbors is called <=
+   * budget times — the analog of the OrbitCrawler edge budget.
+   */
+  private async interestingPath(
+    fromId: number,
+    toId: number,
+    max: number,
+    budget: number,
+    getNeighbors: GetNeighbors,
+  ): Promise<PathResult | null> {
+    const maxDepth = max + 2; // hops allowed for the "interesting" (longer) route
+    let best: { nodes: number[]; totalBridge: number } | null = null;
+    let expansions = 0;
+
+    // LIFO stack of partial simple paths; each carries its running bridge sum.
+    const stack: Array<{ path: number[]; bridgeSum: number; onPath: Set<number> }> = [
+      { path: [fromId], bridgeSum: 0, onPath: new Set([fromId]) },
+    ];
+
+    while (stack.length) {
+      if (expansions >= budget) break; // hard bound -> guaranteed termination
+      const frame = stack.pop()!;
+      const last = frame.path[frame.path.length - 1];
+
+      if (last === toId) {
+        const better =
+          best === null ||
+          frame.bridgeSum > best.totalBridge ||
+          (frame.bridgeSum === best.totalBridge && frame.path.length < best.nodes.length);
+        if (better) best = { nodes: frame.path, totalBridge: frame.bridgeSum };
+        continue; // do not expand past the target
+      }
+      if (frame.path.length - 1 >= maxDepth) continue; // depth cap reached
+
+      expansions += 1;
+      for (const nb of await getNeighbors(last)) {
+        if (frame.onPath.has(nb.target)) continue; // keep paths simple (cycle-safe)
+        const onPath = new Set(frame.onPath);
+        onPath.add(nb.target);
+        stack.push({
+          path: [...frame.path, nb.target],
+          bridgeSum: frame.bridgeSum + (nb.bridge ?? 0),
+          onPath,
+        });
+      }
+    }
+
+    if (!best) return null;
+    return { nodes: best.nodes, degrees: best.nodes.length - 1, mode: 'interesting', totalBridge: best.totalBridge };
   }
 }
