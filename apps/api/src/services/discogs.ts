@@ -8,6 +8,7 @@
 
 import { rateLimit } from './rate-limiter.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
+import { normalizeRole, type BaseRole } from './constellation/RoleTaxonomy.js';
 
 const API_TIMEOUT = 15_000;
 
@@ -138,6 +139,31 @@ interface DiscogsStyleSearchResponse {
   results: DiscogsSearchResult[];
 }
 
+/** Raw Discogs credit entry as it appears in `extraartists` arrays. */
+interface RawDiscogsCredit {
+  id: number;
+  name: string;
+  role: string;
+}
+
+interface DiscogsReleaseDetail {
+  id: number;
+  master_id?: number;
+  extraartists?: RawDiscogsCredit[];
+  tracklist?: Array<{ extraartists?: RawDiscogsCredit[] }>;
+}
+
+/**
+ * A normalized personnel credit for a single release, merged across the
+ * release-level and per-track `extraartists`, carrying the release master_id.
+ */
+export interface DiscogsCredit {
+  artistId: number;
+  name: string;
+  roles: BaseRole[];
+  masterId: number | null;
+}
+
 export class DiscogsService {
   private token: string;
   private baseUrl = 'https://api.discogs.com';
@@ -228,5 +254,53 @@ export class DiscogsService {
    */
   async getArtist(artistId: number): Promise<DiscogsArtist> {
     return this.request<DiscogsArtist>(`/artists/${artistId}`);
+  }
+
+  /**
+   * Get the full personnel credits for a release.
+   *
+   * Combines the release-level `extraartists` with every track's
+   * `extraartists`, normalizes each raw role via {@link normalizeRole},
+   * drops free-text credits (Discogs uses `id: 0` for non-traversable
+   * name credits), and merges duplicate artists into a single entry with
+   * the union of their roles. The release `master_id` (when present) is
+   * carried onto every credit.
+   *
+   * @param releaseId - Discogs release ID
+   * @returns One credit per distinct artist, with unioned normalized roles
+   */
+  async getReleaseCredits(releaseId: number): Promise<DiscogsCredit[]> {
+    const release = await this.request<DiscogsReleaseDetail>(`/releases/${releaseId}`);
+
+    const masterId = release.master_id ?? null;
+
+    // Gather raw credits from the release level and every track.
+    const rawCredits: RawDiscogsCredit[] = [...(release.extraartists ?? [])];
+    for (const track of release.tracklist ?? []) {
+      rawCredits.push(...(track.extraartists ?? []));
+    }
+
+    // Merge by artistId, unioning normalized roles.
+    const byArtist = new Map<number, { name: string; roles: Set<BaseRole> }>();
+    for (const raw of rawCredits) {
+      // Drop free-text (non-traversable) credits.
+      if (raw.id === 0) continue;
+
+      let entry = byArtist.get(raw.id);
+      if (!entry) {
+        entry = { name: raw.name, roles: new Set<BaseRole>() };
+        byArtist.set(raw.id, entry);
+      }
+      for (const role of normalizeRole(raw.role)) {
+        entry.roles.add(role);
+      }
+    }
+
+    return [...byArtist.entries()].map(([artistId, { name, roles }]) => ({
+      artistId,
+      name,
+      roles: [...roles],
+      masterId,
+    }));
   }
 }
