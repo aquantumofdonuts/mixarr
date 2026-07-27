@@ -15,7 +15,6 @@
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
     "test:e2e": "vitest run tests/e2e",
-    "test:constellation-e2e": "vitest run --config vitest.constellation-e2e.config.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push --accept-data-loss",
     "db:migrate": "prisma migrate dev"

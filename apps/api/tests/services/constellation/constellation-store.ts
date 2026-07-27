@@ -117,8 +117,8 @@ export function makeInMemoryConstellationPrisma() {
     },
 
     async updateMany({ where, data }: any): Promise<{ count: number }> {
-      // Two shapes are used: a direct {sourcePersonId,targetPersonId} and the
-      // symmetric {OR:[{s,t},{t,s}]} used by bridgeFill.
+      // The only caller (GraphService.bridgeFill) passes the symmetric
+      // {OR:[{s,t},{t,s}]} shape, so that is the only shape supported here.
       const matchers: Array<(e: EdgeRow) => boolean> = [];
       if (Array.isArray(where?.OR)) {
         for (const clause of where.OR) {
@@ -126,10 +126,6 @@ export function makeInMemoryConstellationPrisma() {
             (e) => e.sourcePersonId === clause.sourcePersonId && e.targetPersonId === clause.targetPersonId,
           );
         }
-      } else if (where) {
-        matchers.push(
-          (e) => e.sourcePersonId === where.sourcePersonId && e.targetPersonId === where.targetPersonId,
-        );
       }
       let count = 0;
       for (const [key, e] of edges) {

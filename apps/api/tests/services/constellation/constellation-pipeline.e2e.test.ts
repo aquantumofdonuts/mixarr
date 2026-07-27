@@ -38,25 +38,25 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // db.js is mocked to a bare object; beforeEach assigns a fresh in-memory store's
 // delegates onto it (see file header). Both default and named exports point at it.
-vi.mock('../../src/lib/db.js', () => {
+vi.mock('../../../src/lib/db.js', () => {
   const shared = {};
   return { default: shared, prisma: shared };
 });
 
 // Silence service loggers (bridge/path warnings) but keep them observable.
-vi.mock('../../src/lib/logger.js', () => ({
+vi.mock('../../../src/lib/logger.js', () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-import prisma from '../../src/lib/db.js';
+import prisma from '../../../src/lib/db.js';
 import { makeInMemoryConstellationPrisma, type InMemoryConstellationPrisma } from './constellation-store.js';
-import { DumpIndexService } from '../../src/services/constellation/DumpIndexService.js';
-import { ExpansionService, type CreditSource } from '../../src/services/constellation/ExpansionService.js';
-import { OrbitCrawler, type OrbitDeps } from '../../src/services/constellation/OrbitCrawler.js';
-import { GraphService } from '../../src/services/constellation/GraphService.js';
-import { IdentityService } from '../../src/services/constellation/IdentityService.js';
-import { normalizeRole, type BaseRole } from '../../src/services/constellation/RoleTaxonomy.js';
-import type { MusicBrainzService } from '../../src/services/musicbrainz.js';
+import { DumpIndexService } from '../../../src/services/constellation/DumpIndexService.js';
+import { ExpansionService, type CreditSource } from '../../../src/services/constellation/ExpansionService.js';
+import { OrbitCrawler, type OrbitDeps } from '../../../src/services/constellation/OrbitCrawler.js';
+import { GraphService } from '../../../src/services/constellation/GraphService.js';
+import { IdentityService } from '../../../src/services/constellation/IdentityService.js';
+import { normalizeRole, type BaseRole } from '../../../src/services/constellation/RoleTaxonomy.js';
+import type { MusicBrainzService } from '../../../src/services/musicbrainz.js';
 
 // ---------------------------------------------------------------------------
 // Synthetic collaboration graph
@@ -283,7 +283,9 @@ describe.each([['ON'], ['OFF']] as const)('constellation e2e pipeline — index 
     const brA = await edge(BR, A);
     expect(aBr!.bridgeConfident).toBe(true);
     expect(typeof aBr!.bridge).toBe('number');
-    expect(aBr!.bridge!).toBeGreaterThan(0);
+    // bridgeScore = 1 - |N(A) ∩ N(BR)| / |N(A) ∪ N(BR)|
+    //   N(A)={B,C,BR}, N(BR)={A,B,D,E}, intersection={B}=1, union=3+4-1=6 => 1-1/6.
+    expect(aBr!.bridge!).toBeCloseTo(1 - 1 / 6, 10);
     expect(brA!.bridgeConfident).toBe(true); // both directed rows updated
     const dG = await edge(D, G);
     expect(dG!.bridgeConfident).toBe(false); // confidence gate holds: G not full
@@ -334,7 +336,7 @@ describe.each([['ON'], ['OFF']] as const)('constellation e2e pipeline — index 
     if (mode === 'OFF') {
       expect(sg.nodes.every((n) => n.genre === null)).toBe(true); // colour degraded
       expect(aBr!.bridgeConfident).toBe(true); // bridge still works
-      expect(aBr!.bridge!).toBeGreaterThan(0);
+      expect(aBr!.bridge!).toBeCloseTo(1 - 1 / 6, 10); // same score as ON — bridge ignores genres
       expect(shortest!.degrees).toBe(2); // path still works
       expect(ownedResult.owned).toBe(1); // owned still works
       expect(ab!.sharedMasterCount).toBe(1); // dedup still works
