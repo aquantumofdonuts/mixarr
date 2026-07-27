@@ -217,9 +217,25 @@ export class GraphService {
     for (const o of owned as Array<{ personId: number }>) ownedSet.add(o.personId);
 
     // Gather popularity for all nodes in parallel (the seam may hit Last.fm).
+    // Graceful degradation (Design §9): the popularity seam is an OPTIONAL
+    // enrichment. Absent -> size = credit prominence. A THROWING seam (Last.fm
+    // outage) must ALSO degrade rather than crash the whole subgraph, so each
+    // call is guarded: a rejected popularity lookup falls back to 0 for that
+    // node (max(prominence, 0) = prominence), never propagating out of subgraph.
     const { getPopularity } = this.deps;
     const popularities = getPopularity
-      ? await Promise.all(allNodeIds.map((id) => getPopularity(id)))
+      ? await Promise.all(
+          allNodeIds.map(async (id) => {
+            try {
+              return await getPopularity(id);
+            } catch (err) {
+              logger.debug(
+                `popularity seam failed for ${id}, falling back to credit prominence: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              return 0;
+            }
+          }),
+        )
       : [];
 
     const nodes: GraphNode[] = allNodeIds.map((id, i) => {

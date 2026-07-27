@@ -96,7 +96,21 @@ export class ExpansionService {
     if (isBlacklisted(personId, undefined)) return;
 
     const nowYear = this.nowYear;
-    const releases = await this.source.getArtistReleases(personId);
+
+    // Per-expand resilience (Design §9): if the credit source is down for THIS
+    // person (e.g. Discogs API throwing on the artist-releases listing), skip the
+    // whole expansion cleanly — no seed row, no edges — rather than letting the
+    // failure abort the surrounding orbit crawl. The already-materialized graph
+    // is still served; this person simply stays unexpanded (a partial graph).
+    let releases: Awaited<ReturnType<CreditSource['getArtistReleases']>>;
+    try {
+      releases = await this.source.getArtistReleases(personId);
+    } catch (err) {
+      logger.warn(
+        `Skipping expansion of person ${personId}: getArtistReleases failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
 
     const collaborators = new Map<number, Collab>();
     // Genre affinity counts each genre at most once per DISTINCT master, so
