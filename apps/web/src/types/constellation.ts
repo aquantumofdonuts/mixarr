@@ -97,15 +97,6 @@ export interface SubscribeResponse {
 }
 
 /**
- * `409` body when a person can't be auto-added: they aren't linked/corroborated
- * in MusicBrainz. The node stays browsable — only the Lidarr add is unavailable.
- */
-export interface NeedsManualResponse {
-  needsManual: true;
-  message: string;
-}
-
-/**
  * A single background-expand SSE payload. Carries the `generation` it was
  * published with plus the newly-expanded node/edge data. The exact node/edge
  * fields depend on the expand worker (Task 16); the generation field is the

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import X from 'lucide-react/dist/esm/icons/x';
 import { api } from '@/lib/api';
 import type {
@@ -54,7 +54,21 @@ export function PersonPanel({ personId, displayName, onClose }: PersonPanelProps
   const [artistState, setArtistState] = useState<AcquireState>(IDLE);
   const [releaseState, setReleaseState] = useState<Record<number, AcquireState>>({});
 
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
   const name = displayName ?? (personId !== null ? `Person ${personId}` : '');
+
+  // A11y: move focus into the panel (the close button) when it opens on a new
+  // person, and close on Escape.
+  useEffect(() => {
+    if (personId === null) return;
+    closeButtonRef.current?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [personId, onClose]);
 
   // Fetch the discography whenever the panel opens on a new person.
   useEffect(() => {
@@ -140,6 +154,7 @@ export function PersonPanel({ personId, displayName, onClose }: PersonPanelProps
           <p className="text-xs text-muted-foreground">Discography</p>
         </div>
         <button
+          ref={closeButtonRef}
           type="button"
           onClick={onClose}
           aria-label="Close panel"

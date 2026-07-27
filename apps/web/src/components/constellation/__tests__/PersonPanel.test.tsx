@@ -121,6 +121,46 @@ describe('PersonPanel', () => {
     expect(screen.queryByText('HTTP 409')).not.toBeInTheDocument();
   });
 
+  it('shows a GENERIC error (not the needsManual notice) on a non-409 error', async () => {
+    releasesOk();
+    mockPost.mockResolvedValue({
+      data: null,
+      error: 'Failed to add to Lidarr: Lidarr timed out',
+      status: 502,
+    });
+    render(<PersonPanel personId={5} displayName="Nine Inch Nails" onClose={vi.fn()} />);
+    await screen.findByText('The Downward Spiral');
+
+    await userEvent.click(screen.getByRole('button', { name: /monitor artist/i }));
+
+    expect(await screen.findByText(/lidarr timed out/i)).toBeInTheDocument();
+    // A real error must NOT masquerade as the honest MusicBrainz dead-end.
+    expect(screen.queryByTestId('person-panel-needs-manual')).not.toBeInTheDocument();
+  });
+
+  it('disables the subscribe buttons while a request is pending', async () => {
+    releasesOk();
+    // A never-resolving post keeps the action in the pending state.
+    mockPost.mockReturnValue(new Promise(() => {}));
+    render(<PersonPanel personId={5} displayName="Nine Inch Nails" onClose={vi.fn()} />);
+    await screen.findByText('The Downward Spiral');
+
+    const monitorButton = screen.getByRole('button', { name: /monitor artist/i });
+    await userEvent.click(monitorButton);
+
+    // Pending: the button is disabled and shows the busy label.
+    expect(screen.getByRole('button', { name: /adding…/i })).toBeDisabled();
+  });
+
+  it('closes on Escape', async () => {
+    releasesOk();
+    const onClose = vi.fn();
+    render(<PersonPanel personId={5} onClose={onClose} />);
+    await screen.findByText('The Downward Spiral');
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('calls onClose when the close button is clicked', async () => {
     releasesOk();
     const onClose = vi.fn();
