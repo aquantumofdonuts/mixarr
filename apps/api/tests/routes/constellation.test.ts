@@ -27,6 +27,7 @@ import {
   buildConstellationHandlers,
   createConstellationRouter,
   StreamRegistry,
+  LidarrNotConfiguredError,
   type ConstellationDeps,
 } from '../../src/routes/constellation.js';
 
@@ -87,10 +88,12 @@ function makeDeps(overrides: Partial<ConstellationDeps> = {}): ConstellationDeps
     } as any,
     identity: {
       mbidToDiscogs: vi.fn(),
+      discogsToMbid: vi.fn(),
     } as any,
     expandQueue: { add: vi.fn().mockResolvedValue(undefined) },
     getArtistReleases: vi.fn(),
     streams: new StreamRegistry(),
+    subscribeToLidarr: vi.fn().mockResolvedValue({ added: true, target: 'artist' }),
     ...overrides,
   };
 }
@@ -256,6 +259,124 @@ describe('GET /person/:personId/releases', () => {
     expect(deps.getArtistReleases).toHaveBeenCalledWith(5);
     expect(res.statusCode).toBe(200);
     expect(res.body.releases).toEqual(releases);
+  });
+});
+
+// ---- POST /person/:id/subscribe ---------------------------------------------
+
+describe('POST /person/:personId/subscribe', () => {
+  it('409s with needsManual when the person is not linked to MusicBrainz', async () => {
+    const deps = makeDeps();
+    (deps.identity!.discogsToMbid as any).mockResolvedValue({
+      mbid: null,
+      confidence: null,
+      needsManual: true,
+    });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ params: { personId: '5' }, body: {} });
+    const res = mockRes();
+    await h.subscribe(req, res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body.needsManual).toBe(true);
+    expect(res.body.message).toMatch(/musicbrainz/i);
+    // Honest dead-end: no Lidarr add is attempted.
+    expect(deps.subscribeToLidarr).not.toHaveBeenCalled();
+  });
+
+  it('resolves the MBID and adds the artist to Lidarr (200)', async () => {
+    const deps = makeDeps();
+    (deps.identity!.discogsToMbid as any).mockResolvedValue({
+      mbid: 'mbid-abc',
+      confidence: 'linked',
+      needsManual: false,
+    });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ params: { personId: '5' }, body: { name: 'Nine Inch Nails' } });
+    const res = mockRes();
+    await h.subscribe(req, res);
+
+    expect(deps.identity!.discogsToMbid).toHaveBeenCalledWith(5, 'Nine Inch Nails');
+    expect(deps.subscribeToLidarr).toHaveBeenCalledWith({
+      userId: 7,
+      mbid: 'mbid-abc',
+      releaseTitle: undefined,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ added: true, mbid: 'mbid-abc' });
+  });
+
+  it('threads a releaseTitle through for the album grain', async () => {
+    const deps = makeDeps();
+    (deps.identity!.discogsToMbid as any).mockResolvedValue({
+      mbid: 'mbid-abc',
+      confidence: 'linked',
+      needsManual: false,
+    });
+    (deps.subscribeToLidarr as any).mockResolvedValue({ added: true, target: 'album' });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ params: { personId: '5' }, body: { releaseTitle: 'The Downward Spiral' } });
+    const res = mockRes();
+    await h.subscribe(req, res);
+
+    expect(deps.subscribeToLidarr).toHaveBeenCalledWith({
+      userId: 7,
+      mbid: 'mbid-abc',
+      releaseTitle: 'The Downward Spiral',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.target).toBe('album');
+  });
+
+  it('returns a clean 502 (not a crash) when the Lidarr add fails', async () => {
+    const deps = makeDeps();
+    (deps.identity!.discogsToMbid as any).mockResolvedValue({
+      mbid: 'mbid-abc',
+      confidence: 'linked',
+      needsManual: false,
+    });
+    (deps.subscribeToLidarr as any).mockRejectedValue(new Error('Lidarr timed out'));
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ params: { personId: '5' }, body: {} });
+    const res = mockRes();
+    await h.subscribe(req, res);
+
+    expect(res.statusCode).toBe(502);
+    expect(res.body.error).toMatch(/lidarr/i);
+  });
+
+  it('400s (not 502) when Lidarr is not configured', async () => {
+    const deps = makeDeps();
+    (deps.identity!.discogsToMbid as any).mockResolvedValue({
+      mbid: 'mbid-abc',
+      confidence: 'linked',
+      needsManual: false,
+    });
+    (deps.subscribeToLidarr as any).mockRejectedValue(
+      new LidarrNotConfiguredError('No active Lidarr connection'),
+    );
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ params: { personId: '5' }, body: {} });
+    const res = mockRes();
+    await h.subscribe(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/lidarr/i);
+  });
+
+  it('400s on a non-numeric personId', async () => {
+    const deps = makeDeps();
+    const h = buildConstellationHandlers(deps);
+    const req = mockReq({ params: { personId: 'abc' }, body: {} });
+    const res = mockRes();
+    await h.subscribe(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(deps.identity!.discogsToMbid).not.toHaveBeenCalled();
   });
 });
 

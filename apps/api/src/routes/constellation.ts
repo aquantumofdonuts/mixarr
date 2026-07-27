@@ -55,6 +55,7 @@ import {
 } from '../jobs/constellation/queue.js';
 import { rateLimit } from '../services/rate-limiter.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
+import { getLidarrServiceWithConfig } from '../lib/connection-resolver.js';
 
 const log = createLogger('Constellation');
 
@@ -227,6 +228,104 @@ export async function fetchDiscogsArtistReleases(artistId: number): Promise<Rele
 }
 
 // ---------------------------------------------------------------------------
+// Subscribe (graph → Lidarr acquisition) — reuses the existing Lidarr add path.
+// ---------------------------------------------------------------------------
+
+/**
+ * Raised when the user has no usable Lidarr connection (missing connection or
+ * missing quality/metadata profile + root folder). Mapped to 400 by the handler
+ * — it's a configuration problem, not a Lidarr outage.
+ */
+export class LidarrNotConfiguredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LidarrNotConfiguredError';
+  }
+}
+
+export interface SubscribeToLidarrInput {
+  userId: number;
+  mbid: string;
+  /** When set, monitor only this specific album rather than the whole artist. */
+  releaseTitle?: string;
+}
+
+export interface SubscribeOutcome {
+  added: boolean;
+  /** Whether we monitored the whole artist or a single album (acquisition grain). */
+  target: 'artist' | 'album';
+}
+
+export type SubscribeToLidarr = (input: SubscribeToLidarrInput) => Promise<SubscribeOutcome>;
+
+/**
+ * Default subscribe implementation — the SAME Lidarr-add mechanism the search /
+ * subscription-approve routes use: resolve the user's Lidarr connection via
+ * {@link getLidarrServiceWithConfig}, fall back to the first available
+ * profile/folder, then add by MBID with SkyHook cache warming.
+ *
+ * ## Acquisition grain (Design §8)
+ * Lidarr monitors ARTISTS, but a session-player node has an empty artist
+ * discography, so blind "monitor artist" is useless. When the panel passes a
+ * `releaseTitle`, we instead resolve that album's MBID via Lidarr's own album
+ * lookup and monitor ONLY that album (`addAlbumWithCacheWarm`, which adds the
+ * artist with monitor:none and monitors the single release). Without a
+ * releaseTitle we monitor the whole artist (`addArtistWithCacheWarm`).
+ */
+export async function subscribeToLidarrDefault(
+  input: SubscribeToLidarrInput,
+): Promise<SubscribeOutcome> {
+  const { userId, mbid, releaseTitle } = input;
+
+  const lidarrResult = await getLidarrServiceWithConfig(userId);
+  if (!lidarrResult) {
+    throw new LidarrNotConfiguredError('No active Lidarr connection');
+  }
+  const { service: lidarr, config } = lidarrResult;
+
+  // Profiles/folders: prefer the connection config, else the first available.
+  let qpId = config.qualityProfileId;
+  let mpId = config.metadataProfileId;
+  let rfPath = config.rootFolderPath;
+  if (!qpId) qpId = (await lidarr.getQualityProfiles())[0]?.id;
+  if (!mpId) mpId = (await lidarr.getMetadataProfiles())[0]?.id;
+  if (!rfPath) rfPath = (await lidarr.getRootFolders())[0]?.path;
+  if (!qpId || !mpId || !rfPath) {
+    throw new LidarrNotConfiguredError('Missing Lidarr configuration (profiles/folders)');
+  }
+
+  if (releaseTitle) {
+    // Album grain: find the release in Lidarr and monitor only it.
+    const wanted = releaseTitle.toLowerCase().trim();
+    const candidates = await lidarr.searchAlbum(releaseTitle);
+    const match =
+      candidates.find(
+        (c) => c.artist?.foreignArtistId === mbid && (c.title ?? '').toLowerCase().trim() === wanted,
+      ) ??
+      candidates.find((c) => c.artist?.foreignArtistId === mbid) ??
+      candidates.find((c) => (c.title ?? '').toLowerCase().trim() === wanted);
+    if (!match) {
+      throw new Error(`Could not find "${releaseTitle}" for this artist in Lidarr`);
+    }
+    await lidarr.addAlbumWithCacheWarm(mbid, match.foreignAlbumId, qpId, mpId, rfPath);
+    return { added: true, target: 'album' };
+  }
+
+  await lidarr.addArtistWithCacheWarm(
+    mbid,
+    qpId,
+    mpId,
+    rfPath,
+    true, // monitored
+    config.searchOnAdd !== false, // searchForMissingAlbums (config-driven)
+    false, // waitForRefresh (deprecated)
+    config.monitorOption || 'all',
+    config.monitorNewItems || 'all',
+  );
+  return { added: true, target: 'artist' };
+}
+
+// ---------------------------------------------------------------------------
 // Handlers (dependency-injected so they are unit-testable without Redis/DB).
 // ---------------------------------------------------------------------------
 
@@ -241,6 +340,8 @@ export interface ConstellationDeps {
   expandQueue?: ExpandQueueLike;
   getArtistReleases?: GetArtistReleases;
   streams?: StreamRegistry;
+  /** Injectable Lidarr-add seam (defaults to {@link subscribeToLidarrDefault}). */
+  subscribeToLidarr?: SubscribeToLidarr;
 }
 
 export interface ConstellationHandlers {
@@ -248,6 +349,7 @@ export interface ConstellationHandlers {
   expand(req: Request, res: Response): Promise<void>;
   path(req: Request, res: Response): Promise<void>;
   releases(req: Request, res: Response): Promise<void>;
+  subscribe(req: Request, res: Response): Promise<void>;
   stream(req: Request, res: Response): Promise<void>;
   owned(req: Request, res: Response): Promise<void>;
 }
@@ -258,6 +360,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
   const expandQueue = deps.expandQueue ?? constellationExpandQueue;
   const getArtistReleases = deps.getArtistReleases ?? fetchDiscogsArtistReleases;
   const streams = deps.streams ?? defaultStreams;
+  const subscribeToLidarr = deps.subscribeToLidarr ?? subscribeToLidarrDefault;
 
   return {
     /**
@@ -425,6 +528,65 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
     },
 
     /**
+     * POST /person/:personId/subscribe   body: { releaseTitle?, name? }
+     * Close the graph→Lidarr loop: resolve the Discogs person to a MusicBrainz
+     * MBID and add it to Lidarr (whole artist, or a single album when
+     * `releaseTitle` is supplied — the acquisition grain from Design §8).
+     *
+     * The honest dead-end: a person MusicBrainz doesn't link/corroborate cannot
+     * be auto-added, so we answer 409 `{ needsManual }` rather than guessing. The
+     * node stays fully browsable; only the Lidarr add is unavailable.
+     */
+    async subscribe(req: Request, res: Response): Promise<void> {
+      try {
+        const userId = req.user!.id;
+        const personId = parseIntParam(req.params.personId);
+        if (personId === null) {
+          res.status(400).json({ error: 'invalid person id' });
+          return;
+        }
+
+        const body = (req.body ?? {}) as { releaseTitle?: unknown; name?: unknown };
+        const releaseTitle =
+          typeof body.releaseTitle === 'string' && body.releaseTitle.trim()
+            ? body.releaseTitle.trim()
+            : undefined;
+        const name =
+          typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined;
+
+        // Discogs person -> MBID. No/manual mapping is the honest dead-end (409).
+        const resolution = await identity.discogsToMbid(personId, name);
+        if (resolution.needsManual || !resolution.mbid) {
+          res.status(409).json({
+            needsManual: true,
+            message:
+              "This artist isn't linked to MusicBrainz — can't add to Lidarr automatically.",
+          });
+          return;
+        }
+
+        // Lidarr add is guarded so an outage returns a clean error, not a crash.
+        try {
+          const outcome = await subscribeToLidarr({ userId, mbid: resolution.mbid, releaseTitle });
+          res.json({ added: outcome.added, mbid: resolution.mbid, target: outcome.target });
+        } catch (error) {
+          if (error instanceof LidarrNotConfiguredError) {
+            res.status(400).json({ error: error.message });
+            return;
+          }
+          const message = error instanceof Error ? error.message : 'Failed to add to Lidarr';
+          log.error('subscribe: lidarr add failed', { personId, error: message });
+          res.status(502).json({ error: `Failed to add to Lidarr: ${message}` });
+        }
+      } catch (error) {
+        log.error('subscribe failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        res.status(500).json({ error: error instanceof Error ? error.message : 'subscribe failed' });
+      }
+    },
+
+    /**
      * GET /stream/:token  (SSE)
      * Subscribe to background-expand events for a stream token. Each event is a
      * `data:` frame carrying the generation it was published with. Cleans up
@@ -509,6 +671,7 @@ export function createConstellationRouter(deps: ConstellationDeps = {}): Router 
   router.get('/expand/:personId', h.expand);
   router.get('/path', h.path);
   router.get('/person/:personId/releases', h.releases);
+  router.post('/person/:personId/subscribe', h.subscribe);
   router.get('/stream/:token', h.stream);
   router.get('/owned', h.owned);
 
