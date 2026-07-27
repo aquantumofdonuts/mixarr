@@ -145,6 +145,13 @@ export function edgeColor(
 export const OWNED_RING_COLOR = '#f5c542';
 
 /**
+ * Red highlight stroke for the current focus node — the design's "red center at
+ * the focus". Drawn as an outer ring so it reads on top of any genre fill or
+ * owned gold ring.
+ */
+export const FOCUS_NODE_COLOR = '#e0533a';
+
+/**
  * Ring spec for an owned node (a gold outline), or `null` when the node is not
  * owned and should render without a ring.
  */

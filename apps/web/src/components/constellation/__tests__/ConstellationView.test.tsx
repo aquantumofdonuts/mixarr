@@ -49,10 +49,44 @@ vi.mock('@/hooks/useConstellation', async (importOriginal) => {
 });
 
 import { useConstellation } from '@/hooks/useConstellation';
+import { useFrontierStream } from '@/hooks/useFrontierStream';
 import { ConstellationView } from '../ConstellationView';
-import type { GraphNode, GraphEdge } from '@/types/constellation';
+import { FOCUS_NODE_COLOR } from '../encoding';
+import type { GraphNode, GraphEdge, StreamPayload } from '@/types/constellation';
 
 const mockUseConstellation = useConstellation as unknown as Mock;
+
+/** Grab the `onFrame` callback the component handed to useFrontierStream. */
+function latestOnFrame(): (payload: StreamPayload) => void {
+  const calls = (useFrontierStream as unknown as Mock).mock.calls;
+  return calls[calls.length - 1][1] as (payload: StreamPayload) => void;
+}
+
+/** Minimal recording 2D context stub for exercising nodeCanvasObject. */
+function makeCtx() {
+  const strokeStyles: string[] = [];
+  const ctx = {
+    _stroke: '',
+    fillStyle: '',
+    lineWidth: 0,
+    font: '',
+    textAlign: '',
+    textBaseline: '',
+    beginPath: vi.fn(),
+    arc: vi.fn(),
+    fill: vi.fn(),
+    stroke: vi.fn(),
+    fillText: vi.fn(),
+    get strokeStyle() {
+      return this._stroke;
+    },
+    set strokeStyle(v: string) {
+      this._stroke = v;
+      strokeStyles.push(v);
+    },
+  };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, strokeStyles };
+}
 
 const node = (personId: number, over: Partial<GraphNode> = {}): GraphNode => ({
   personId,
@@ -139,17 +173,80 @@ describe('ConstellationView', () => {
 
   it('accumulates multiple hops in the breadcrumb trail', () => {
     const recenter = vi.fn().mockResolvedValue(undefined);
+    // focusId=1, so hop to 2 then 3 (neither is the current center).
     mockUseConstellation.mockReturnValue(mockResult({ recenter }));
     render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
 
     const onNodeClick = graphProps().onNodeClick as ClickHandler;
     act(() => onNodeClick({ id: 2, name: 'Person 2' }));
-    act(() => onNodeClick({ id: 1, name: 'Person 1' }));
+    act(() => onNodeClick({ id: 3, name: 'Person 3' }));
 
     const trail = screen.getByTestId('constellation-breadcrumbs');
     expect(trail).toHaveTextContent('Person 2');
-    expect(trail).toHaveTextContent('Person 1');
+    expect(trail).toHaveTextContent('Person 3');
     expect(recenter).toHaveBeenCalledTimes(2);
+  });
+
+  it('is a no-op when clicking the node that is already the focus', () => {
+    const recenter = vi.fn().mockResolvedValue(undefined);
+    // focusId=1 -> clicking node 1 must not re-seed or push a breadcrumb.
+    mockUseConstellation.mockReturnValue(mockResult({ recenter }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 1, name: 'Person 1' }));
+
+    expect(recenter).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('constellation-breadcrumbs')).not.toBeInTheDocument();
+  });
+
+  it('collapses consecutive clicks on the same node to one breadcrumb', () => {
+    const recenter = vi.fn().mockResolvedValue(undefined);
+    mockUseConstellation.mockReturnValue(mockResult({ recenter }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 2, name: 'Person 2' }));
+    act(() => onNodeClick({ id: 2, name: 'Person 2' }));
+
+    const crumbs = screen.getAllByRole('button', { name: 'Person 2' });
+    expect(crumbs).toHaveLength(1);
+  });
+
+  it('merges a streamed frame into graphData (frontier SSE seam)', () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    // Before the frame: only the two seed nodes.
+    let data = graphProps().graphData as { nodes: Array<{ id: number }> };
+    expect(data.nodes.map((n) => n.id)).toEqual([1, 2]);
+
+    // A background-expand frame arrives with a fresh node.
+    act(() => {
+      latestOnFrame()({ generation: 0, nodes: [node(3)], edges: [] } as unknown as StreamPayload);
+    });
+
+    data = graphProps().graphData as { nodes: Array<{ id: number }> };
+    expect(data.nodes.map((n) => n.id)).toContain(3);
+  });
+
+  it('draws the red focus highlight only for the focus node', () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const paint = graphProps().nodeCanvasObject as (
+      node: Record<string, unknown>,
+      ctx: CanvasRenderingContext2D,
+      scale: number,
+    ) => void;
+
+    const focus = makeCtx();
+    paint({ id: 1, name: 'Person 1', genre: 'rock', size: 10, owned: false, isFocus: true, x: 0, y: 0 }, focus.ctx, 1);
+    expect(focus.strokeStyles).toContain(FOCUS_NODE_COLOR);
+
+    const plain = makeCtx();
+    paint({ id: 2, name: 'Person 2', genre: 'rock', size: 10, owned: false, isFocus: false, x: 0, y: 0 }, plain.ctx, 1);
+    expect(plain.strokeStyles).not.toContain(FOCUS_NODE_COLOR);
   });
 
   it('renders the loading state', () => {

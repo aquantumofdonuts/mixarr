@@ -18,6 +18,7 @@ import {
   edgeWidth,
   edgeColor,
   ownedRingStyle,
+  FOCUS_NODE_COLOR,
 } from './encoding';
 
 /**
@@ -133,6 +134,9 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
     (node: NodeObject<CanvasNode>) => {
       const personId = Number(node.id);
       if (!Number.isFinite(personId)) return;
+      // Clicking the node we're already centred on is a no-op: no redundant
+      // re-seed, no breadcrumb.
+      if (personId === focusId) return;
       setBreadcrumbs((prev) => {
         // Collapse a no-op click on the person we're already centred on.
         if (prev.length > 0 && prev[prev.length - 1].personId === personId) return prev;
@@ -142,7 +146,7 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       // graphData, animating the field into its new layout.
       void recenter(personId);
     },
-    [recenter],
+    [recenter, focusId],
   );
 
   /** Custom node paint: genre fill, prominence radius, owned ring, label. */
@@ -161,6 +165,16 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       if (ring) {
         ctx.lineWidth = ring.width;
         ctx.strokeStyle = ring.stroke;
+        ctx.stroke();
+      }
+
+      // Focus emphasis: the design's "red center at the focus" — a bright red
+      // outer ring so the currently-centred node stands out of the dense field.
+      if (node.isFocus) {
+        ctx.beginPath();
+        ctx.arc(x, y, radius + 2, 0, 2 * Math.PI);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = FOCUS_NODE_COLOR;
         ctx.stroke();
       }
 
