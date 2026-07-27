@@ -18,6 +18,9 @@ const DUMP_XML = `<?xml version="1.0" encoding="UTF-8"?>
       </artist>
     </artists>
     <title>First Release</title>
+    <labels>
+      <label id="888" name="Some Label" catno="ABC-1"/>
+    </labels>
     <extraartists>
       <artist>
         <id>10</id>
@@ -51,6 +54,13 @@ const DUMP_XML = `<?xml version="1.0" encoding="UTF-8"?>
         </extraartists>
       </track>
     </tracklist>
+    <companies>
+      <company>
+        <id>777</id>
+        <name>Pressing Plant Co.</name>
+        <entity_type_name>Pressed By</entity_type_name>
+      </company>
+    </companies>
   </release>
   <release id="200" status="Accepted">
     <title>Second Release</title>
@@ -72,7 +82,12 @@ describe('importDumpStream', () => {
   let index: DumpIndexService;
 
   afterEach(() => {
-    index?.close();
+    try {
+      index?.close();
+    } catch {
+      // already closed / never opened
+    }
+    index = undefined as unknown as DumpIndexService;
   });
 
   it('streams the dump into the index with parsed meta and credits', async () => {
@@ -132,5 +147,81 @@ describe('importDumpStream', () => {
     // Progress reported at least once.
     expect(progress.length).toBeGreaterThan(0);
     expect(progress[progress.length - 1]).toBe(2);
+  });
+
+  it('does not treat <labels>/<companies> id+name as credits', async () => {
+    index = new DumpIndexService(':memory:');
+    await importDumpStream(Readable.from(DUMP_XML), index);
+
+    // Label id 888 and company id 777 (which have <id>/<name>) must never be
+    // recorded as artist credits.
+    expect(await index.getArtistReleases(888)).toEqual([]);
+    expect(await index.getArtistReleases(777)).toEqual([]);
+    const credits100 = await index.getReleaseCredits(100);
+    const ids = credits100.map((c) => c.artistId).sort((a, b) => a - b);
+    expect(ids).toEqual([10, 20]);
+  });
+
+  it('persists every release across multiple batches and reports progress per release', async () => {
+    index = new DumpIndexService(':memory:');
+    const progress: number[] = [];
+
+    // batchSize 1 forces a mid-stream flush after each release.
+    const result = await importDumpStream(Readable.from(DUMP_XML), index, {
+      batchSize: 1,
+      onProgress: (n) => progress.push(n),
+    });
+
+    expect(result.releases).toBe(2);
+    expect(result.credits).toBe(3);
+    // Both releases persisted.
+    expect(await index.getArtistReleases(10)).toHaveLength(1);
+    expect(await index.getArtistReleases(30)).toHaveLength(1);
+    // onProgress fired once per release, with the running total each time.
+    expect(progress).toEqual([1, 2]);
+  });
+
+  it('rejects when the input stream emits an error mid-stream', async () => {
+    index = new DumpIndexService(':memory:');
+
+    const bad = new Readable({
+      read() {
+        this.push('<releases><release id="1">');
+        this.destroy(new Error('stream boom'));
+      },
+    });
+
+    await expect(importDumpStream(bad, index)).rejects.toThrow('stream boom');
+  });
+
+  it('rejects on malformed XML', async () => {
+    index = new DumpIndexService(':memory:');
+
+    // Unclosed <release> tag / truncated document.
+    const malformed = '<releases><release id="1"><genres><genre>Rock</genre>';
+
+    await expect(importDumpStream(Readable.from(malformed), index)).rejects.toBeInstanceOf(Error);
+  });
+
+  it('rejects (does not throw uncaught) when a mid-stream transaction throws', async () => {
+    // Minimal stub implementing only the writer surface importDumpStream uses.
+    const stub = {
+      transaction() {
+        throw new Error('SQLITE_FULL: database or disk is full');
+      },
+      setReleaseMeta() {},
+      upsertArtist() {},
+      addCredit() {},
+      setIndexVersion() {},
+      getIndexVersion() {
+        return null;
+      },
+    } as unknown as DumpIndexService;
+
+    // batchSize 1 flushes mid-stream (inside the sax closetag handler), which is
+    // where the throw used to escape as an uncaught exception.
+    await expect(
+      importDumpStream(Readable.from(DUMP_XML), stub, { batchSize: 1 }),
+    ).rejects.toThrow('SQLITE_FULL');
   });
 });

@@ -139,88 +139,102 @@ export function importDumpStream(
     };
 
     saxStream.on('opentag', (node) => {
-      const name = node.name;
-      if (name === 'release') {
-        const attrs = (node as sax.Tag).attributes ?? {};
-        release = {
-          id: parseInt(String(attrs.id ?? ''), 10) || 0,
-          masterId: null,
-          year: null,
-          genres: [],
-          credits: [],
-        };
-      } else if (name === 'extraartists') {
-        inExtra = true;
-      } else if (name === 'artist' && inExtra) {
-        artist = { artistId: 0, name: '', role: '' };
+      if (settled) return;
+      try {
+        const name = node.name;
+        if (name === 'release') {
+          const attrs = (node as sax.Tag).attributes ?? {};
+          release = {
+            id: parseInt(String(attrs.id ?? ''), 10) || 0,
+            masterId: null,
+            year: null,
+            genres: [],
+            credits: [],
+          };
+        } else if (name === 'extraartists') {
+          inExtra = true;
+        } else if (name === 'artist' && inExtra) {
+          artist = { artistId: 0, name: '', role: '' };
+        }
+        stack.push(name);
+        text = '';
+      } catch (err) {
+        fail(err as Error);
       }
-      stack.push(name);
-      text = '';
     });
 
     saxStream.on('text', (t) => {
+      if (settled) return;
       text += t;
     });
 
     saxStream.on('closetag', (name) => {
-      stack.pop();
-      const parent = stack[stack.length - 1];
-      const val = text.trim();
-      text = '';
+      if (settled) return;
+      try {
+        stack.pop();
+        const parent = stack[stack.length - 1];
+        const val = text.trim();
+        text = '';
 
-      switch (name) {
-        case 'release': {
-          if (release && release.id > 0) {
-            batch.push(release);
-            if (batch.length >= batchSize) flushBatch();
-          }
-          release = null;
-          break;
-        }
-        case 'extraartists': {
-          inExtra = false;
-          break;
-        }
-        case 'artist': {
-          // Close an extraartist credit; skip free-text (id 0/missing) entries.
-          if (inExtra && artist && release && parent === 'extraartists') {
-            if (artist.artistId > 0) {
-              release.credits.push(artist);
+        switch (name) {
+          case 'release': {
+            if (release && release.id > 0) {
+              batch.push(release);
+              // Synchronous flush inside sax's write(): a throw here (e.g.
+              // SQLITE_FULL/IOERR/BUSY) would otherwise escape as an uncaught
+              // exception, so it is caught below and rejects the promise.
+              if (batch.length >= batchSize) flushBatch();
             }
+            release = null;
+            break;
           }
-          artist = null;
-          break;
+          case 'extraartists': {
+            inExtra = false;
+            break;
+          }
+          case 'artist': {
+            // Close an extraartist credit; skip free-text (id 0/missing) entries.
+            if (inExtra && artist && release && parent === 'extraartists') {
+              if (artist.artistId > 0) {
+                release.credits.push(artist);
+              }
+            }
+            artist = null;
+            break;
+          }
+          case 'id': {
+            if (artist && parent === 'artist') artist.artistId = parsePositiveInt(val) ?? 0;
+            break;
+          }
+          case 'name': {
+            if (artist && parent === 'artist') artist.name = val;
+            break;
+          }
+          case 'role': {
+            if (artist && parent === 'artist') artist.role = val;
+            break;
+          }
+          case 'master_id': {
+            if (release && parent === 'release') release.masterId = parsePositiveInt(val);
+            break;
+          }
+          case 'released': {
+            if (release && parent === 'release') release.year = parseYear(val);
+            break;
+          }
+          case 'genre': {
+            if (release && parent === 'genres' && val) release.genres.push(val);
+            break;
+          }
+          case 'style': {
+            if (release && parent === 'styles' && val) release.genres.push(val);
+            break;
+          }
+          default:
+            break;
         }
-        case 'id': {
-          if (artist && parent === 'artist') artist.artistId = parsePositiveInt(val) ?? 0;
-          break;
-        }
-        case 'name': {
-          if (artist && parent === 'artist') artist.name = val;
-          break;
-        }
-        case 'role': {
-          if (artist && parent === 'artist') artist.role = val;
-          break;
-        }
-        case 'master_id': {
-          if (release && parent === 'release') release.masterId = parsePositiveInt(val);
-          break;
-        }
-        case 'released': {
-          if (release && parent === 'release') release.year = parseYear(val);
-          break;
-        }
-        case 'genre': {
-          if (release && parent === 'genres' && val) release.genres.push(val);
-          break;
-        }
-        case 'style': {
-          if (release && parent === 'styles' && val) release.genres.push(val);
-          break;
-        }
-        default:
-          break;
+      } catch (err) {
+        fail(err as Error);
       }
     });
 
@@ -260,11 +274,16 @@ export async function runDumpImport(
   const fileStream = createReadStream(filePath);
   const gunzip = createGunzip();
   fileStream.on('error', (err) => gunzip.destroy(err));
-  const xmlStream = fileStream.pipe(gunzip);
   logger.info('Starting Discogs dump import', { filePath });
-  const result = await importDumpStream(xmlStream, index, opts);
-  logger.info('Discogs dump import complete', result);
-  return result;
+  try {
+    const result = await importDumpStream(fileStream.pipe(gunzip), index, opts);
+    logger.info('Discogs dump import complete', result);
+    return result;
+  } finally {
+    // Always release the file descriptor and gunzip resources, even on error.
+    fileStream.destroy();
+    gunzip.destroy();
+  }
 }
 
 /**
