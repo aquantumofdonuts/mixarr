@@ -525,3 +525,73 @@ enum NotificationType {
   pushover
   email
 }
+
+// ============================================================================
+// COLLABORATION CONSTELLATION
+// ============================================================================
+
+model ConstellationPerson {
+  personId    Int      @id @map("person_id") // = Discogs artist id
+  displayName String   @map("display_name") @db.VarChar(512)
+  type        String   @default("person") @db.VarChar(16) // person|group|blacklisted
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("constellation_person")
+}
+
+model ConstellationIdentity {
+  personId   Int    @map("person_id")
+  source     String @db.VarChar(16) // mb|lidarr|plex|jellyfin|lastfm
+  externalId String @map("external_id") @db.VarChar(255)
+  confidence String @default("linked") @db.VarChar(16) // linked|corroborated|manual
+
+  @@id([personId, source])
+  @@index([source, externalId])
+  @@map("constellation_identity")
+}
+
+model ConstellationEdge {
+  sourcePersonId    Int      @map("source_person_id")
+  targetPersonId    Int      @map("target_person_id")
+  weight            Float    @default(0)
+  bridge            Float? // null until both endpoints full
+  bridgeConfident   Boolean  @default(false) @map("bridge_confident")
+  roleBitmask       Int      @default(0) @map("role_bitmask")
+  sharedMasterCount Int      @default(0) @map("shared_master_count")
+  bothEndpointsFull Boolean  @default(false) @map("both_endpoints_full")
+  sampleMasterId    Int?     @map("sample_master_id")
+  indexVersion      Int      @default(0) @map("index_version")
+  fetchedAt         DateTime @default(now()) @map("fetched_at")
+
+  @@id([sourcePersonId, targetPersonId])
+  @@map("constellation_edge")
+}
+
+model ConstellationGenre {
+  personId Int    @map("person_id")
+  genre    String @db.VarChar(64)
+  weight   Float  @default(0)
+
+  @@id([personId, genre])
+  @@map("constellation_genre")
+}
+
+model ConstellationOrbit {
+  userId        Int       @map("user_id")
+  personId      Int       @map("person_id")
+  tier          String    @db.VarChar(16) // hist1d|hist7d|hist30d|libtop|lib|frontier
+  lastCrawledAt DateTime? @map("last_crawled_at")
+  status        String    @default("queued") @db.VarChar(16)
+
+  @@id([userId, personId])
+  @@map("constellation_orbit")
+}
+
+model ConstellationOwned {
+  userId   Int    @map("user_id")
+  personId Int    @map("person_id")
+  source   String @db.VarChar(16) // lidarr|plex|jellyfin
+
+  @@id([userId, personId, source])
+  @@map("constellation_owned")
+}
