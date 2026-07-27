@@ -140,7 +140,7 @@ describe('IdentityService.buildOwnedSet', () => {
     const svc = new IdentityService({ mb: new MusicBrainzService() });
     const result = await svc.buildOwnedSet(42, [fakeSource('lidarr', ['mbid-a', 'mbid-b'])]);
 
-    expect(result).toEqual({ owned: 1, skipped: 1 });
+    expect(result).toEqual({ owned: 1, skipped: 1, sourcesFailed: 0 });
     // Exactly ONE owned upsert, for the resolved node, carrying userId + source.
     expect(ownedUpsert()).toHaveBeenCalledTimes(1);
     const call = ownedUpsert().mock.calls[0][0] as any;
@@ -165,10 +165,69 @@ describe('IdentityService.buildOwnedSet', () => {
       fakeSource('jellyfin', ['mbid-jelly']),
     ]);
 
-    expect(result).toEqual({ owned: 2, skipped: 0 });
+    expect(result).toEqual({ owned: 2, skipped: 0, sourcesFailed: 0 });
     expect(ownedUpsert()).toHaveBeenCalledTimes(2);
     const rows = ownedUpsert().mock.calls.map(c => (c[0] as any).create);
     expect(rows).toContainEqual({ userId: 7, personId: 200, source: 'lidarr' });
     expect(rows).toContainEqual({ userId: 7, personId: 300, source: 'jellyfin' });
+  });
+
+  it('RESILIENCE: one source that throws is skipped; the other still builds', async () => {
+    const fetchMock = routeFetch([['/artist/mbid-ok', discogsRel(400)]]);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const deadSource: OwnedSourceProvider = {
+      source: 'plex',
+      getArtistMbids: async () => {
+        throw new Error('Plex unreachable');
+      },
+    };
+
+    const svc = new IdentityService({ mb: new MusicBrainzService() });
+    const result = await svc.buildOwnedSet(5, [
+      deadSource,
+      fakeSource('lidarr', ['mbid-ok']),
+    ]);
+
+    // Dead source skipped, not thrown; the healthy source still wrote its row.
+    expect(result).toEqual({ owned: 1, skipped: 0, sourcesFailed: 1 });
+    expect(ownedUpsert()).toHaveBeenCalledTimes(1);
+    expect((ownedUpsert().mock.calls[0][0] as any).create).toMatchObject({
+      userId: 5,
+      personId: 400,
+      source: 'lidarr',
+    });
+  });
+
+  it('SAME MBID via TWO sources: one owned row per source (distinct)', async () => {
+    // Both lidarr and plex hold the same MBID, which resolves to discogs 500.
+    const fetchMock = routeFetch([['/artist/mbid-shared', discogsRel(500)]]);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const svc = new IdentityService({ mb: new MusicBrainzService() });
+    const result = await svc.buildOwnedSet(9, [
+      fakeSource('lidarr', ['mbid-shared']),
+      fakeSource('plex', ['mbid-shared']),
+    ]);
+
+    expect(result).toEqual({ owned: 2, skipped: 0, sourcesFailed: 0 });
+    expect(ownedUpsert()).toHaveBeenCalledTimes(2);
+    const rows = ownedUpsert().mock.calls.map(c => (c[0] as any).create);
+    expect(rows).toContainEqual({ userId: 9, personId: 500, source: 'lidarr' });
+    expect(rows).toContainEqual({ userId: 9, personId: 500, source: 'plex' });
+  });
+
+  it('DEDUP within a source: a duplicate MBID does not double-count the owned row', async () => {
+    const fetchMock = routeFetch([['/artist/mbid-dup', discogsRel(600)]]);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const svc = new IdentityService({ mb: new MusicBrainzService() });
+    const result = await svc.buildOwnedSet(3, [
+      fakeSource('lidarr', ['mbid-dup', 'mbid-dup']),
+    ]);
+
+    // One distinct owned row despite the repeated MBID.
+    expect(result).toEqual({ owned: 1, skipped: 0, sourcesFailed: 0 });
+    expect(ownedUpsert()).toHaveBeenCalledTimes(1);
   });
 });

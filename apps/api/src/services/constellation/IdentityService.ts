@@ -266,22 +266,44 @@ export class IdentityService {
    * per-user {@link ConstellationOwned} row. MBIDs that don't resolve to a
    * Discogs node are SKIPPED (counted, never thrown). Task 13/15 then flags a
    * visible node's `owned` by a simple membership check against these rows.
+   *
+   * Per-source resilient: a source whose fetch throws (e.g. Lidarr down) is
+   * logged and skipped so the OTHER sources still build; `sourcesFailed` counts
+   * them and `{owned, skipped}` reflect only what succeeded. `owned` counts
+   * DISTINCT (source, personId) rows — a duplicate MBID (or two MBIDs resolving
+   * to the same person) within one source does not double-count.
    */
   async buildOwnedSet(
     userId: number,
     sources: OwnedSourceProvider[]
-  ): Promise<{ owned: number; skipped: number }> {
+  ): Promise<{ owned: number; skipped: number; sourcesFailed: number }> {
     let owned = 0;
     let skipped = 0;
+    let sourcesFailed = 0;
+    // Dedup written rows by (source, personId) so a repeated MBID within a
+    // source's list can't inflate the owned count or re-upsert.
+    const written = new Set<string>();
 
     for (const provider of sources) {
-      const mbids = await provider.getArtistMbids();
-      for (const mbid of mbids) {
+      let mbids: string[];
+      try {
+        mbids = await provider.getArtistMbids();
+      } catch (error) {
+        // One dead library must not abort the whole build.
+        logger.warn(`Owned-set source '${provider.source}' failed, skipping: ${error}`);
+        sourcesFailed++;
+        continue;
+      }
+
+      for (const mbid of new Set(mbids)) {
         const personId = await this.mbidToDiscogs(mbid);
         if (personId === null) {
           skipped++;
           continue;
         }
+        const key = `${provider.source}:${personId}`;
+        if (written.has(key)) continue;
+        written.add(key);
         await prisma.constellationOwned.upsert({
           where: {
             userId_personId_source: { userId, personId, source: provider.source },
@@ -293,7 +315,7 @@ export class IdentityService {
       }
     }
 
-    return { owned, skipped };
+    return { owned, skipped, sourcesFailed };
   }
 
   private async cache(

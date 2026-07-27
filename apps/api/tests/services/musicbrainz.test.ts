@@ -177,6 +177,30 @@ describe('MusicBrainzService', () => {
       expect(result).toBe(67890);
     });
 
+    it('rejects a discogs LABEL url-rel (only /artist/ matches)', async () => {
+      mockFetch({
+        relations: [
+          { type: 'discogs', url: { resource: 'https://www.discogs.com/label/999' } },
+        ],
+      });
+
+      const result = await service.lookupArtistDiscogsId('mbid-label');
+
+      expect(result).toBeNull();
+    });
+
+    it('rejects a look-alike host (fakediscogs.com) via the host anchor', async () => {
+      mockFetch({
+        relations: [
+          { type: 'discogs', url: { resource: 'https://fakediscogs.com/artist/5' } },
+        ],
+      });
+
+      const result = await service.lookupArtistDiscogsId('mbid-fake');
+
+      expect(result).toBeNull();
+    });
+
     it('returns null when the artist has no discogs url-rel', async () => {
       mockFetch({
         relations: [

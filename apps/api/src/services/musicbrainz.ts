@@ -196,12 +196,14 @@ export class MusicBrainzService {
   async lookupArtistDiscogsId(mbid: string): Promise<number | null> {
     try {
       const result = await this.request<MusicBrainzArtistUrlRels>(
-        `/artist/${mbid}?inc=url-rels&fmt=json`
+        `/artist/${encodeURIComponent(mbid)}?inc=url-rels&fmt=json`
       );
       for (const relation of result.relations ?? []) {
         const resource = relation.url?.resource;
         if (!resource) continue;
-        const match = resource.match(/discogs\.com\/artist\/(\d+)/);
+        // Anchor on the real discogs host + /artist/ path so a suffix look-alike
+        // host (fakediscogs.com) or a /label/ url can't false-positive.
+        const match = resource.match(/\/\/(?:www\.)?discogs\.com\/artist\/(\d+)/);
         if (match) return Number(match[1]);
       }
       return null;
