@@ -16,4 +16,9 @@ describe('BridgeScore', () => {
     expect(r.confident).toBe(false);
     expect(r.score).toBeNull();
   });
+  it('returns score 0 (not NaN) for two empty sets when both are full', () => {
+    const r = bridgeScore(new Set<number>(), new Set<number>(), true, true);
+    expect(r.confident).toBe(true);
+    expect(r.score).toBe(0);
+  });
 });
