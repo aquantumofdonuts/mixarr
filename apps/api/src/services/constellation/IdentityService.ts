@@ -86,6 +86,17 @@ export interface DiscogsToMbidResult {
   needsManual: boolean;
 }
 
+/**
+ * A user-library source that yields the artist MBIDs it holds. Injected seam so
+ * {@link IdentityService.buildOwnedSet} stays testable with fakes; production
+ * wiring (Task 15) supplies real adapters over the lidarr/plex/jellyfin
+ * services — this service must NOT couple to them directly.
+ */
+export interface OwnedSourceProvider {
+  source: 'lidarr' | 'plex' | 'jellyfin';
+  getArtistMbids(): Promise<string[]>;
+}
+
 export interface IdentityServiceDeps {
   mb?: MusicBrainzService;
   /**
@@ -215,6 +226,74 @@ export class IdentityService {
 
     // 4. Nothing matched at all — manual (the user can search).
     return { mbid: null, confidence: null, needsManual: true };
+  }
+
+  /**
+   * Reverse of {@link discogsToMbid}: resolve a MusicBrainz MBID (from the user's
+   * library) to a Discogs person id (graph key). Cache-first, then the MB discogs
+   * url-rel; the resolved link is cached forever with confidence='linked'.
+   *
+   * Cache lookup is by (source='mb', externalId=mbid). The stored PK is
+   * (personId, source), so the reverse key needs a `findFirst` on those columns,
+   * backed by @@index([source, externalId]). Returns null (never throws) when the
+   * MBID has no discogs link or MB is unavailable.
+   */
+  async mbidToDiscogs(mbid: string): Promise<number | null> {
+    // 1. Cache first — a stored reverse identity wins with no network.
+    const cached = await prisma.constellationIdentity.findFirst({
+      where: { source: IDENTITY_SOURCE, externalId: mbid },
+    });
+    if (cached) return cached.personId;
+
+    // 2. MB discogs url-rel. lookupArtistDiscogsId already degrades to null on
+    //    error; the extra guard keeps buildOwnedSet skip-not-throw regardless.
+    let discogsId: number | null;
+    try {
+      discogsId = await this.mb.lookupArtistDiscogsId(mbid);
+    } catch (error) {
+      logger.debug(`Reverse identity lookup failed for mbid ${mbid}: ${error}`);
+      return null;
+    }
+    if (discogsId === null) return null;
+
+    await this.cache(discogsId, mbid, 'linked');
+    return discogsId;
+  }
+
+  /**
+   * Build the user's owned set: for each library source, resolve every artist
+   * MBID to its Discogs person id (via {@link mbidToDiscogs}) and record a
+   * per-user {@link ConstellationOwned} row. MBIDs that don't resolve to a
+   * Discogs node are SKIPPED (counted, never thrown). Task 13/15 then flags a
+   * visible node's `owned` by a simple membership check against these rows.
+   */
+  async buildOwnedSet(
+    userId: number,
+    sources: OwnedSourceProvider[]
+  ): Promise<{ owned: number; skipped: number }> {
+    let owned = 0;
+    let skipped = 0;
+
+    for (const provider of sources) {
+      const mbids = await provider.getArtistMbids();
+      for (const mbid of mbids) {
+        const personId = await this.mbidToDiscogs(mbid);
+        if (personId === null) {
+          skipped++;
+          continue;
+        }
+        await prisma.constellationOwned.upsert({
+          where: {
+            userId_personId_source: { userId, personId, source: provider.source },
+          },
+          create: { userId, personId, source: provider.source },
+          update: {},
+        });
+        owned++;
+      }
+    }
+
+    return { owned, skipped };
   }
 
   private async cache(

@@ -91,6 +91,13 @@ interface MusicBrainzUrlLookup {
   }>;
 }
 
+interface MusicBrainzArtistUrlRels {
+  relations?: Array<{
+    type?: string;
+    url?: { resource?: string };
+  }>;
+}
+
 interface MusicBrainzLabelSearchResult {
   labels: MusicBrainzLabel[];
   count: number;
@@ -171,6 +178,33 @@ export class MusicBrainzService {
       // Exactly one distinct artist is an unambiguous join key; anything else
       // (none, or several) is not linkable.
       return distinctIds.size === 1 ? [...distinctIds][0] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Reverse of {@link lookupArtistMbidByUrl}: given a MusicBrainz artist MBID,
+   * return the numeric Discogs artist id from the artist's discogs url
+   * relationship (`GET /artist/{mbid}?inc=url-rels`). The discogs relation's
+   * `url.resource` is either `https://www.discogs.com/artist/12345` or the
+   * slugged `.../artist/12345-Artist-Name`; both forms yield 12345.
+   *
+   * Returns null if the artist has no discogs url-rel, and degrades to null
+   * (rather than throwing) on any MB API error.
+   */
+  async lookupArtistDiscogsId(mbid: string): Promise<number | null> {
+    try {
+      const result = await this.request<MusicBrainzArtistUrlRels>(
+        `/artist/${mbid}?inc=url-rels&fmt=json`
+      );
+      for (const relation of result.relations ?? []) {
+        const resource = relation.url?.resource;
+        if (!resource) continue;
+        const match = resource.match(/discogs\.com\/artist\/(\d+)/);
+        if (match) return Number(match[1]);
+      }
+      return null;
     } catch {
       return null;
     }

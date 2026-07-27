@@ -5,7 +5,7 @@
  * that determines which MusicBrainz artist corresponds to a search query.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MusicBrainzService } from '../../src/services/musicbrainz.js';
 
 // Mock the rate limiter
@@ -131,6 +131,71 @@ describe('MusicBrainzService', () => {
       vi.spyOn(service, 'searchArtist' as any).mockResolvedValue([]);
 
       const result = await service.findBestMatch('completely unknown artist xyz123');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('lookupArtistDiscogsId', () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    function mockFetch(body: unknown, ok = true) {
+      const fn = vi.fn(async () => ({ ok, json: async () => body }) as unknown as Response);
+      global.fetch = fn as unknown as typeof fetch;
+      return fn;
+    }
+
+    it('parses the numeric Discogs id from a bare /artist/{id} url-rel', async () => {
+      const fetchMock = mockFetch({
+        relations: [
+          { type: 'discogs', url: { resource: 'https://www.discogs.com/artist/12345' } },
+        ],
+      });
+
+      const result = await service.lookupArtistDiscogsId('mbid-1');
+
+      expect(result).toBe(12345);
+      // Hit the artist url-rels endpoint.
+      const url = String(fetchMock.mock.calls[0][0]);
+      expect(url).toContain('/artist/mbid-1');
+      expect(url).toContain('inc=url-rels');
+    });
+
+    it('parses the id from a slugged /artist/{id}-Name url-rel', async () => {
+      mockFetch({
+        relations: [
+          { type: 'discogs', url: { resource: 'https://www.discogs.com/artist/67890-Some-Artist-Name' } },
+        ],
+      });
+
+      const result = await service.lookupArtistDiscogsId('mbid-2');
+
+      expect(result).toBe(67890);
+    });
+
+    it('returns null when the artist has no discogs url-rel', async () => {
+      mockFetch({
+        relations: [
+          { type: 'wikidata', url: { resource: 'https://www.wikidata.org/wiki/Q123' } },
+        ],
+      });
+
+      const result = await service.lookupArtistDiscogsId('mbid-3');
+
+      expect(result).toBeNull();
+    });
+
+    it('degrades to null when the MB request fails', async () => {
+      const fn = vi.fn(async () => {
+        throw new Error('MusicBrainz unavailable');
+      });
+      global.fetch = fn as unknown as typeof fetch;
+
+      const result = await service.lookupArtistDiscogsId('mbid-4');
 
       expect(result).toBeNull();
     });
