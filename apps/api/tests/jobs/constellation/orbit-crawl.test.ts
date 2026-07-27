@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runOrbitCrawl } from '../../../src/jobs/constellation/orbit-crawl-worker.js';
+import { runOrbitCrawl, makeExpandAdapter } from '../../../src/jobs/constellation/orbit-crawl-worker.js';
 import {
   OrbitSeedCollector,
   type SeedSource,
@@ -165,6 +165,100 @@ describe('runOrbitCrawl', () => {
     expect(result).toEqual({ personsExpanded: 0, edgesMaterialized: 0, seeds: 0 });
     expect(calls).toEqual([]);
     expect(expandCalled).toBe(false);
+  });
+
+  it('keeps crawling when markOrbit throws for one seed (mark failure is non-fatal)', async () => {
+    const collector = new OrbitSeedCollector(async () => null);
+    const sources = [source('hist1d', [{ discogsId: 1 }, { discogsId: 2 }])];
+
+    const crawlSeeds: number[] = [];
+    const deps: OrbitDeps = {
+      async expand(personId) {
+        crawlSeeds.push(personId);
+        return { neighborIds: [], edgesCreated: 0 };
+      },
+      async isFull() {
+        return false;
+      },
+    };
+
+    // markOrbit throws for person 1 but succeeds for person 2.
+    const marked: number[] = [];
+    const markOrbit = async (_userId: number, personId: number) => {
+      if (personId === 1) throw new Error('orbit upsert boom');
+      marked.push(personId);
+    };
+
+    const result = await runOrbitCrawl({
+      userId: 3,
+      collector,
+      sources,
+      crawler: new OrbitCrawler(deps),
+      maxEdges: 100,
+      markOrbit,
+    });
+
+    // The failed mark for seed 1 did not abort the run: seed 2 still marked, and
+    // BOTH seeds were still crawled.
+    expect(marked).toEqual([2]);
+    expect(crawlSeeds).toEqual([1, 2]);
+    expect(result.seeds).toBe(2);
+    expect(result.personsExpanded).toBe(2);
+  });
+});
+
+describe('makeExpandAdapter resilience', () => {
+  it('returns an empty dead-end (not a throw) when expandPerson fails', async () => {
+    const expansionService = {
+      async expandPerson() {
+        throw new Error('getArtistReleases: source unreachable');
+      },
+    };
+    // findMany must never be reached on the failure path.
+    const prisma = {
+      constellationEdge: {
+        async findMany() {
+          throw new Error('should not be called after expand failure');
+        },
+      },
+    };
+
+    const expand = makeExpandAdapter(expansionService, prisma);
+
+    await expect(expand(42)).resolves.toEqual({ neighborIds: [], edgesCreated: 0 });
+  });
+
+  it('skips only the failing person; a real OrbitCrawler still expands the others', async () => {
+    // Two seeds; expandPerson throws for person 1 but succeeds for person 2.
+    const expansionService = {
+      async expandPerson(id: number) {
+        if (id === 1) throw new Error('person 1 unreachable');
+      },
+    };
+    const prisma = {
+      constellationEdge: {
+        async findMany(args: unknown) {
+          const sourceId = (args as { where: { sourcePersonId: number } }).where.sourcePersonId;
+          // Person 2 has no neighbours; anyone else likewise (only 1 & 2 are seeds).
+          return sourceId === 2 ? [] : [];
+        },
+      },
+    };
+
+    const expand = makeExpandAdapter(expansionService, prisma);
+    const crawler = new OrbitCrawler({
+      expand,
+      async isFull() {
+        return false;
+      },
+    });
+
+    const result = await crawler.crawl([1, 2], { maxEdges: 100 });
+
+    // Both were dequeued and expand() was awaited for each; person 1's failure
+    // degraded to a dead end rather than aborting the crawl.
+    expect(result.personsExpanded).toBe(2);
+    expect(result.edgesMaterialized).toBe(0);
   });
 });
 

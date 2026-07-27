@@ -75,9 +75,17 @@ export interface RunOrbitCrawlResult {
 export async function runOrbitCrawl(p: RunOrbitCrawlParams): Promise<RunOrbitCrawlResult> {
   const seeds = await p.collector.collect(p.sources);
 
-  // Mark every seed into the orbit with its (nearest) tier before crawling.
+  // Mark every seed into the orbit with its (nearest) tier before crawling. A
+  // single bookkeeping-upsert failure must not reject the whole warm before it
+  // even runs — log and continue (mirrors the collector's per-source resilience).
   for (const { personId, tier } of seeds) {
-    await p.markOrbit(p.userId, personId, tier);
+    try {
+      await p.markOrbit(p.userId, personId, tier);
+    } catch (err) {
+      logger.warn(
+        `markOrbit failed for user ${p.userId} person ${personId} (${tier}), continuing: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // Seeds already carry nearest-first tier order from the collector; preserve it.
@@ -120,18 +128,30 @@ export async function runOrbitCrawl(p: RunOrbitCrawlParams): Promise<RunOrbitCra
  * new-row deltas would require a pre-count/post-count around expandPerson; the
  * approximation is documented and intentional.
  */
-function makeExpandAdapter(
+export function makeExpandAdapter(
   expansionService: { expandPerson(id: number): Promise<void> },
   prisma: { constellationEdge: { findMany(args: unknown): Promise<Array<{ targetPersonId: number }>> } },
 ): (personId: number) => Promise<{ neighborIds: number[]; edgesCreated: number }> {
   return async (personId: number) => {
-    await expansionService.expandPerson(personId);
-    const edges = await prisma.constellationEdge.findMany({
-      where: { sourcePersonId: personId },
-      select: { targetPersonId: true },
-    });
-    const neighborIds = edges.map((e) => e.targetPersonId);
-    return { neighborIds, edgesCreated: neighborIds.length };
+    // OrbitCrawler awaits expand() UNGUARDED, so a throw here would abort the
+    // whole crawl. expandPerson is already hardened against per-release errors,
+    // but a total getArtistReleases failure (source down) can still throw — treat
+    // one unreachable/failing person as a dead end (no neighbours, no edges) so
+    // the rest of the warm proceeds.
+    try {
+      await expansionService.expandPerson(personId);
+      const edges = await prisma.constellationEdge.findMany({
+        where: { sourcePersonId: personId },
+        select: { targetPersonId: true },
+      });
+      const neighborIds = edges.map((e) => e.targetPersonId);
+      return { neighborIds, edgesCreated: neighborIds.length };
+    } catch (err) {
+      logger.warn(
+        `expand failed for person ${personId}, skipping: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { neighborIds: [], edgesCreated: 0 };
+    }
   };
 }
 
