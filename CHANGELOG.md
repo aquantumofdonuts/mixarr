@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Version-stamps and tags two hotfixes that shipped to production after v2.3.3.
 
+### Added
+- **Collaboration Constellation** — an interactive force-directed graph of *credited* album personnel (musicians, producers, songwriters, engineers) at the `/constellation` route. Explore who-actually-recorded-with-whom outward from an artist and send discoveries to Lidarr. Runs on the **live Discogs/MusicBrainz API by default** (no setup, but no genre coloring), with an **opt-in local Discogs credit index** for fast offline exploration and genre-based node coloring — at the honest cost of downloading and parsing the full Discogs releases dump. Uses Deezer for 30s previews and the Plex/Jellyfin/Lidarr "in your library" ring; YouTube is a link-out. Configured under **Settings → Constellation**.
+
 ### Fixed
 - **Per-artist error isolation in subscription runs** (#68): A single artist's transient error (confirmed in production as a MusicBrainz `503`) aborted the entire subscription run and recorded it with `lastRunCount: 0`, discarding every artist already added earlier in the same run. Each MusicBrainz lookup (strict + lenient fallback) and each artist's full processing is now wrapped in its own try/catch, so one failure degrades that artist to `no_mbid_found`/`failed` and the loop continues. The run-fatal catch path now reports real partial progress instead of a hardcoded `0`.
 - **slskd search completion polling** (#70): The worker now polls for slskd search completion instead of reading status once immediately, and matches slskd's compound status strings exactly (`Completed, Succeeded` vs `Completed, Errored` / `TimedOut` / `Aborted` / `Rejected`) rather than a loose `Completed` check — so searches are no longer treated as finished before results arrive or misclassified as successful.

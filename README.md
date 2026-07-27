@@ -127,6 +127,49 @@ docker run -d \
     *   **Bandcamp** — tag and search discovery
 *   **AI Recommendations** — OpenAI, Anthropic, Google Gemini, or local Ollama. Analyzes your library and suggests what's missing.
 *   **Library Health** — tools to analyze and repair your Lidarr library. Fix missing metadata with one click.
+*   **Collaboration Constellation** — an interactive graph of credited album personnel. Start from an artist, explore who-actually-recorded-with-whom, and send discoveries to Lidarr. See below.
+
+---
+
+## Collaboration Constellation
+
+An interactive, force-directed graph of **credited album personnel** — the musicians, producers, songwriters, and engineers who actually appear in the liner notes. Start from an artist, explore outward through who-actually-recorded-with-whom, and send discoveries straight to Lidarr. Reachable at the `/constellation` route (under **Discovery** in the nav).
+
+Edges mean **"credited together on a record"** — never "listeners of X also like Y." This surfaces throughlines no recommendation engine can: a rock bassist → his solo LP → its flutist → a string quartet. Genuine dead-ends are allowed — an obscure session player with two credits is a real leaf, not a loading bug.
+
+> **Plex Pass is not required.** Sonic analysis is explicitly out of scope — Plexamp owns "what sounds like this." Genre coloring here comes from Discogs/MusicBrainz tags, not from listening to the audio.
+
+### Live API vs. local index (the key operational decision)
+
+Collaboration data can come from live APIs or a local index. This is a global toggle in **Settings → Constellation**, and it's the one real decision to make:
+
+| | **Live API (default, OFF)** | **Local index (ON)** |
+|---|---|---|
+| Setup | None | Downloads + parses the Discogs data dump |
+| Footprint | Light | Large disk + hours of parsing |
+| Exploration speed | Slower (rate-limited) | Fast, offline |
+| Genre node coloring | Unavailable (neutral nodes) | Available |
+
+*   **Live API (OFF — the default):** queries Discogs/MusicBrainz live. No setup, light footprint. Exploration is slower because it's rate-limited, and **genre-based node coloring is unavailable** on the live path (nodes render neutral). Everything else — collaboration edges, tie-strength weights, bridge scoring, shortest-path, and the "in your library" ring — still works.
+*   **Local index (ON):** builds a **credit-only index** from the Discogs CC0 monthly data dump. Fast, offline exploration plus genre coloring. **Honest cost:** the resulting index is small, but *building* it downloads and stream-parses the **full Discogs releases dump (~10GB compressed, ~100GB+ uncompressed)** — hours of parsing, repeated on each refresh. A real disk-and-time commitment, aimed at power users. Refresh cadence is configurable (monthly) or you can build once and never refresh.
+
+### Integrations it uses
+
+*   **Deezer** — 30-second track previews (no auth required).
+*   **Lidarr** — send-to-library. An artist must exist in MusicBrainz to be auto-added; if it doesn't, that's an honest "not in MusicBrainz" dead-end — the node stays fully browsable and playable, but its subscribe action is disabled with a tooltip.
+*   **Plex / Jellyfin / Lidarr** — power the "in your library" ring that highlights nodes you already own.
+*   **YouTube** — a **link-out** only (no in-app embed or API), used as the final fallback in the player after owned playback and Deezer preview.
+
+### Honest limitations
+
+*   **Real leaf nodes.** A true collaboration graph has dead-ends; a settled leaf is a fact about a career, not a bug.
+*   **Genre color only on the index (ON) path.** On the live path, nodes render neutral.
+*   **Node size reflects credit ubiquity, not fame.** A ubiquitous session player sizes by how much they're credited, not by listener count.
+*   **YouTube is a link-out,** not in-app playback.
+*   **Artist seeds only** for now — seeding from a specific album is not yet supported.
+*   **No sonic/audio analysis** — genre color is tag-derived, never from the audio itself.
+
+The index toggle and the crawl/API budgets live in **Settings → Constellation** (admin).
 
 ---
 
