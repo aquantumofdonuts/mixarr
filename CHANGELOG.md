@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.3.4] - 2026-07-27
+
+Version-stamps and tags two hotfixes that shipped to production after v2.3.3.
+
+### Fixed
+- **Per-artist error isolation in subscription runs** (#68): A single artist's transient error (confirmed in production as a MusicBrainz `503`) aborted the entire subscription run and recorded it with `lastRunCount: 0`, discarding every artist already added earlier in the same run. Each MusicBrainz lookup (strict + lenient fallback) and each artist's full processing is now wrapped in its own try/catch, so one failure degrades that artist to `no_mbid_found`/`failed` and the loop continues. The run-fatal catch path now reports real partial progress instead of a hardcoded `0`.
+- **slskd search completion polling** (#70): The worker now polls for slskd search completion instead of reading status once immediately, and matches slskd's compound status strings exactly (`Completed, Succeeded` vs `Completed, Errored` / `TimedOut` / `Aborted` / `Rejected`) rather than a loose `Completed` check — so searches are no longer treated as finished before results arrive or misclassified as successful.
+
+---
+
 ## [v2.3.3] - 2026-07-04
 
 ### Fixed
