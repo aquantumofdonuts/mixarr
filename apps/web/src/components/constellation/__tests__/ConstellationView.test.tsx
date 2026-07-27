@@ -42,6 +42,15 @@ vi.mock('@/hooks/useFrontierStream', () => ({
   useFrontierStream: vi.fn(() => ({ connected: true, error: null })),
 }));
 
+// PersonPanel (a child) fetches the discography on open — stub the api so node
+// selection doesn't trigger a real request.
+vi.mock('@/lib/api', () => ({
+  api: {
+    get: vi.fn().mockResolvedValue({ data: { personId: 0, releases: [] }, error: null, status: 200 }),
+    post: vi.fn(),
+  },
+}));
+
 // Keep the real merge helpers, mock only the data hook.
 vi.mock('@/hooks/useConstellation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/useConstellation')>();
@@ -169,6 +178,35 @@ describe('ConstellationView', () => {
     expect(recenter).toHaveBeenCalledWith(2);
     const trail = screen.getByTestId('constellation-breadcrumbs');
     expect(trail).toHaveTextContent('Person 2');
+  });
+
+  it('opens the PersonPanel for the selected node (acquisition grain)', async () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    // No panel until a node is selected.
+    expect(screen.queryByTestId('person-panel')).not.toBeInTheDocument();
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 2, name: 'Person 2' }));
+
+    // Selecting a node opens its panel (where the user picks artist-vs-album).
+    const panel = await screen.findByTestId('person-panel');
+    expect(panel).toHaveTextContent('Person 2');
+  });
+
+  it('opens the PersonPanel even when clicking the current focus node', async () => {
+    const recenter = vi.fn().mockResolvedValue(undefined);
+    mockUseConstellation.mockReturnValue(mockResult({ recenter }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    // focusId=1 -> no re-center, but the panel still opens.
+    act(() => onNodeClick({ id: 1, name: 'Person 1' }));
+
+    expect(recenter).not.toHaveBeenCalled();
+    const panel = await screen.findByTestId('person-panel');
+    expect(panel).toHaveTextContent('Person 1');
   });
 
   it('accumulates multiple hops in the breadcrumb trail', () => {

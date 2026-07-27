@@ -20,6 +20,7 @@ import {
   ownedRingStyle,
   FOCUS_NODE_COLOR,
 } from './encoding';
+import { PersonPanel } from './PersonPanel';
 
 /**
  * A single visited focus person in the re-center walk.
@@ -93,6 +94,11 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
   // The breadcrumb trail of visited focus persons (the re-center walk).
   const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
 
+  // The person whose acquisition panel is open. Selecting a node opens this (the
+  // acquisition grain: the node action lands the user in the panel where they
+  // pick artist-vs-album, rather than blind-subscribing).
+  const [selectedPerson, setSelectedPerson] = useState<Breadcrumb | null>(null);
+
   const onFrame = useCallback((payload: StreamPayload) => {
     const incomingNodes = Array.isArray(payload.nodes) ? (payload.nodes as GraphNode[]) : [];
     const incomingEdges = Array.isArray(payload.edges) ? (payload.edges as GraphEdge[]) : [];
@@ -134,8 +140,11 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
     (node: NodeObject<CanvasNode>) => {
       const personId = Number(node.id);
       if (!Number.isFinite(personId)) return;
-      // Clicking the node we're already centred on is a no-op: no redundant
-      // re-seed, no breadcrumb.
+      // Selecting a node ALWAYS opens its acquisition panel (the grain fix): the
+      // user chooses artist-vs-album there rather than blind-subscribing.
+      setSelectedPerson({ personId, displayName: node.name });
+      // Clicking the node we're already centred on only opens the panel — no
+      // redundant re-seed, no breadcrumb.
       if (personId === focusId) return;
       setBreadcrumbs((prev) => {
         // Collapse a no-op click on the person we're already centred on.
@@ -252,6 +261,12 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
           const l = link as CanvasLink;
           return edgeColor({ bridge: l.bridge, bridgeConfident: l.bridgeConfident }, l.isFocusLink);
         }}
+      />
+
+      <PersonPanel
+        personId={selectedPerson?.personId ?? null}
+        displayName={selectedPerson?.displayName}
+        onClose={() => setSelectedPerson(null)}
       />
     </div>
   );

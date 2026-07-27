@@ -75,6 +75,36 @@ export interface OwnedResponse {
   owned: number[];
 }
 
+/** A single release in a person's discography (side-panel row). */
+export interface ReleaseItem {
+  releaseId: number;
+  title: string;
+  year: number | null;
+  master: number | null;
+}
+
+/** `GET /api/constellation/person/:personId/releases` response. */
+export interface ReleasesResponse {
+  personId: number;
+  releases: ReleaseItem[];
+}
+
+/** `POST /api/constellation/person/:personId/subscribe` success response. */
+export interface SubscribeResponse {
+  added: boolean;
+  mbid: string;
+  target: 'artist' | 'album';
+}
+
+/**
+ * `409` body when a person can't be auto-added: they aren't linked/corroborated
+ * in MusicBrainz. The node stays browsable — only the Lidarr add is unavailable.
+ */
+export interface NeedsManualResponse {
+  needsManual: true;
+  message: string;
+}
+
 /**
  * A single background-expand SSE payload. Carries the `generation` it was
  * published with plus the newly-expanded node/edge data. The exact node/edge
