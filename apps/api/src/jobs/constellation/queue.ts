@@ -31,9 +31,18 @@ export interface ConstellationImportJobData {
   filePath: string;
 }
 
-/** Payload for a crawl job: expand outward from a seed artist. */
+/**
+ * Payload for a crawl job. The crawl queue serves two shapes:
+ *  - a single-seed expansion outward from `seedArtistId` (Task 9); and
+ *  - a per-user orbit warm keyed by `userId` (Task 10's orbit-crawl-worker),
+ *    which collects the user's tiered seeds itself.
+ * At least one of the two keys is present for a given job.
+ */
 export interface ConstellationCrawlJobData {
-  seedArtistId: number;
+  /** Single-seed crawl: the artist to expand outward from. */
+  seedArtistId?: number;
+  /** Per-user orbit warm: the user whose taste orbit to crawl. */
+  userId?: number;
   /** Maximum crawl depth (hops from the seed). */
   maxDepth?: number;
 }
