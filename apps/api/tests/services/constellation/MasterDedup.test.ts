@@ -15,4 +15,14 @@ describe('MasterDedup', () => {
     const b = [{ releaseId: 9, masterId: 100 }];
     expect(sharedMasterCount(a, b)).toBe(1); // same master via different pressings
   });
+  it('returns an empty set for empty input', () => {
+    expect(dedupToMasters([]).size).toBe(0);
+  });
+  it('counts zero shared masters for disjoint lists', () => {
+    expect(sharedMasterCount([{ releaseId: 1, masterId: 100 }], [{ releaseId: 2, masterId: 200 }])).toBe(0);
+  });
+  it('keeps two distinct null-master releases separate', () => {
+    // Deliberate: null-master releases key on their own release id, so they never collapse together.
+    expect(dedupToMasters([{ releaseId: 5, masterId: null }, { releaseId: 6, masterId: null }]).size).toBe(2);
+  });
 });
