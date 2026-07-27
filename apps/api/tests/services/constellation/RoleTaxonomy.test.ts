@@ -37,4 +37,8 @@ describe('RoleTaxonomy', () => {
   it('returns an empty array for empty input', () => {
     expect(normalizeRole('')).toEqual([]);
   });
+  it('returns an empty array for null/undefined input', () => {
+    expect(normalizeRole(undefined as unknown as string)).toEqual([]);
+    expect(normalizeRole(null as unknown as string)).toEqual([]);
+  });
 });

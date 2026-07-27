@@ -107,6 +107,75 @@ describe('DiscogsService.getReleaseCredits', () => {
     );
   });
 
+  it('returns [] for a payload with no extraartists and no tracklist', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 7, title: 'Bare' }),
+    });
+
+    const service = new DiscogsService('test-token');
+    const credits = await service.getReleaseCredits(7);
+
+    expect(credits).toEqual([]);
+  });
+
+  it('does not throw when a track has no extraartists', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          id: 8,
+          extraartists: [{ id: 20, name: 'Prod', role: 'Producer' }],
+          tracklist: [{ position: 'A1', title: 'No Credits Track' }],
+        }),
+    });
+
+    const service = new DiscogsService('test-token');
+    const credits = await service.getReleaseCredits(8);
+
+    expect(credits).toHaveLength(1);
+    expect(credits[0].artistId).toBe(20);
+    expect(credits[0].roles).toEqual(['producer']);
+  });
+
+  it('does not throw when a credit is missing its role (regression)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          id: 9,
+          extraartists: [{ id: 30, name: 'Roleless Artist' }],
+          tracklist: [],
+        }),
+    });
+
+    const service = new DiscogsService('test-token');
+    const credits = await service.getReleaseCredits(9);
+
+    // Artist is still emitted, with whatever roles remain (here: none).
+    expect(credits).toHaveLength(1);
+    expect(credits[0].artistId).toBe(30);
+    expect(credits[0].roles).toEqual([]);
+  });
+
+  it('emits empty roles for a credit with an empty role string', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          id: 10,
+          extraartists: [{ id: 40, name: 'Empty Role', role: '' }],
+          tracklist: [],
+        }),
+    });
+
+    const service = new DiscogsService('test-token');
+    const credits = await service.getReleaseCredits(10);
+
+    expect(credits).toHaveLength(1);
+    expect(credits[0].roles).toEqual([]);
+  });
+
   it('throws on API error', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,

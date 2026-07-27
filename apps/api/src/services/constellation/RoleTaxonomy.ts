@@ -21,6 +21,7 @@ const MAP: Record<string, BaseRole> = {
 };
 
 export function normalizeRole(raw: string): BaseRole[] {
+  if (!raw) return [];
   const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
   const roles = new Set<BaseRole>();
   for (const part of parts) {

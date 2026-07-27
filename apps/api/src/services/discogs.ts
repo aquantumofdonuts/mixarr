@@ -139,11 +139,14 @@ interface DiscogsStyleSearchResponse {
   results: DiscogsSearchResult[];
 }
 
-/** Raw Discogs credit entry as it appears in `extraartists` arrays. */
+/**
+ * Raw Discogs credit entry as it appears in `extraartists` arrays.
+ * Describes untrusted external data, so every field is treated as optional.
+ */
 interface RawDiscogsCredit {
   id: number;
-  name: string;
-  role: string;
+  name?: string;
+  role?: string;
 }
 
 interface DiscogsReleaseDetail {
@@ -283,15 +286,17 @@ export class DiscogsService {
     // Merge by artistId, unioning normalized roles.
     const byArtist = new Map<number, { name: string; roles: Set<BaseRole> }>();
     for (const raw of rawCredits) {
-      // Drop free-text (non-traversable) credits.
-      if (raw.id === 0) continue;
+      // Drop free-text (non-traversable) credits and any type-drift garbage.
+      // Discogs uses id 0 for free-text name credits; a non-numeric or missing
+      // id must never leak an undefined-keyed entry into the output.
+      if (typeof raw.id !== 'number' || raw.id === 0) continue;
 
       let entry = byArtist.get(raw.id);
       if (!entry) {
-        entry = { name: raw.name, roles: new Set<BaseRole>() };
+        entry = { name: raw.name ?? '', roles: new Set<BaseRole>() };
         byArtist.set(raw.id, entry);
       }
-      for (const role of normalizeRole(raw.role)) {
+      for (const role of normalizeRole(raw.role ?? '')) {
         entry.roles.add(role);
       }
     }
