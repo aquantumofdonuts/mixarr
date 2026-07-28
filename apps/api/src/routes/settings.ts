@@ -11,6 +11,7 @@ import {
   updatePreferencesSchema,
   globalSettingKeySchema,
   bulkUpdateGlobalSettingsSchema,
+  updateConstellationSettingsSchema,
 } from '../schemas/settings.js';
 
 const logger = createLogger('SettingsRoute');
@@ -128,6 +129,40 @@ settingsRouter.put('/preferences', validateBody(updatePreferencesSchema), async 
     res.status(500).json({ error: 'Failed to update preferences' });
   }
 });
+
+// Admin: Get Collaboration Constellation settings (merged over defaults).
+// Registered BEFORE the catch-all PUT /:key so those verbs are not shadowed.
+settingsRouter.get('/constellation', requireAdmin, async (_req, res) => {
+  try {
+    const settings = await SettingsService.getConstellationSettings();
+    res.json({ settings });
+  } catch (error) {
+    logger.error('Failed to fetch constellation settings', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    res.status(500).json({ error: 'Failed to fetch constellation settings' });
+  }
+});
+
+// Admin: Update Collaboration Constellation settings (partial merge, validated).
+settingsRouter.put(
+  '/constellation',
+  requireAdmin,
+  validateBody(updateConstellationSettingsSchema),
+  async (req, res) => {
+  try {
+    const merged = await SettingsService.updateConstellationSettings(req.body);
+    res.json({ success: true, settings: merged });
+  } catch (error) {
+    logger.error('Failed to update constellation settings', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    res.status(500).json({ error: 'Failed to update constellation settings' });
+  }
+  },
+);
 
 // Update user setting (must come after /preferences to avoid shadowing)
 settingsRouter.put('/:key', validateParams(userSettingKeySchema), async (req, res) => {

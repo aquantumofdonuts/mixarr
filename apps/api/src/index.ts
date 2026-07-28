@@ -24,6 +24,7 @@ import { feedRouter } from './routes/feed.js';
 import notificationsRouter from './routes/notifications.js';
 import { duplicatesRouter } from './routes/duplicates.js';
 import { ssoRouter } from './routes/sso.js';
+import { constellationRouter } from './routes/constellation.js';
 import { setupPassport, sessionMiddleware, sessionRedis } from './auth/passport.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requestLogger } from './middleware/request-logger.js';
@@ -136,6 +137,20 @@ app.use('/api', apiLimiter);
 // Make io available to routes
 app.set('io', io);
 
+// Boot the Collaboration Constellation background workers (guarded: each
+// registerXWorker dynamically imports bullmq/redis internally, so no Redis is
+// touched until called here). Skipped under test to avoid opening connections.
+if (process.env.NODE_ENV !== 'test') {
+  const { registerDumpImportWorker } = await import('./jobs/constellation/dump-import-worker.js');
+  const { registerOrbitCrawlWorker } = await import('./jobs/constellation/orbit-crawl-worker.js');
+  const { registerConstellationExpandWorker } = await import(
+    './jobs/constellation/constellation-expand-worker.js'
+  );
+  await registerDumpImportWorker(io);
+  await registerOrbitCrawlWorker(io);
+  await registerConstellationExpandWorker(io);
+}
+
 // Routes
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
@@ -155,6 +170,7 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/slskd', slskdRouter);
 app.use('/api/duplicates', duplicatesRouter);
 app.use('/api/sso', ssoRouter);
+app.use('/api/constellation', constellationRouter);
 
 // Error handler
 app.use(errorHandler);

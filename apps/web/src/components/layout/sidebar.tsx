@@ -21,6 +21,7 @@ import Settings from 'lucide-react/dist/esm/icons/settings';
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
 import TrendingUp from 'lucide-react/dist/esm/icons/trending-up';
 import Users from 'lucide-react/dist/esm/icons/users';
+import Waypoints from 'lucide-react/dist/esm/icons/waypoints';
 import X from 'lucide-react/dist/esm/icons/x';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
@@ -47,6 +48,7 @@ const navGroups: NavGroup[] = [
       { href: '/', label: 'Dashboard', icon: Home },
       { href: '/search', label: 'Search', icon: Search },
       { href: '/discover', label: 'Discover', icon: Sparkles },
+      { href: '/constellation', label: 'Constellation', icon: Waypoints },
     ],
   },
   {

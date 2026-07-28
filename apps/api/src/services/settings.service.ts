@@ -21,6 +21,37 @@ export const DEFAULT_USER_PREFERENCES = {
 
 export type UserPreferences = typeof DEFAULT_USER_PREFERENCES;
 
+/**
+ * Default Collaboration Constellation settings (global, admin-managed).
+ *
+ * Stored as a single JSON blob under the `constellation` global-setting key
+ * (mirrors the `preferences` user-setting blob) so the whole group is read/merged
+ * in one round-trip and new keys can be added without a migration.
+ *
+ *  - `constellationIndexEnabled` — "Setting-ON" uses the local SQLite dump index
+ *    ({@link DumpIndexService}); "Setting-OFF" uses the live Discogs adapter.
+ *  - `constellationIndexPath`    — filesystem path to that SQLite index.
+ *  - `orbitEdgeBudget`           — hard cap on edges materialized per orbit warm.
+ *  - `dailyApiBudget`            — daily live-Discogs request budget.
+ *  - `fanoutN`                   — neighbours kept per node when re-centring.
+ *  - `pathMaxDegrees`            — six-degrees traversal ceiling.
+ *  - `indexRefresh`              — monthly rebuild of the dump index, or off.
+ */
+export const DEFAULT_CONSTELLATION_SETTINGS = {
+  constellationIndexEnabled: false,
+  constellationIndexPath: '/data/constellation/index.db',
+  orbitEdgeBudget: 250_000,
+  dailyApiBudget: 5_000,
+  fanoutN: 8,
+  pathMaxDegrees: 6,
+  indexRefresh: 'monthly' as 'monthly' | 'off',
+};
+
+export type ConstellationSettings = typeof DEFAULT_CONSTELLATION_SETTINGS;
+
+/** The global-setting key the constellation settings blob is stored under. */
+const CONSTELLATION_SETTINGS_KEY = 'constellation';
+
 export class SettingsService {
   // ============================================================================
   // Base URL (Global)
@@ -168,6 +199,46 @@ export class SettingsService {
       create: { key, value: dbValue },
       update: { value: dbValue },
     });
+  }
+
+  // ============================================================================
+  // Constellation Settings (Global, admin-managed)
+  // ============================================================================
+
+  /**
+   * Read the constellation settings blob, merged over {@link DEFAULT_CONSTELLATION_SETTINGS}.
+   * Unset keys always fall back to their default, so callers get a complete object.
+   */
+  static async getConstellationSettings(): Promise<ConstellationSettings> {
+    const setting = await prisma.globalSetting.findUnique({
+      where: { key: CONSTELLATION_SETTINGS_KEY },
+    });
+    const stored = (setting?.value as Partial<ConstellationSettings>) || {};
+    return { ...DEFAULT_CONSTELLATION_SETTINGS, ...stored };
+  }
+
+  /**
+   * Merge `updates` over the currently-stored constellation settings (which are
+   * themselves merged over the defaults) and persist the whole blob. Returns the
+   * merged result.
+   */
+  static async updateConstellationSettings(
+    updates: Partial<ConstellationSettings>,
+  ): Promise<ConstellationSettings> {
+    const existing = await prisma.globalSetting.findUnique({
+      where: { key: CONSTELLATION_SETTINGS_KEY },
+    });
+    const merged: ConstellationSettings = {
+      ...DEFAULT_CONSTELLATION_SETTINGS,
+      ...((existing?.value as Partial<ConstellationSettings>) || {}),
+      ...updates,
+    };
+    await prisma.globalSetting.upsert({
+      where: { key: CONSTELLATION_SETTINGS_KEY },
+      create: { key: CONSTELLATION_SETTINGS_KEY, value: merged },
+      update: { value: merged },
+    });
+    return merged;
   }
 }
 

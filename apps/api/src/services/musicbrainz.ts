@@ -81,6 +81,23 @@ interface MusicBrainzSearchResult {
   offset: number;
 }
 
+interface MusicBrainzUrlLookup {
+  id: string;
+  resource: string;
+  relations?: Array<{
+    type?: string;
+    direction?: string;
+    artist?: MusicBrainzArtist;
+  }>;
+}
+
+interface MusicBrainzArtistUrlRels {
+  relations?: Array<{
+    type?: string;
+    url?: { resource?: string };
+  }>;
+}
+
 interface MusicBrainzLabelSearchResult {
   labels: MusicBrainzLabel[];
   count: number;
@@ -134,6 +151,65 @@ export class MusicBrainzService {
       `/artist?query=${query}&limit=${limit}&fmt=json`
     );
     return result.artists || [];
+  }
+
+  /**
+   * Resolve an external resource URL to a MusicBrainz artist MBID via the
+   * MB `/url` lookup with `inc=artist-rels`. Used to map a Discogs artist page
+   * (`https://www.discogs.com/artist/{id}`) to its MB artist through the
+   * curated URL relationship — the clean, unambiguous join key.
+   *
+   * Returns the MBID of the single related artist, or null if the URL is not
+   * known to MusicBrainz, carries no artist relationship, or resolves to TWO OR
+   * MORE distinct artists (ambiguous — the caller falls through to a
+   * corroborated/manual path rather than picking one arbitrarily).
+   */
+  async lookupArtistMbidByUrl(resourceUrl: string): Promise<string | null> {
+    const encoded = encodeURIComponent(resourceUrl);
+    try {
+      const result = await this.request<MusicBrainzUrlLookup>(
+        `/url?resource=${encoded}&inc=artist-rels&fmt=json`
+      );
+      const distinctIds = new Set(
+        (result.relations ?? [])
+          .map(r => r.artist?.id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      );
+      // Exactly one distinct artist is an unambiguous join key; anything else
+      // (none, or several) is not linkable.
+      return distinctIds.size === 1 ? [...distinctIds][0] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Reverse of {@link lookupArtistMbidByUrl}: given a MusicBrainz artist MBID,
+   * return the numeric Discogs artist id from the artist's discogs url
+   * relationship (`GET /artist/{mbid}?inc=url-rels`). The discogs relation's
+   * `url.resource` is either `https://www.discogs.com/artist/12345` or the
+   * slugged `.../artist/12345-Artist-Name`; both forms yield 12345.
+   *
+   * Returns null if the artist has no discogs url-rel, and degrades to null
+   * (rather than throwing) on any MB API error.
+   */
+  async lookupArtistDiscogsId(mbid: string): Promise<number | null> {
+    try {
+      const result = await this.request<MusicBrainzArtistUrlRels>(
+        `/artist/${encodeURIComponent(mbid)}?inc=url-rels&fmt=json`
+      );
+      for (const relation of result.relations ?? []) {
+        const resource = relation.url?.resource;
+        if (!resource) continue;
+        // Anchor on the real discogs host + /artist/ path so a suffix look-alike
+        // host (fakediscogs.com) or a /label/ url can't false-positive.
+        const match = resource.match(/\/\/(?:www\.)?discogs\.com\/artist\/(\d+)/);
+        if (match) return Number(match[1]);
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   async getArtist(mbid: string): Promise<MusicBrainzArtist | null> {

@@ -13,6 +13,7 @@ import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal';
 import Plug from 'lucide-react/dist/esm/icons/plug';
 import Search from 'lucide-react/dist/esm/icons/search';
 import SettingsIcon from 'lucide-react/dist/esm/icons/settings';
+import Waypoints from 'lucide-react/dist/esm/icons/waypoints';
 import { useOfflineStatus } from '@/lib/use-offline-status';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 
@@ -23,7 +24,7 @@ interface NavItem {
   badge?: number;
 }
 
-const MORE_PATHS = ['/subscriptions', '/discover', '/downloads', '/connections', '/settings'];
+const MORE_PATHS = ['/subscriptions', '/discover', '/constellation', '/downloads', '/connections', '/settings'];
 
 export function MobileNav() {
   const pathname = usePathname();
@@ -123,6 +124,10 @@ export function MobileNav() {
           <Link href="/discover" onClick={() => setMoreOpen(false)} className="flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-accent transition-colors">
             <Compass className="w-5 h-5" />
             <span>Discover</span>
+          </Link>
+          <Link href="/constellation" onClick={() => setMoreOpen(false)} className="flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-accent transition-colors">
+            <Waypoints className="w-5 h-5" />
+            <span>Constellation</span>
           </Link>
           <Link href="/downloads" onClick={() => setMoreOpen(false)} className="flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-accent transition-colors">
             <Download className="w-5 h-5" />

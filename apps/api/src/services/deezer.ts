@@ -155,6 +155,73 @@ export async function getDeezerRelatedArtists(artistId: number, limit: number = 
   return data.data || [];
 }
 
+// ---------------------------------------------------------------------------
+// Track search (playback previews) — the public general `search` endpoint returns
+// TRACKS carrying a 30s `preview` MP3 URL plus artist/title/album-cover art. Used
+// by the constellation /play resolution (Design §8 playback chain).
+// ---------------------------------------------------------------------------
+
+interface DeezerTrackAlbum {
+  cover?: string;
+  cover_small?: string;
+  cover_medium?: string;
+  cover_big?: string;
+  cover_xl?: string;
+}
+
+interface DeezerTrackSearchItem {
+  id: number;
+  title: string;
+  /** 30-second MP3 preview URL (may be absent/empty for some tracks). */
+  preview?: string;
+  artist?: { name?: string };
+  album?: DeezerTrackAlbum;
+}
+
+interface DeezerTrackSearchResponse {
+  data?: DeezerTrackSearchItem[];
+}
+
+/** A resolved Deezer track preview (30s clip) with cover art for the player. */
+export interface DeezerTrackPreview {
+  previewUrl: string;
+  title: string;
+  artist: string;
+  coverUrl?: string;
+}
+
+/**
+ * Search Deezer for a playable 30s preview of a track (or an artist's top hit
+ * when no track is given). Returns the first result that actually carries a
+ * `preview` URL, or `null` when nothing playable is found. Throws on an HTTP
+ * error so the caller can decide how to degrade (the constellation /play route
+ * falls through to a YouTube link-out).
+ */
+export async function searchDeezerTrackPreview(
+  artist: string,
+  track?: string,
+): Promise<DeezerTrackPreview | null> {
+  const query = track ? `${artist} ${track}` : artist;
+  const response = await fetchWithTimeout(
+    `${DEEZER_API_BASE}/search?q=${encodeURIComponent(query)}&limit=10`,
+    { timeout: API_TIMEOUT },
+  );
+  if (!response.ok) {
+    throw new Error(`Deezer API error: ${response.status}`);
+  }
+  const data = (await response.json()) as DeezerTrackSearchResponse;
+  const items = data.data ?? [];
+  const hit = items.find((i) => typeof i.preview === 'string' && i.preview.length > 0);
+  if (!hit) return null;
+  const album = hit.album ?? {};
+  return {
+    previewUrl: hit.preview!,
+    title: hit.title,
+    artist: hit.artist?.name ?? artist,
+    coverUrl: album.cover_big || album.cover_medium || album.cover || album.cover_small,
+  };
+}
+
 /**
  * Get artist details by ID
  */
