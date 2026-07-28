@@ -6,6 +6,11 @@ RUN apk add --no-cache openssl openssl-dev
 
 # Dependencies stage - cached separately
 FROM base AS deps
+# better-sqlite3 (native module, powers the opt-in local Discogs credit index) has no
+# musl/Alpine prebuilt binary, so npm must compile it from source. Install the build
+# toolchain here in the deps stage only; the compiled .node is copied into the lean
+# production stage via node_modules, which never installs these tools itself.
+RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 COPY turbo.json ./
 COPY tsconfig.base.json ./
