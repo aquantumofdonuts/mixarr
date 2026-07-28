@@ -90,6 +90,36 @@ describe('Discogs Service', () => {
       expect(service).toBeDefined();
     });
 
+    it('sends both Authorization and User-Agent headers when a token is provided', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 1, name: 'X' }),
+      });
+      global.fetch = fetchMock as any;
+
+      const service = new DiscogsService('tok');
+      await service.getArtist(1);
+
+      const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+      expect(headers['Authorization']).toBe('Discogs token=tok');
+      expect(headers['User-Agent']).toBe('MixarrMusicDiscovery/1.0');
+    });
+
+    it('omits Authorization but keeps User-Agent when constructed without a token (public API)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 1, name: 'X' }),
+      });
+      global.fetch = fetchMock as any;
+
+      const service = new DiscogsService();
+      await service.getArtist(1);
+
+      const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+      expect(headers['Authorization']).toBeUndefined();
+      expect(headers['User-Agent']).toBe('MixarrMusicDiscovery/1.0');
+    });
+
     it('gets artist by ID', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,

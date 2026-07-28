@@ -196,18 +196,31 @@ interface DiscogsArtistReleasesResponse {
 const DEFAULT_ARTIST_RELEASES_MAX_PAGES = 5;
 
 export class DiscogsService {
-  private token: string;
+  private token: string | undefined;
   private baseUrl = 'https://api.discogs.com';
 
-  constructor(token: string) {
+  /**
+   * @param token - Discogs personal-access token. OPTIONAL: the Discogs public
+   *   database API works unauthenticated (rate-limited), so the constellation
+   *   live source can build a tokenless service. When present the token is sent
+   *   as an `Authorization` header; when absent only the (mandatory) `User-Agent`
+   *   is sent — Discogs rejects requests without a User-Agent with 403.
+   */
+  constructor(token?: string) {
     this.token = token;
   }
 
   private getHeaders(): Record<string, string> {
-    return {
-      'Authorization': `Discogs token=${this.token}`,
+    // Discogs REQUIRES a User-Agent on every request (unauthenticated requests
+    // without one get 403); the Authorization header is added only when a token
+    // is configured, so a tokenless service still hits the public API.
+    const headers: Record<string, string> = {
       'User-Agent': 'MixarrMusicDiscovery/1.0',
     };
+    if (this.token) {
+      headers['Authorization'] = `Discogs token=${this.token}`;
+    }
+    return headers;
   }
 
   private async request<T>(path: string): Promise<T> {

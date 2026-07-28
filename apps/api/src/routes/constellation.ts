@@ -500,6 +500,33 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           throw error;
         }
 
+        // Kick off the background crawl for a not-yet-fully-expanded focus so a
+        // freshly-seeded artist doesn't stay a lone node: enqueue a
+        // constellation-expand job carrying the minted stream token so the
+        // expand worker streams newly-expanded nodes back over SSE. Only skip
+        // when the focus row exists and is already fullyExpanded (nothing to
+        // crawl). Guarded exactly like /expand — a dead queue (or DB hiccup)
+        // must not fail the seed response.
+        try {
+          const focusPerson = (await prisma.constellationPerson.findUnique({
+            where: { personId: focusId },
+            select: { fullyExpanded: true },
+          })) as { fullyExpanded: boolean } | null;
+          if (!focusPerson || focusPerson.fullyExpanded === false) {
+            const jobData: ConstellationExpandJobData = {
+              artistId: focusId,
+              tokenId: streamToken.id,
+              generation: streamToken.generation,
+            };
+            await expandQueue.add(CONSTELLATION_QUEUE_NAMES.EXPAND, jobData);
+          }
+        } catch (error) {
+          log.warn('seed expand enqueue failed (returning seed subgraph only)', {
+            focusId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
         res.json({ focusId, subgraph, streamToken });
       } catch (error) {
         log.error('seed failed', { error: error instanceof Error ? error.message : String(error) });

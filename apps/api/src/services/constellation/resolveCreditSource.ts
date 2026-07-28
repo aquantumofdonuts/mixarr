@@ -79,8 +79,14 @@ export async function resolveConfiguredCreditSource(userId?: number): Promise<Cr
   return resolveCreditSource(settings, { discogs });
 }
 
-/** Resolve an active Discogs connection into a DiscogsService, or undefined. */
-async function resolveDiscogsBackend(userId?: number): Promise<DiscogsCreditBackend | undefined> {
+/**
+ * Resolve a Discogs backend for the live path. A DiscogsService is ALWAYS
+ * returned: when an active Discogs connection with a token exists it is used
+ * (authenticated, higher rate limit), otherwise a tokenless service hits the
+ * public Discogs database API (rate-limited, works out of the box). This keeps
+ * the live source buildable with no Discogs connection configured.
+ */
+async function resolveDiscogsBackend(userId?: number): Promise<DiscogsCreditBackend> {
   const { default: prisma } = await import('../../lib/db.js');
   const { DiscogsService } = await import('../discogs.js');
 
@@ -95,5 +101,6 @@ async function resolveDiscogsBackend(userId?: number): Promise<DiscogsCreditBack
   });
 
   const token = (conn?.config as { token?: string } | null | undefined)?.token;
-  return token ? new DiscogsService(token) : undefined;
+  // token may be undefined -> tokenless public Discogs API.
+  return new DiscogsService(token);
 }

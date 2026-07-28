@@ -7,6 +7,7 @@ import request from 'supertest';
 vi.mock('../../src/lib/db.js', () => ({
   default: {
     constellationOwned: { findMany: vi.fn() },
+    constellationPerson: { findUnique: vi.fn() },
   },
 }));
 
@@ -212,6 +213,82 @@ describe('GET /seed', () => {
     expect(call[0]).toBe(42);
     expect(call[1].userId).toBe(7);
     expect(call[1].roleMask).toBeUndefined();
+  });
+
+  it('enqueues a constellation-expand job for a focus that is NOT fullyExpanded (with the minted token)', async () => {
+    // Focus row missing -> treated as not fully expanded -> crawl kicks off.
+    vi.mocked(prisma.constellationPerson.findUnique).mockResolvedValue(null as any);
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { type: 'artist', id: '42' } });
+    const res = mockRes();
+    await h.seed(req, res);
+
+    expect(res.statusCode).toBe(200);
+    const tokenId = res.body.streamToken.id as string;
+    const generation = res.body.streamToken.generation as number;
+    expect(deps.expandQueue!.add).toHaveBeenCalledWith('constellation-expand', {
+      artistId: 42,
+      tokenId,
+      generation,
+    });
+    // The seed response contract is unchanged (enqueue is a side effect).
+    expect(res.body.focusId).toBe(42);
+    expect(res.body.subgraph).toBeDefined();
+  });
+
+  it('also enqueues when the focus row exists but fullyExpanded is false', async () => {
+    vi.mocked(prisma.constellationPerson.findUnique).mockResolvedValue({
+      fullyExpanded: false,
+    } as any);
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { type: 'artist', id: '42' } });
+    const res = mockRes();
+    await h.seed(req, res);
+
+    expect(deps.expandQueue!.add).toHaveBeenCalledWith('constellation-expand', {
+      artistId: 42,
+      tokenId: res.body.streamToken.id,
+      generation: res.body.streamToken.generation,
+    });
+  });
+
+  it('does NOT enqueue when the focus is already fullyExpanded', async () => {
+    vi.mocked(prisma.constellationPerson.findUnique).mockResolvedValue({
+      fullyExpanded: true,
+    } as any);
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { type: 'artist', id: '42' } });
+    const res = mockRes();
+    await h.seed(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(deps.expandQueue!.add).not.toHaveBeenCalled();
+  });
+
+  it('still returns the seed 200 when the expand enqueue fails (guarded, no Redis)', async () => {
+    vi.mocked(prisma.constellationPerson.findUnique).mockResolvedValue(null as any);
+    const deps = makeDeps({
+      expandQueue: { add: vi.fn().mockRejectedValue(new Error('no redis')) },
+    });
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const req = mockReq({ query: { type: 'artist', id: '42' } });
+    const res = mockRes();
+    await h.seed(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.streamToken.id).toBeTypeOf('string');
+    expect(res.body.subgraph).toBeDefined();
   });
 });
 
