@@ -36,6 +36,7 @@ import { warmLidarrCaches } from './services/lidarr-warmup.js';
 import { redis } from './lib/redis.js';
 import slskdRouter, { cleanupQueueEvents } from './routes/slskd.js';
 import { applyNetworkPreflight } from './lib/network-preflight.js';
+import { lidarrWebhookRouter } from './routes/lidarr-webhook.js';
 
 // Probe outbound IPv6 connectivity before any worker establishes pools.
 // On hosts where v6 is advertised but egress is broken, this falls back to v4.
@@ -155,6 +156,7 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/slskd', slskdRouter);
 app.use('/api/duplicates', duplicatesRouter);
 app.use('/api/sso', ssoRouter);
+app.use('/api/webhooks', lidarrWebhookRouter);
 
 // Error handler
 app.use(errorHandler);
