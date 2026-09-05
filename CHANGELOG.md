@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.3.5] - 2026-09-05
+
+Fixes first-run setup for every deployment that does not terminate TLS in front of Mixarr.
+
+### Fixed
+- **Setup wizard and login failed over plain HTTP** (#75): The session cookie was configured `secure: true` whenever `NODE_ENV=production`, which is baked into the unified image. express-session refuses to emit the `Set-Cookie` header at all when the request is not HTTPS, so `POST /api/auth/setup` created the admin and returned `200` while silently dropping the session — and the next request, `POST /api/settings/base-url`, saw an unauthenticated user and returned `401 Authentication required`. The cookie now uses express-session's `secure: 'auto'`, which applies the `Secure` flag only when the connection actually is HTTPS. HTTPS deployments are unaffected and still get the flag. Also removes the login page's "HTTP Access Not Supported" block added in v1.2.1 for #30, which only explained the breakage on one of the two affected routes and would now reject a configuration that works.
+
+### Changed
+- **Corrected the documented HTTP port**: the README instructed users to map `3010:3010` and `EXPOSE` advertised `3010`, but nothing in the unified image has ever listened on 3010 — Next.js is on `3000`, the API on `3005`, Caddy on `80`/`443`. 3010 is the API's own default port, overridden to 3005 by supervisor inside the image. Both `docker run` and compose examples now map `3010:3000` (matching what `docker-compose.yml` already did for the multi-container setup), `EXPOSE` advertises `3000`, and the ports table separates host from container columns. The startup banner no longer prints host-side URLs it cannot know.
+
+---
+
 ## [v2.3.4] - 2026-07-27
 
 Version-stamps and tags two hotfixes that shipped to production after v2.3.3.
@@ -481,6 +493,7 @@ Version-stamps and tags two hotfixes that shipped to production after v2.3.3.
 
 ---
 
+[v2.3.5]: https://github.com/aquantumofdonuts/mixarr/compare/v2.3.4...v2.3.5
 [v2.3.1]: https://github.com/aquantumofdonuts/mixarr/compare/v2.2.0...v2.3.1
 [v2.2.0]: https://github.com/aquantumofdonuts/mixarr/compare/v2.1.6...v2.2.0
 [v2.1.2]: https://github.com/aquantumofdonuts/mixarr/compare/v2.1.1...v2.1.2
