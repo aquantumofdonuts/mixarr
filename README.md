@@ -32,7 +32,7 @@ services:
     container_name: mixarr
     ports:
       - "3443:443"  # HTTPS Access
-      - "3010:3010" # Web UI (HTTP)
+      - "3010:3000" # Web UI (HTTP, bypasses Caddy)
     volumes:
       - /path/to/data:/data
     environment:
@@ -52,7 +52,7 @@ docker compose up -d
 docker run -d \
   --name mixarr \
   -p 3443:443 \
-  -p 3010:3010 \
+  -p 3010:3000 \
   -v ~/mixarr-data:/data \
   -e SESSION_SECRET="$(openssl rand -hex 32)" \
   -e BASE_URL="https://YOUR-IP:3443" \
@@ -166,10 +166,10 @@ Configure these in **Settings → AI**.
 
 ### Ports
 
-| Port | Protocol | Usage |
-|------|----------|-------|
-| `3443` | HTTPS | **Primary Access**. Secured via internal Caddy. |
-| `3010` | HTTP | Direct Node.js access (useful for reverse proxies like Traefik/Nginx). |
+| Host port | Container port | Protocol | Usage |
+|-----------|----------------|----------|-------|
+| `3443` | `443` | HTTPS | **Primary Access**. Secured via internal Caddy. |
+| `3010` | `3000` | HTTP | Direct Node.js access (useful for reverse proxies like Traefik/Nginx). |
 
 ### Volumes
 
