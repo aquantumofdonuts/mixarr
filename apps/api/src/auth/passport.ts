@@ -62,7 +62,12 @@ export const sessionMiddleware: RequestHandler = session({
   }),
   proxy: true, // Trust the reverse proxy (Caddy/Next.js) for secure cookies
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    // 'auto' marks the cookie Secure only when the request actually arrived over
+    // HTTPS (direct TLS, or X-Forwarded-Proto: https via the proxy above).
+    // A hard `true` makes express-session drop the Set-Cookie header entirely on
+    // plain-HTTP deployments, which silently breaks login and the setup wizard
+    // for anyone not terminating TLS in front of Mixarr. See issue #75.
+    secure: 'auto',
     httpOnly: true,
     sameSite: 'lax', // CSRF protection: blocks cross-site POST/PUT/DELETE with cookies
     maxAge: 24 * 60 * 60 * 1000, // 24 hours

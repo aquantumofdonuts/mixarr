@@ -10,7 +10,6 @@ import { api } from '@/lib/api';
 import Eye from 'lucide-react/dist/esm/icons/eye';
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off';
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
-import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import MonitorPlay from 'lucide-react/dist/esm/icons/monitor-play';
 import KeyRound from 'lucide-react/dist/esm/icons/key-round';
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
@@ -45,38 +44,6 @@ function LoginPageContent() {
         if (data) setSsoProviders(data.providers);
       });
   }, []);
-
-  // Check for insecure HTTP access in production
-  // Must be AFTER all hooks to comply with React Rules of Hooks
-  const isInsecureAccess = typeof window !== 'undefined' &&
-    window.location.protocol === 'http:' &&
-    process.env.NODE_ENV === 'production';
-
-  // Show warning if accessing over plain HTTP in production
-  if (isInsecureAccess) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-              <AlertTriangle className="h-6 w-6 text-destructive" />
-            </div>
-            <CardTitle className="text-2xl">HTTP Access Not Supported</CardTitle>
-            <CardDescription>
-              Mixarr requires HTTPS to work properly. You&apos;re accessing over plain HTTP.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm font-medium">To fix this:</p>
-            <ul className="list-disc pl-5 space-y-2 text-sm text-muted-foreground">
-              <li>Use the built-in HTTPS port (3443), or</li>
-              <li>Access through your reverse proxy with HTTPS enabled</li>
-            </ul>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
