@@ -433,9 +433,9 @@ SUPERVISOR_PID=$!
 
 echo "=== Mixarr is starting up ==="
 if [ -n "${DISABLE_CADDY}" ]; then
-    echo "Access the web interface at http://[your-ip]:3010"
+    echo "Access the web interface on whichever host port you mapped to container port 3000 (README uses 3010)"
 else
-    echo "Access the web interface at https://[your-ip]:443"
+    echo "Access the web interface on whichever host port you mapped to container port 443 (README uses 3443)"
 fi
 
 # Keep container running
@@ -457,7 +457,7 @@ ENV BASE_URL=""
 ENV DISABLE_CADDY=""
 
 # Expose ports
-EXPOSE 80 443 3010
+EXPOSE 80 443 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
