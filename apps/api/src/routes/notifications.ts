@@ -15,16 +15,17 @@ import prisma from '../lib/db.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
 import { requireAuth } from '../middleware/auth.js';
 import { parseIntParam } from '../utils/params.js';
-import { NotificationEvent } from '../services/notifications.js';
+import { NotificationEvent, SUPPORTED_CHANNEL_TYPES } from '../services/notifications.js';
 import { createLogger } from '../lib/logger.js';
 
 const logger = createLogger('NotificationsRoute');
 
 const router = Router();
 
-// Validation schemas
+// Validation schemas. Only deliverable channel types are accepted (see
+// SUPPORTED_CHANNEL_TYPES); the Prisma enum's other values have no sender.
 const CreateChannelSchema = z.object({
-  type: z.enum(['discord', 'webhook', 'telegram', 'pushover', 'email']),
+  type: z.enum(SUPPORTED_CHANNEL_TYPES),
   name: z.string().min(1).max(100),
   config: z.record(z.any()),
   events: z.array(z.string()),
@@ -365,7 +366,9 @@ async function sendTestNotification(channel: any): Promise<void> {
     }
 
     default:
-      throw new Error(`Test notification not implemented for type: ${channel.type}`);
+      // Unreachable for channels created through this API (the schema only
+      // accepts SUPPORTED_CHANNEL_TYPES); covers rows that predate that check.
+      throw new Error(`Notification channel type '${channel.type}' is not supported`);
   }
 }
 
@@ -382,7 +385,7 @@ function validateConfig(type: string, config: Record<string, any>): string | nul
         return 'Invalid Discord webhook URL format';
       }
       break;
-      
+
     case 'webhook':
       if (!config.url) {
         return 'Webhook URL is required';
@@ -391,26 +394,11 @@ function validateConfig(type: string, config: Record<string, any>): string | nul
         return 'Webhook URL must start with http:// or https://';
       }
       break;
-      
-    case 'telegram':
-      if (!config.botToken || !config.chatId) {
-        return 'Telegram bot token and chat ID are required';
-      }
-      break;
-      
-    case 'pushover':
-      if (!config.userKey || !config.appToken) {
-        return 'Pushover user key and app token are required';
-      }
-      break;
-      
-    case 'email':
-      if (!config.smtpHost || !config.from || !config.to) {
-        return 'SMTP host, from, and to addresses are required';
-      }
-      break;
+
+    default:
+      return `Notification channel type '${type}' is not supported`;
   }
-  
+
   return null;
 }
 

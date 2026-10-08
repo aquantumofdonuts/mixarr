@@ -503,11 +503,39 @@ describe('FeedService', () => {
       });
     });
 
-    // Note: Tests for excluding already-approved/dismissed items are skipped
-    // because the FeedItemAction table doesn't exist yet.
-    // TODO: Add these tests after schema migration:
-    // - it('excludes results user already approved')
-    // - it('excludes results user already dismissed')
+    // Acted-on items are excluded by the result's own status (approve -> 'added',
+    // dismiss -> 'rejected'); there is no separate action table.
+    it('excludes already-approved and already-dismissed results by default', async () => {
+      mockPrisma.subscription.findMany.mockResolvedValue([{ id: 1 }]);
+      mockPrisma.subscriptionResult.findMany.mockResolvedValue([]);
+      mockPrisma.subscriptionResult.count.mockResolvedValue(0);
+
+      const service = new FeedService();
+      await service.getFeedForUser(123, { limit: 50, offset: 0 });
+
+      expect(mockPrisma.subscriptionResult.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: { in: ['pending', 'queued'] } }),
+        }),
+      );
+    });
+
+    it('includes approved and dismissed results when includeActedOn is set', async () => {
+      mockPrisma.subscription.findMany.mockResolvedValue([{ id: 1 }]);
+      mockPrisma.subscriptionResult.findMany.mockResolvedValue([]);
+      mockPrisma.subscriptionResult.count.mockResolvedValue(0);
+
+      const service = new FeedService();
+      await service.getFeedForUser(123, { limit: 50, offset: 0, includeActedOn: true });
+
+      expect(mockPrisma.subscriptionResult.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: { in: ['pending', 'queued', 'added', 'rejected'] },
+          }),
+        }),
+      );
+    });
   });
 
   /**

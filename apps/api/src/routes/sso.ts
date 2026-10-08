@@ -260,8 +260,12 @@ ssoRouter.post('/providers/:type/test', validateParams(ssoProviderTypeParamsSche
           return;
         }
       }
-      default:
-        res.json({ success: true, message: `${type} connection test not yet implemented` });
+      default: {
+        // Every SsoProviderType has a case above; this only runs if a new enum
+        // value is added without a test. Never report an untested provider as OK.
+        const unhandled: never = type;
+        res.json({ success: false, message: `No connection test is available for ${String(unhandled)}` });
+      }
     }
   } catch (error) {
     logger.error('Failed to test SSO provider', { error });
