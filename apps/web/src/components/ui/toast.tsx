@@ -7,124 +7,71 @@ import Info from 'lucide-react/dist/esm/icons/info';
 import X from 'lucide-react/dist/esm/icons/x';
 import XCircle from 'lucide-react/dist/esm/icons/x-circle';
 import { cn } from '@/lib/utils';
+import { Button } from './button';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
-
 interface Toast {
   id: string;
   type: ToastType;
   title: string;
   message?: string;
   duration?: number;
+  action?: { label: string; onClick: () => void };
 }
-
 interface ToastContextValue {
   toasts: Toast[];
   addToast: (toast: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
 }
-
 const ToastContext = React.createContext<ToastContextValue | null>(null);
-
 export function useToast() {
   const context = React.useContext(ToastContext);
-  if (!context) {
-    throw new Error('useToast must be used within a ToastProvider');
-  }
+  if (!context) throw new Error('useToast must be used within a ToastProvider');
   return context;
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = React.useState<Toast[]>([]);
-  const [exitingIds, setExitingIds] = React.useState<Set<string>>(new Set());
-
+  const nextId = React.useRef(0);
+  const timers = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const removeToast = React.useCallback((id: string) => {
-    setExitingIds((prev) => new Set(prev).add(id));
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-      setExitingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }, 150);
+    clearTimeout(timers.current.get(id));
+    timers.current.delete(id);
+    setToasts(previous => previous.filter(toast => toast.id !== id));
+  }, []);
+  const addToast = React.useCallback((toast: Omit<Toast, 'id'>) => {
+    const id = `toast-${++nextId.current}`;
+    setToasts(previous => [...previous, { ...toast, id }]);
+    // Actionable feedback (including Undo) gets ten seconds by default.
+    const duration = toast.duration ?? (toast.action ? 10_000 : 5_000);
+    if (duration > 0) timers.current.set(id, setTimeout(() => removeToast(id), duration));
+  }, [removeToast]);
+  React.useEffect(() => {
+    const activeTimers = timers.current;
+    return () => { activeTimers.forEach(clearTimeout); activeTimers.clear(); };
   }, []);
 
-  const addToast = React.useCallback(
-    (toast: Omit<Toast, 'id'>) => {
-      const id = Math.random().toString(36).substring(2, 9);
-      const newToast = { ...toast, id };
-      setToasts((prev) => [...prev, newToast]);
-
-      const duration = toast.duration ?? 5000;
-      if (duration > 0) {
-        setTimeout(() => {
-          removeToast(id);
-        }, duration);
-      }
-    },
-    [removeToast]
-  );
-
-  return (
-    <ToastContext.Provider value={{ toasts, addToast, removeToast }}>
-      {children}
-      <ToastContainer toasts={toasts} exitingIds={exitingIds} onRemove={removeToast} />
-    </ToastContext.Provider>
-  );
-}
-
-const icons = {
-  success: CheckCircle2,
-  error: XCircle,
-  warning: AlertCircle,
-  info: Info,
-};
-
-const iconColors = {
-  success: 'text-status-success',
-  error: 'text-status-error',
-  warning: 'text-status-warning',
-  info: 'text-status-info',
-};
-
-function ToastContainer({
-  toasts,
-  exitingIds,
-  onRemove,
-}: {
-  toasts: Toast[];
-  exitingIds: Set<string>;
-  onRemove: (id: string) => void;
-}) {
-  return (
-    <div className="fixed bottom-20 md:bottom-4 right-4 z-50 flex flex-col gap-2">
-      {toasts.map((toast) => {
+  return <ToastContext.Provider value={{ toasts, addToast, removeToast }}>
+    {children}
+    <div aria-label="Notifications" role="region" className="fixed bottom-4 left-3 right-3 z-50 flex flex-col gap-2 sm:left-auto sm:w-[25rem] sm:max-w-[calc(100vw-1.5rem)]">
+      {toasts.map(toast => {
         const Icon = icons[toast.type];
-        return (
-          <div
-            key={toast.id}
-            className={cn(
-              'flex items-start gap-3 p-4 rounded-lg shadow-lg bg-card border min-w-[300px] max-w-[400px]',
-              exitingIds.has(toast.id) ? 'animate-slide-right' : 'animate-fade-in'
-            )}
-          >
-            <Icon className={cn('h-5 w-5 flex-shrink-0 mt-0.5', iconColors[toast.type])} />
-            <div className="flex-1 min-w-0">
-              <p className="font-medium">{toast.title}</p>
-              {toast.message && (
-                <p className="mt-1 text-sm text-muted-foreground">{toast.message}</p>
-              )}
-            </div>
-            <button
-              onClick={() => onRemove(toast.id)}
-              className="rounded-lg p-1 hover:bg-accent transition-colors flex-shrink-0"
-            >
-              <X className="h-4 w-4" />
-            </button>
+        return <div key={toast.id} role={toast.type === 'error' ? 'alert' : 'status'} aria-atomic="true"
+          className="flex items-start gap-3 rounded-container border bg-card p-3 text-card-foreground shadow-sm">
+          <Icon aria-hidden="true" className={cn('mt-1 h-5 w-5 shrink-0', iconColors[toast.type])} />
+          <div className="min-w-0 flex-1 break-words">
+            <p className="font-medium">{toast.title}</p>
+            {toast.message && <p className="mt-1 text-sm text-muted-foreground">{toast.message}</p>}
+            {toast.action && <Button variant="outline" className="mt-2" onClick={toast.action.onClick}>{toast.action.label}</Button>}
           </div>
-        );
+          <button type="button" aria-label={`Dismiss ${toast.title}`} onClick={() => removeToast(toast.id)}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-button hover:bg-muted">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>;
       })}
     </div>
-  );
+  </ToastContext.Provider>;
 }
+const icons = { success: CheckCircle2, error: XCircle, warning: AlertCircle, info: Info };
+const iconColors = { success: 'text-status-success', error: 'text-status-error', warning: 'text-status-warning', info: 'text-muted-foreground' };
