@@ -80,7 +80,7 @@ export function SubscriptionCard({ subscription: sub, currentUser: user, isRunni
           {descriptor !== name && <p className="mt-1 break-words text-sm text-muted-foreground">{descriptor}</p>}
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span>{scheduleLabel}</span>
-            {sub.lastRun || sub.lastRunStatus ? <span><span className={sub.lastRunStatus === 'failed' ? 'text-destructive' : undefined}>Last run: {runStatus}{sub.lastRunCount !== null && <> · <span className="font-mono">{sub.lastRunCount}</span> results</>}</span>{sub.lastRun && <> · <time dateTime={sub.lastRun}>{new Date(sub.lastRun).toLocaleString()}</time></>}</span> : <span>Not run yet</span>}
+            {sub.lastRun || sub.lastRunStatus ? <span><span className={sub.lastRunStatus === 'failed' ? 'text-destructive' : undefined}>Last run: {runStatus}{sub.lastRunCount !== null && <> · <span className="font-mono">{sub.lastRunCount}</span> records marked added or queued</>}</span>{sub.lastRun && <> · <time dateTime={sub.lastRun}>{new Date(sub.lastRun).toLocaleString()}</time></>}</span> : <span>Not run yet</span>}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

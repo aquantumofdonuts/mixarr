@@ -52,9 +52,9 @@ describe('subscription catalog rows', () => {
     await user.tab(); expect(screen.getByRole('link', { name: 'View results' })).toHaveFocus();
     await user.tab(); expect(screen.getByRole('button', { name: 'Run now' })).toHaveFocus();
   });
-  it('shows explicit schedule and completed zero result evidence', () => {
+  it('shows explicit schedule and completed zero added-or-queued record evidence', () => {
     show(); expect(screen.getByText('Daily at midnight')).toBeInTheDocument();
-    expect(screen.getByText(/Last run: Completed/)).toHaveTextContent('Last run: Completed · 0 results');
+    expect(screen.getByText(/Last run: Completed/)).toHaveTextContent('Last run: Completed · 0 records marked added or queued');
     expect(screen.getByText('0')).toHaveClass('font-mono');
     expect(screen.queryByText(/0 artists/)).not.toBeInTheDocument();
   });
@@ -66,6 +66,6 @@ describe('subscription catalog rows', () => {
   it('does not manufacture a result count or run date without evidence', () => {
     show({ schedule: null, lastRun: null, lastRunStatus: null, lastRunCount: null });
     expect(screen.getByText('Manual only')).toBeInTheDocument(); expect(screen.getByText('Not run yet')).toBeInTheDocument();
-    expect(screen.queryByText(/0 results/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/0 records marked added or queued/)).not.toBeInTheDocument();
   });
 });
