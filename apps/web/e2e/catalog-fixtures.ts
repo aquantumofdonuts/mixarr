@@ -30,6 +30,7 @@ interface CatalogFixtures {
 }
 
 export const test = base.extend<CatalogFixtures>({
+  serviceWorkers: 'block',
   catalogRole: ['admin', { option: true }],
   catalogScenario: ['ready', { option: true }],
   catalogAuthenticated: [true, { option: true }],

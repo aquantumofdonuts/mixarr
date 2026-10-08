@@ -134,7 +134,7 @@ export function FeedCard({
                   onClick={() => onApprove(id)}
                   className="p-3 rounded-full bg-status-success hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  <Check className="w-6 h-6 text-white" aria-hidden="true" />
+                  <Check className="w-6 h-6 text-primary-foreground" aria-hidden="true" />
                 </button>
                 <button
                   type="button"
@@ -143,7 +143,7 @@ export function FeedCard({
                   onClick={() => onDismiss(id)}
                   className="p-3 rounded-full bg-status-error hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  <X className="w-6 h-6 text-white" aria-hidden="true" />
+                  <X className="w-6 h-6 text-primary-foreground" aria-hidden="true" />
                 </button>
               </>
             )}

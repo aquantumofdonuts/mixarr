@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss';
 
-const config: Config = {
+const config = {
   darkMode: ['selector', '[data-theme="dark"]'],
   content: [
     './src/**/*.{js,ts,jsx,tsx,mdx}',
@@ -46,10 +46,10 @@ const config: Config = {
           border: 'hsl(var(--sidebar-border))',
         },
         status: {
-          success: 'hsl(var(--success))',
-          warning: 'hsl(var(--warning))',
-          error: 'hsl(var(--error))',
-          info: 'hsl(var(--info, 210 60% 50%))',
+          success: { DEFAULT: 'hsl(var(--success))', surface: 'hsl(var(--success-background))' },
+          warning: { DEFAULT: 'hsl(var(--warning))', surface: 'hsl(var(--warning-background))' },
+          error: { DEFAULT: 'hsl(var(--error))', surface: 'hsl(var(--error-background))' },
+          info: { DEFAULT: 'hsl(var(--info))', surface: 'hsl(var(--info-background))' },
         },
       },
       width: {
@@ -126,10 +126,7 @@ const config: Config = {
         'elevation-2': '0 4px 16px rgba(0, 0, 0, 0.1)',
         'elevation-3': '0 8px 30px rgba(0, 0, 0, 0.14)',
         'elevation-4': '0 16px 48px rgba(0, 0, 0, 0.18)',
-        // ponytail: compatibility until existing glow consumers migrate in T03.
-        'glow-sm': 'none',
-        'glow-md': 'none',
-        'glow-primary': 'none',
+
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
@@ -137,6 +134,6 @@ const config: Config = {
     },
   },
   plugins: [],
-};
+} satisfies Config;
 
 export default config;

@@ -9,18 +9,18 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground shadow-sm hover:shadow-glow-sm hover:brightness-110 active:brightness-95 active:scale-[0.98]',
+        default: 'bg-primary text-primary-foreground hover:bg-primary-hover',
         destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
-        outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
+        outline: 'border border-input bg-transparent hover:bg-muted',
+        secondary: 'border border-input bg-transparent text-foreground hover:bg-muted',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
-        link: 'text-primary underline-offset-4 hover:underline',
+        link: 'text-link underline-offset-4 hover:underline',
       },
       size: {
-        default: 'h-10 px-4 py-2',
-        sm: 'h-9 rounded-button px-3',
-        lg: 'h-11 rounded-md px-8',
-        icon: 'h-10 w-10',
+        default: 'min-h-11 px-4 py-2',
+        sm: 'min-h-11 px-3 py-2 sm:min-h-9',
+        lg: 'min-h-11 px-8 py-2',
+        icon: 'h-11 w-11',
       },
     },
     defaultVariants: {
@@ -37,11 +37,12 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, isLoading, children, disabled, ...props }, ref) => {
+  ({ className, variant, size, isLoading, children, disabled, type = 'button', ...props }, ref) => {
     return (
       <button
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
+        type={type}
         disabled={disabled || isLoading}
         aria-busy={isLoading}
         {...props}

@@ -3,18 +3,18 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const badgeVariants = cva(
-  'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+  'inline-flex items-center rounded-button border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-primary text-primary-foreground hover:bg-primary/80',
-        secondary: 'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        destructive: 'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80',
+        default: 'border-transparent bg-primary text-primary-foreground',
+        secondary: 'border-transparent bg-secondary text-secondary-foreground',
+        destructive: 'border-transparent bg-destructive text-destructive-foreground',
         outline: 'text-foreground',
-        success: 'border-transparent bg-status-success text-white hover:bg-status-success/80',
-        warning: 'border-transparent bg-status-warning text-white hover:bg-status-warning/80',
-        error: 'border-transparent bg-status-error text-white hover:bg-status-error/80',
-        info: 'border-transparent bg-status-info text-white hover:bg-status-info/80',
+        success: 'border-transparent bg-status-success-surface text-status-success',
+        warning: 'border-transparent bg-status-warning-surface text-status-warning',
+        error: 'border-transparent bg-status-error-surface text-status-error',
+        info: 'border-transparent bg-status-info-surface text-status-info',
       },
     },
     defaultVariants: {
