@@ -12,6 +12,8 @@ import { z } from 'zod';
 import { FeedService, NotFoundError, ForbiddenError } from '../services/FeedService.js';
 import { createLogger } from '../lib/logger.js';
 import { getLidarrServiceWithConfig, getLastfmService } from '../lib/connection-resolver.js';
+import prisma from '../lib/db.js';
+import { restoreDecision, restoreDecisionSchema } from '../lib/decision-undo.js';
 import { DecisionError } from '../lib/decision.js';
 import { cacheService } from '../services/cache.js';
 
@@ -79,6 +81,17 @@ export function feedRouter(feedService?: FeedService): Router {
     }
   });
 
+  router.post('/restore', requireAuth, async (req: Request, res: Response): Promise<void> => {
+    const body = restoreDecisionSchema.safeParse(req.body);
+    if (!body.success) { res.status(400).json({ error: 'Invalid restoration request' }); return; }
+    try {
+      res.json(await restoreDecision(prisma, body.data.undoToken, req.user!.id, 'feed-dismiss'));
+    } catch (error) {
+      if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
+      res.status(500).json({ error: 'Failed to restore decision' });
+    }
+  });
+
   /**
    * POST /api/feed/:id/approve
    * Approves a feed item, updating status to 'added' and removing from review.
@@ -129,7 +142,7 @@ export function feedRouter(feedService?: FeedService): Router {
       const userId = req.user!.id;
 
       const result = await service.dismiss(feedId, userId);
-      res.json({ success: true, artistName: result.artistName });
+      res.json({ success: true, ...result });
     } catch (error) {
       if (error instanceof DecisionError) {
         res.status(error.status).json({ error: error.message, code: error.code });

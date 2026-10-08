@@ -1,6 +1,6 @@
 'use client';
 
-import type { AcquisitionOutcome, AcquisitionState } from '@mixarr/shared-types';
+import type { AcquisitionOutcome, AcquisitionState, UndoDecisionResponse } from '@mixarr/shared-types';
 
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { api } from './api';
@@ -157,46 +157,33 @@ export function useApproveFeedItem() {
 
 export function useDismissFeedItem() {
   const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await api.post<{ artistName: string }>(
-        `/api/feed/${id}/dismiss`
-      );
+      const { data, error } = await api.post<{ artistName: string } & UndoDecisionResponse>(`/api/feed/${id}/dismiss`);
       if (error) throw new Error(error);
       return data!;
     },
-    onMutate: async (id) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.feed });
-      // Prefix-match all ['feed', limit] queries — see useApproveFeedItem
-      const previousData = queryClient.getQueriesData({ queryKey: queryKeys.feed });
-
-      queryClient.setQueriesData({ queryKey: queryKeys.feed }, (old: any) => {
-        if (!old?.pages) return old;
-        return {
-          ...old,
-          pages: old.pages.map((page: FeedResponse) => ({
-            ...page,
-            items: page.items.map((item: FeedItem) =>
-              item.id === id ? { ...item, status: 'dismissed' as const } : item
-            ),
-            stats: {
-              ...page.stats,
-              pending: Math.max(0, page.stats.pending - 1),
-            },
-          })),
-        };
-      });
-
-      return { previousData };
-    },
-    onError: (_err, _id, context) => {
-      for (const [key, data] of context?.previousData ?? []) {
-        queryClient.setQueryData(key, data);
-      }
-    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.feed });
+      queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
+    },
+  });
+}
+
+/** Restoration is a server mutation now, with no delayed or client-only decision rollback. */
+export function useRestoreDecision(kind: 'feed' | 'review') {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (undoToken: string) => {
+      const endpoint = kind === 'feed' ? '/api/feed/restore' : '/api/imports/review/restore';
+      const { data, error } = await api.post<{ restoredIds: number[] }>(endpoint, { undoToken });
+      if (error) throw new Error(error);
+      return data!;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: kind === 'feed' ? queryKeys.feed : ['review'] });
+      if (kind === 'feed') queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
     },
   });
@@ -450,8 +437,9 @@ export function useUpdateReviewItem() {
   
   return useMutation({
     mutationFn: async ({ id, status }: { id: number; status: 'approved' | 'rejected' }) => {
-      const { error } = await api.put(`/api/imports/review/${id}`, { status });
+      const { data, error } = await api.put<Partial<UndoDecisionResponse>>(`/api/imports/review/${id}`, { status });
       if (error) throw new Error(error);
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review'] });
@@ -465,8 +453,9 @@ export function useBulkUpdateReview() {
   
   return useMutation({
     mutationFn: async ({ ids, status }: { ids: number[]; status: 'approved' | 'rejected' }) => {
-      const { error } = await api.post('/api/imports/review/bulk', { ids, status });
+      const { data, error } = await api.post<Partial<UndoDecisionResponse>>('/api/imports/review/bulk', { ids, status });
       if (error) throw new Error(error);
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review'] });

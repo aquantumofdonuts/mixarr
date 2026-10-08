@@ -98,15 +98,15 @@ export const reviewQueueQuerySchema = z.object({
  * Body for PUT /review/:id — single review item status update
  */
 export const updateReviewItemSchema = z.object({
-  status: reviewStatusEnum,
+  status: z.enum(['approved', 'rejected']),
 });
 
 /**
  * Body for POST /review/bulk — bulk review
  */
 export const bulkReviewSchema = z.object({
-  ids: z.array(z.number().int().positive()).min(1, 'At least one ID is required'),
-  status: reviewStatusEnum,
+  ids: z.array(z.number().int().positive().safe()).min(1, 'At least one ID is required').max(100),
+  status: z.enum(['approved', 'rejected']),
 });
 
 // ============================================================================

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
-import { useFeed, useApproveFeedItem, useDismissFeedItem } from '../hooks';
+import { useFeed, useApproveFeedItem, useDismissFeedItem, useRestoreDecision } from '../hooks';
 
 // Mock api module
 vi.mock('../api', () => ({
@@ -147,5 +147,32 @@ describe('confirmed acquisition cache behavior', () => {
     await pending;
     expect(client.getQueryData<{ pages: typeof page[] }>(['feed', 20])!.pages[0].items[0].status).toBe('failed');
     client.clear();
+  });
+});
+
+describe('server decision restoration', () => {
+  it.each(['feed', 'review'] as const)('restores %s immediately and invalidates its actual cache scope', async kind => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    vi.mocked(api.post).mockResolvedValueOnce({ data: { restoredIds: [1, 2] }, error: null, status: 200 });
+    const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const { result } = renderHook(() => useRestoreDecision(kind), { wrapper });
+    expect(await result.current.mutateAsync('opaque-signed-token')).toEqual({ restoredIds: [1, 2] });
+    expect(api.post).toHaveBeenCalledWith(kind === 'feed' ? '/api/feed/restore' : '/api/imports/review/restore', { undoToken: 'opaque-signed-token' });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: [kind === 'feed' ? 'feed' : 'review'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['dashboard', 'stats'] });
+    client.clear();
+  });
+});
+
+describe('rejected decision restoration', () => {
+  it('leaves cached scopes untouched when the token is expired or conflicts', async () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    vi.mocked(api.post).mockResolvedValueOnce({ data: null, error: 'Decision restoration has expired', status: 409 });
+    const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const { result } = renderHook(() => useRestoreDecision('feed'), { wrapper });
+    await expect(result.current.mutateAsync('expired-token')).rejects.toThrow('expired');
+    expect(invalidate).not.toHaveBeenCalled(); client.clear();
   });
 });

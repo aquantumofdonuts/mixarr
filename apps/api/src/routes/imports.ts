@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/db.js';
+import { DecisionError, nextRevision } from '../lib/decision.js';
+import { rejectReviews, restoreDecision, restoreDecisionSchema } from '../lib/decision-undo.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
 import {
@@ -27,7 +29,7 @@ import { parseSpotifyPlaylistUrl, importPublicPlaylist } from '../services/publi
 import { notificationService } from '../services/notifications.js';
 import { createLogger } from '../lib/logger.js';
 import { Prisma } from '@prisma/client';
-import type { ImportSource, ReviewStatus } from '@prisma/client';
+import type { ImportSource, ReviewStatus, ReviewItem } from '@prisma/client';
 import type { Request } from 'express';
 import { LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
 
@@ -240,14 +242,39 @@ importsRouter.get('/review/queue', validateQuery(reviewQueueQuerySchema), async 
   }
 });
 
+// A provider response can race a reject/restore; never overwrite its revision.
+async function updateReviewDecision(item: ReviewItem, data: Prisma.ReviewItemUpdateManyMutationInput): Promise<void> {
+  await prisma.$transaction(async tx => {
+    const changed = await tx.reviewItem.updateMany({
+      where: { id: item.id, userId: item.userId, status: item.status, updatedAt: item.updatedAt },
+      data: { ...data, updatedAt: nextRevision([item.updatedAt]) },
+    });
+    if (changed.count !== 1) throw new DecisionError(409, 'DECISION_CONFLICT', 'Review item changed');
+  }, { timeout: 5_000 });
+}
+
+// Static restoration route precedes dynamic review IDs.
+importsRouter.post('/review/restore', validateBody(restoreDecisionSchema), async (req, res) => {
+  try {
+    res.json(await restoreDecision(prisma, req.body.undoToken, req.user!.id, 'review-reject'));
+  } catch (error) {
+    if (error instanceof DecisionError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+    } else {
+      log.error('Failed to restore review decision', { userId: req.user!.id });
+      res.status(500).json({ error: 'Failed to restore review decision' });
+    }
+  }
+});
+
 // Update review item status
 importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBody(updateReviewItemSchema), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { status } = req.body;
 
-    const item = await prisma.reviewItem.findUnique({
-      where: { id },
+    const item = await prisma.reviewItem.findFirst({
+      where: { id, userId: req.user!.id },
     });
 
     if (!item) {
@@ -255,19 +282,17 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
       return;
     }
 
-    // Users can only update their own, admins can update any
-    if (req.user!.role !== 'admin' && item.userId !== req.user!.id) {
+    // Review mutation and Undo both require the actor to own the record.
+    if (item.userId !== req.user!.id) {
       res.status(404).json({ error: 'Review item not found' });
       return;
     }
 
-    // If rejecting or setting to pending, just update status
-    if (status !== 'approved') {
-      await prisma.reviewItem.update({
-        where: { id },
-        data: { status },
-      });
-      res.json({ success: true });
+    if (item.status !== 'pending') {
+      throw new DecisionError(409, 'DECISION_CONFLICT', 'Review item already processed');
+    }
+    if (status === 'rejected') {
+      res.json({ success: true, ...await rejectReviews(prisma, [id], req.user!.id) });
       return;
     }
 
@@ -296,10 +321,7 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
 
     // Skip if already in library
     if (await cache.exists({ name: item.artistName, mbid: item.mbid || undefined })) {
-      await prisma.reviewItem.update({
-        where: { id },
-        data: { status: 'approved' },
-      });
+      await updateReviewDecision(item, { status: 'approved' });
       await addLogEntry('info', 'review', `Artist "${item.artistName}" already in library`, {
         artistName: item.artistName,
         mbid: item.mbid,
@@ -348,10 +370,7 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
         rootFolders[0].path
       );
       
-      await prisma.reviewItem.update({
-        where: { id },
-        data: { status: 'approved', mbid: foreignArtistId },
-      });
+      await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
 
       await addLogEntry('info', 'review', `Added album "${item.albumName}" by "${item.artistName}" to Lidarr`, {
         artistName: item.artistName,
@@ -363,7 +382,7 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
       // Send notification
       await notificationService.send(req.user!.id, 'artist.added', {
         artistName: `${item.albumName} by ${item.artistName}`,
-      });
+      }).catch(() => log.warn('Review notification failed', { userId: req.user!.id }));
 
       res.json({ success: true, added: true, itemType: 'album' });
     } else {
@@ -381,10 +400,7 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
         lidarrConfig.monitorNewItems || 'all'
       );
 
-      await prisma.reviewItem.update({
-        where: { id },
-        data: { status: 'approved', mbid: foreignArtistId },
-      });
+      await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
 
       await addLogEntry('info', 'review', `Added artist "${item.artistName}" to Lidarr`, {
         artistName: item.artistName,
@@ -394,11 +410,15 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
       // Send notification
       await notificationService.send(req.user!.id, 'artist.added', {
         artistName: item.artistName,
-      });
+      }).catch(() => log.warn('Review notification failed', { userId: req.user!.id }));
 
       res.json({ success: true, added: true, itemType: 'artist' });
     }
   } catch (error) {
+    if (error instanceof DecisionError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+      return;
+    }
     const errorMsg = error instanceof Error ? error.message : 'Failed to update review item';
     log.error('PUT /review/:id error:', error);
     await addLogEntry('error', 'review', `Failed to add artist to Lidarr: ${errorMsg}`, {
@@ -409,7 +429,7 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
     await notificationService.send(req.user!.id, 'artist.failed', {
       artistName: 'Unknown',
       error: errorMsg,
-    });
+    }).catch(() => log.warn('Review notification failed', { userId: req.user!.id }));
 
     res.status(500).json({ error: errorMsg });
   }
@@ -420,16 +440,8 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
   try {
     const { ids, status } = req.body;
 
-    // If rejecting, just update status
-    if (status === 'rejected' || status === 'pending') {
-      await prisma.reviewItem.updateMany({
-        where: {
-          id: { in: ids },
-          userId: req.user!.id,
-        },
-        data: { status },
-      });
-      res.json({ success: true, added: 0, failed: 0 });
+    if (status === 'rejected') {
+      res.json({ success: true, added: 0, failed: 0, ...await rejectReviews(prisma, ids, req.user!.id) });
       return;
     }
 
@@ -438,13 +450,11 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
       where: {
         id: { in: ids },
         userId: req.user!.id,
-        status: 'pending',
       },
     });
 
-    if (items.length === 0) {
-      res.json({ success: true, added: 0, failed: 0 });
-      return;
+    if (items.length !== new Set<number>(ids).size || items.some(item => item.status !== 'pending')) {
+      throw new DecisionError(409, 'DECISION_CONFLICT', 'A selected review is unavailable or already processed');
     }
 
     // Get Lidarr connection (user's own or global)
@@ -497,10 +507,7 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
         // For artists: Skip if already in library
         if (!isAlbum && await cache.exists({ name: item.artistName, mbid: item.mbid || undefined })) {
           log.debug(`Artist ${item.artistName} already in library, marking approved`);
-          await prisma.reviewItem.update({
-            where: { id: item.id },
-            data: { status: 'approved' },
-          });
+          await updateReviewDecision(item, { status: 'approved' });
           await addLogEntry('info', 'review', `Artist "${item.artistName}" already in library`, {
             artistName: item.artistName,
             mbid: item.mbid,
@@ -531,10 +538,7 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
         if (!foreignArtistId) {
           log.debug(`No MBID found for ${item.artistName}`);
           failedItems.push({ name: item.artistName, error: 'Artist not found' });
-          await prisma.reviewItem.update({
-            where: { id: item.id },
-            data: { status: 'rejected' },
-          });
+          await updateReviewDecision(item, { status: 'rejected' });
           await addLogEntry('warn', 'review', `Artist "${item.artistName}" not found in Lidarr or MusicBrainz`, {
             artistName: item.artistName,
           });
@@ -560,10 +564,7 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
           if (!albumMbid) {
             log.debug(`No album MBID found for "${item.albumName}" by ${item.artistName}`);
             failedItems.push({ name: `${item.artistName} - ${item.albumName}`, error: 'Album not found' });
-            await prisma.reviewItem.update({
-              where: { id: item.id },
-              data: { status: 'rejected' },
-            });
+            await updateReviewDecision(item, { status: 'rejected' });
             failed++;
             continue;
           }
@@ -607,19 +608,16 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
           });
         }
 
-        await prisma.reviewItem.update({
-          where: { id: item.id },
-          data: { status: 'approved', mbid: foreignArtistId },
-        });
+        await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
         added++;
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         log.error(`Failed to add ${item.artistName}:`, errorMsg);
         failedItems.push({ name: item.artistName, error: errorMsg });
-        await prisma.reviewItem.update({
-          where: { id: item.id },
-          data: { status: 'rejected' },
-        });
+        if (!(error instanceof DecisionError)) {
+          try { await updateReviewDecision(item, { status: 'rejected' }); }
+          catch (conflict) { if (!(conflict instanceof DecisionError)) throw conflict; }
+        }
         failed++;
       }
     }
@@ -635,6 +633,10 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
 
     res.json({ success: true, added, failed, failedItems });
   } catch (error) {
+    if (error instanceof DecisionError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+      return;
+    }
     log.error('Failed to process review items', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,

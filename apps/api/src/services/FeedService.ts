@@ -10,6 +10,8 @@
 
 import prisma from '../lib/db.js';
 import type { AcquisitionOutcome, AcquisitionState } from '@mixarr/shared-types';
+import { createDecisionUndo } from '../lib/decision-undo.js';
+import type { UndoDecisionResponse } from '@mixarr/shared-types';
 import { DecisionError, nextRevision } from '../lib/decision.js';
 import { readBeforeDeadline } from '../lib/acquisition-deadline.js';
 import { invalidateLidarrCache } from './lidarr.js';
@@ -796,7 +798,7 @@ export class FeedService {
     return { artistName, outcome };
   }
 
-  async dismiss(feedId: string, userId: number): Promise<{ artistName: string }> {
+  async dismiss(feedId: string, userId: number): Promise<{ artistName: string } & UndoDecisionResponse> {
     return this.prismaClient.$transaction(async tx => {
       const results = await new FeedService(tx as unknown as PrismaClient).ownedResults(feedId, userId);
       if (results.some(row => row.status === 'adding')) throw new DecisionError(409, 'IN_PROGRESS', 'Artist is already being added');
@@ -804,6 +806,10 @@ export class FeedService {
         throw new DecisionError(409, 'DECISION_CONFLICT', 'Artist has already been processed');
       }
       const revision = nextRevision(results.map(row => row.processedAt));
+      const undo = createDecisionUndo(userId, 'feed-dismiss', results.map(row => ({
+        table: 'subscription-result', id: row.id, originalStatus: row.status as 'pending' | 'queued' | 'failed',
+        revision: revision.getTime(),
+      })));
       for (const row of results) {
         const changed = await tx.subscriptionResult.updateMany({
           where: { id: row.id, subscription: { userId }, status: row.status, processedAt: row.processedAt },
@@ -811,7 +817,7 @@ export class FeedService {
         });
         if (changed.count !== 1) throw new DecisionError(409, 'DECISION_CONFLICT', 'Artist decision changed; refresh and retry');
       }
-      return { artistName: results[0].name };
+      return { artistName: results[0].name, ...undo };
     });
   }
 }
