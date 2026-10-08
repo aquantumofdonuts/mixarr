@@ -118,7 +118,7 @@ function AuthenticatedLayout({ children }: ProtectedLayoutProps) {
         </header>
         <div className="mx-auto px-3 py-4 lg:px-4">
           <ListScrollContext.Provider value={scrollElement}>{children}
-            {(artistRoutes.includes(pathname) || /^\/subscriptions\/\d+$/.test(pathname)) && <ArtistInspector restoreContext={pathname !== '/'} />}
+            {(artistRoutes.includes(pathname) || /^\/subscriptions\/\d+$/.test(pathname)) && <ArtistInspector restoreContext={pathname !== '/' && !/^\/subscriptions\/[1-9]\d*$/.test(pathname)} />}
           </ListScrollContext.Provider>
         </div>
       </main>

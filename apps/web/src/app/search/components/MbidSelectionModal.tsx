@@ -31,7 +31,7 @@ export function MbidSelectionModal({
     >
       <div className="space-y-2">
         <p className="text-sm text-muted-foreground mb-4">
-          Multiple matches found in MusicBrainz for &quot;{artist?.artistName}&quot;.
+          MusicBrainz matches for &quot;{artist?.artistName}&quot;.
           Please select the correct artist:
         </p>
         {candidates?.map((candidate) => (

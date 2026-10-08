@@ -892,6 +892,9 @@ export interface SubscriptionResult {
   createdAt: string;
   imageUrl?: string | null;
   inLibrary?: boolean;
+  albumMbid?: string | null;
+  errorMessage?: string | null;
+  runId?: number | null;
 }
 
 export interface SubscriptionResultsPage {
@@ -913,7 +916,7 @@ export function useSubscriptionDetail(id: number) {
       return data!.subscription;
     },
     staleTime: 30 * 1000,
-    enabled: Number.isFinite(id),
+    enabled: Number.isSafeInteger(id) && id > 0,
   });
 }
 
@@ -926,7 +929,7 @@ export function useSubscriptionRuns(id: number) {
       return data!.runs;
     },
     staleTime: 30 * 1000,
-    enabled: Number.isFinite(id),
+    enabled: Number.isSafeInteger(id) && id > 0,
   });
 }
 
@@ -944,8 +947,8 @@ export function useSubscriptionResults(id: number, status: string, page: number)
       return data!;
     },
     staleTime: 30 * 1000,
-    placeholderData: (prev) => prev,
-    enabled: Number.isFinite(id),
+    placeholderData: (prev, query) => query?.queryKey[1] === id && query.queryKey[3] === status ? prev : undefined,
+    enabled: Number.isSafeInteger(id) && id > 0,
   });
 }
 
@@ -958,7 +961,7 @@ export function useSubscriptionRunDetails(id: number, runId: number | null) {
       return data!;
     },
     staleTime: 30 * 1000,
-    enabled: Number.isFinite(id) && runId !== null,
+    enabled: Number.isSafeInteger(id) && id > 0 && runId !== null && Number.isSafeInteger(runId) && runId > 0,
   });
 }
 
@@ -969,13 +972,16 @@ function updateResultStatus(
   resultId: number,
   newStatus: string
 ) {
-  queryClient.setQueriesData<SubscriptionResultsPage>(
-    { queryKey: ['subscriptions', subscriptionId, 'results'] },
-    (old) =>
-      old
-        ? { ...old, results: old.results.map((r) => (r.id === resultId ? { ...r, status: newStatus } : r)) }
-        : old
-  );
+  for (const [key, old] of queryClient.getQueriesData<SubscriptionResultsPage>({ queryKey: ['subscriptions', subscriptionId, 'results'] })) {
+    const row = old?.results.find(result => result.id === resultId);
+    if (!old || !row || row.status === newStatus) continue;
+    const filter = key[3];
+    const results = old.results.flatMap(result => result.id !== resultId ? [result] : !filter || filter === newStatus ? [{ ...result, status: newStatus }] : []);
+    queryClient.setQueryData(key, { ...old, results,
+      total: filter && filter !== newStatus ? Math.max(0, old.total - 1) : old.total,
+      statusCounts: { ...old.statusCounts, [row.status]: Math.max(0, (old.statusCounts[row.status] || 0) - 1), [newStatus]: (old.statusCounts[newStatus] || 0) + 1 },
+    });
+  }
   // For run-details views (shape: { run, results }) — skip plain runs-list (SubscriptionRun[])
   queryClient.setQueriesData<{ run: SubscriptionRun; results: SubscriptionResult[] }>(
     { queryKey: ['subscriptions', subscriptionId, 'runs'] },
@@ -986,17 +992,37 @@ function updateResultStatus(
   );
 }
 
+function currentActor(queryClient: ReturnType<typeof useQueryClient>) {
+  return queryClient.getQueryData<{ user: { id: number } | null }>(queryKeys.auth)?.user?.id;
+}
+
 export function useApproveResult(subscriptionId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (resultId: number) => {
-      const { error } = await api.post(`/api/subscriptions/${subscriptionId}/results/${resultId}/approve`);
-      if (error) throw new Error(error);
+    mutationKey: ['subscriptions', subscriptionId, 'approve'],
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
+    mutationFn: async (input: number | { resultId: number; mbid?: string }) => {
+      const { resultId, mbid } = typeof input === 'number' ? { resultId: input, mbid: undefined } : input;
+      const { data, error, code, status } = await api.post<{ success: boolean; outcome: string; message: string }>(
+        `/api/subscriptions/${subscriptionId}/results/${resultId}/approve`, mbid ? { mbid } : undefined, { timeoutMs: 65000 });
+      if (error) throw Object.assign(new Error(error), { code, status });
+      if (!data?.success || !['added', 'already-in-library'].includes(data.outcome)) {
+        throw Object.assign(new Error('Provider outcome could not be confirmed; retry to check membership'), { code: 'ACQUISITION_UNCERTAIN' });
+      }
+      return data;
     },
-    onSuccess: (_data, resultId) => {
-      updateResultStatus(queryClient, subscriptionId, resultId, 'added');
-      // Mark stale without triggering an immediate refetch — the cache is already updated surgically above
-      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'], refetchType: 'none' });
+    onSuccess: (_data, input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
+      updateResultStatus(queryClient, subscriptionId, typeof input === 'number' ? input : input.resultId, 'added');
+      queryClient.invalidateQueries({ queryKey: ['discover', 'library'] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+    },
+    onSettled: (_data, _error, _input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'] });
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'runs'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.feed });
     },
   });
 }
@@ -1004,14 +1030,19 @@ export function useApproveResult(subscriptionId: number) {
 export function useRejectResult(subscriptionId: number) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: ['subscriptions', subscriptionId, 'reject'],
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
     mutationFn: async (resultId: number) => {
       const { error } = await api.post(`/api/subscriptions/${subscriptionId}/results/${resultId}/reject`);
       if (error) throw new Error(error);
     },
-    onSuccess: (_data, resultId) => {
+    onSuccess: (_data, resultId, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
       updateResultStatus(queryClient, subscriptionId, resultId, 'rejected');
-      // Mark stale without triggering an immediate refetch — the cache is already updated surgically above
-      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'], refetchType: 'none' });
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'] });
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'runs'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.feed });
     },
   });
 }

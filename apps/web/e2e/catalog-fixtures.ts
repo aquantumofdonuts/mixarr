@@ -41,6 +41,13 @@ export const test = base.extend<CatalogFixtures>({
     const queue = catalogScenario === 'empty' ? [] : [...catalogQueue];
     const added = new Set<string>();
     const dismissed = new Map<string, FeedItem>();
+    const subscriptionResults = Array.from({ length: 53 }, (_, index) => ({
+      id: 101 + index, itemType: 'artist', name: index === 0 ? 'Unknown Common Name' : `Result Artist ${index + 1}`,
+      artistName: null, mbid: index === 0 ? null : ARTIST_IDS[index % 2], status: 'pending', skipReason: null,
+      createdAt: recordedAt, runId: 71, imageUrl: null,
+    }));
+    const subscription = { id: 11, name: 'Weekly discoveries', type: 'lastfm_similar', config: { artist: 'Common Name' }, resultHandling: 'queue', resultLimit: 50, isActive: true, schedule: '0 0 * * 0', lastRun: recordedAt };
+    const runs = [71, 72].map(id => ({ id, status: 'completed', resultsCount: id === 71 ? 53 : 0, addedCount: 0, skippedCount: 0, errorMessage: null, startedAt: recordedAt, completedAt: recordedAt }));
     const unhandled: string[] = [];
     await page.context().route(/\/api\//, async (route) => {
       const request = route.request();
@@ -49,6 +56,20 @@ export const test = base.extend<CatalogFixtures>({
       const method = request.method();
       const reply = (json: unknown, status = 200) => route.fulfill({ status, json });
       if (method === 'GET') {
+        if (path === '/api/subscriptions/11') return reply({ subscription });
+        if (path === '/api/subscriptions/11/runs') return reply({ runs });
+        if (/^\/api\/subscriptions\/11\/runs\/(71|72)$/.test(path)) {
+          const id = Number(path.split('/').at(-1));
+          return reply({ run: runs.find(run => run.id === id), results: id === 71 ? subscriptionResults : [] });
+        }
+        if (path === '/api/subscriptions/11/results') {
+          const status = url.searchParams.get('status');
+          const matches = subscriptionResults.filter(result => !status || result.status === status);
+          const offset = Number(url.searchParams.get('offset') || 0), limit = Number(url.searchParams.get('limit') || 50);
+          const statusCounts = subscriptionResults.reduce((counts, result) => ({ ...counts, [result.status]: (counts[result.status] || 0) + 1 }), {} as Record<string, number>);
+          return reply({ results: matches.slice(offset, offset + limit), total: matches.length, statusCounts, offset, limit });
+        }
+        if (path === '/api/search/musicbrainz/artist') return reply({ results: ARTIST_IDS.map((id, index) => ({ id, name: 'Unknown Common Name', disambiguation: index ? 'Canadian ensemble' : 'British solo artist', country: index ? 'CA' : 'GB' })) });
         const artistPath = path.match(/^\/api\/search\/artist\/([^/]+)\/(detail|releases)$/);
         if (artistPath) {
           const mbid = artistPath[1];
@@ -100,6 +121,17 @@ export const test = base.extend<CatalogFixtures>({
         }
       }
       if (method === 'POST') {
+        const decision = path.match(/^\/api\/subscriptions\/11\/results\/(\d+)\/(approve|reject)$/);
+        if (decision) {
+          const result = subscriptionResults.find(result => result.id === Number(decision[1]));
+          if (!result) return reply({ error: 'Result not found' }, 404);
+          if (decision[2] === 'reject') { result.status = 'rejected'; return reply({ success: true }); }
+          const mbid = result.mbid || request.postDataJSON()?.mbid;
+          if (!ARTIST_IDS.includes(mbid)) return reply({ error: 'Choose an identity', code: 'IDENTITY_REQUIRED' }, 422);
+          result.mbid = mbid; result.status = 'added'; added.add(mbid);
+          return reply({ success: true, outcome: 'added', message: 'Artist added to Lidarr' });
+        }
+        if (path === '/api/jobs/run/subscription/11') return reply({ success: true });
         if (path === '/api/auth/login') {
           const body = request.postDataJSON();
           if (body.username !== user.username || body.password !== 'catalog-fixture-password') return reply({ error: 'Invalid username or password' }, 401);
