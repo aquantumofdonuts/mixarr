@@ -48,6 +48,8 @@ export const test = base.extend<CatalogFixtures>({
     }));
     const subscription = { id: 11, name: 'Weekly discoveries', type: 'lastfm_similar', config: { artist: 'Common Name' }, resultHandling: 'queue', resultLimit: 50, isActive: true, schedule: '0 0 * * 0', lastRun: recordedAt };
     const runs = [71, 72].map(id => ({ id, status: 'completed', resultsCount: id === 71 ? 53 : 0, addedCount: 0, skippedCount: 0, errorMessage: null, startedAt: recordedAt, completedAt: recordedAt }));
+    let feedRecordsMarkedAdded = 0;
+    const pendingDiscoveryRecords = () => items.filter(item => !['adding', 'failed', 'uncertain'].includes(item.acquisitionState || '')).reduce((count, item) => count + item.id.slice('feed-'.length).split('-').length, 0);
     const unhandled: string[] = [];
     await page.context().route(/\/api\//, async (route) => {
       const request = route.request();
@@ -98,9 +100,9 @@ export const test = base.extend<CatalogFixtures>({
             if (catalogScenario === 'error') return reply({ error: 'Catalog source unavailable' }, 503);
             const offset = Number(url.searchParams.get('offset') || 0);
             const limit = Number(url.searchParams.get('limit') || 50);
-            return reply({ items: items.slice(offset, offset + limit).map(({ status: _status, ...item }) => item), total: items.length, stats: { pending: items.length, addedToday: 0 } });
+            return reply({ items: items.slice(offset, offset + limit).map(({ status: _status, ...item }) => item), total: items.length, stats: { pending: pendingDiscoveryRecords(), addedToday: feedRecordsMarkedAdded } });
           }
-          case '/api/dashboard/stats': return reply({ stats: { activeSubscriptions: 1, pendingDiscoveryRecords: items.length, subscriptionRecordsMarkedAdded: 0, pendingReviews: queue.length, runningJobs: 0, activeConnections: 1 } });
+          case '/api/dashboard/stats': return reply({ stats: { activeSubscriptions: 1, pendingDiscoveryRecords: pendingDiscoveryRecords(), subscriptionRecordsMarkedAdded: feedRecordsMarkedAdded + subscriptionResults.filter(result => result.status === 'added').length, pendingReviews: queue.length, runningJobs: 0, activeConnections: 1 } });
           case '/api/search/ai/status': return reply({ available: false });
           case '/api/search/lidarr/artists': return reply({ artists: [], total: 0, needingRefresh: 0, issueStats: { noAlbums: 0, noPoster: 0, noOverview: 0, noGenres: 0 }, healthScore: 100 });
           case '/api/search/discover': return reply({ results: catalogScenario === 'empty' ? [] : catalogFeed.map((item, index) => ({ name: item.artistName, mbid: item.artistMbid, imageUrl: item.imageUrl, sources: item.sources, spotifyId: `fixture-${index}`, inLibrary: added.has(item.artistMbid || '') })) });
@@ -165,6 +167,7 @@ export const test = base.extend<CatalogFixtures>({
               return reply({ success: false, artistName: item.artistName, outcome: { artistMbid: item.artistMbid, state: 'uncertain', message: 'Retry to check membership' } });
             }
             added.add(item.artistMbid);
+            feedRecordsMarkedAdded += item.id.slice('feed-'.length).split('-').length;
             items.splice(index, 1);
             return reply({ success: true, artistName: item.artistName, outcome: { artistMbid: item.artistMbid, state: 'added', message: 'Artist added to Lidarr' } });
           }

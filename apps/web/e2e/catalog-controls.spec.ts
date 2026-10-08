@@ -40,7 +40,7 @@ test('catalog navigation uses native destinations', async ({ catalogPage: page }
 test('dashboard record labels distinguish owner counts from broader administrative lists', async ({ catalogPage: page }) => {
   await page.goto('/');
   const summary = page.getByRole('region', { name: 'Your catalog summary' });
-  await expect(summary.getByRole('link', { name: /Pending discovery records/ })).toHaveAttribute('href', '/');
+  await expect(summary.getByRole('link', { name: '4 Pending discovery records', exact: true })).toHaveAttribute('href', '/');
   await expect(summary.getByText('Results marked added (30d)', { exact: true })).toBeVisible();
   await expect(summary.getByRole('link', { name: /Results marked added/ })).toHaveCount(0);
   await summary.getByRole('link', { name: 'Open all review records', exact: true }).click();
@@ -60,6 +60,10 @@ test('mobile subscription rows expose separate actions and explain delete conseq
   const overflow = page.getByLabel('More actions for Weekly discoveries', { exact: true });
   await overflow.focus();
   await page.keyboard.press('Enter');
+  const editBounds = await page.getByRole('button', { name: 'Edit subscription', exact: true }).boundingBox();
+  expect(editBounds).not.toBeNull();
+  expect(editBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(editBounds!.x + editBounds!.width).toBeLessThanOrEqual(320);
   await page.getByRole('button', { name: 'Delete subscription', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Delete subscription?', exact: true });
   await expect(dialog).toBeVisible();
