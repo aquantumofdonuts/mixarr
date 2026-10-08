@@ -50,6 +50,7 @@ import {
   CONSTELLATION_QUEUE_NAMES,
   type ConstellationExpandJobData,
 } from '../jobs/constellation/queue.js';
+import { warmOrbitIfStale } from '../jobs/constellation/orbit-crawl-worker.js';
 import { rateLimit } from '../services/rate-limiter.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
 import { getLidarrServiceWithConfig } from '../lib/connection-resolver.js';
@@ -415,6 +416,11 @@ export interface ConstellationDeps {
   subscribeToLidarr?: SubscribeToLidarr;
   /** Injectable Deezer track-preview search (defaults to the real service). */
   searchTrackPreview?: SearchTrackPreview;
+  /**
+   * Starts the user's background orbit warm if their orbit is stale (defaults
+   * to {@link warmOrbitIfStale}). Fire-and-forget from /seed.
+   */
+  warmOrbit?: (userId: number) => Promise<unknown>;
 }
 
 export interface ConstellationHandlers {
@@ -436,6 +442,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
   const streams = deps.streams ?? defaultStreams;
   const subscribeToLidarr = deps.subscribeToLidarr ?? subscribeToLidarrDefault;
   const searchTrackPreview = deps.searchTrackPreview ?? searchDeezerTrackPreview;
+  const warmOrbit = deps.warmOrbit ?? ((userId: number) => warmOrbitIfStale(userId));
 
   return {
     /**
@@ -524,6 +531,19 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           log.warn('seed expand enqueue failed (returning seed subgraph only)', {
             focusId,
             error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        // Opening a fresh graph is the "user is here" signal that warms their
+        // taste orbit in the background (design §4.2). Staleness-gated inside
+        // warmOrbit, so a settled orbit is a no-op; a re-seed via ?token= (role
+        // filter change) is not a new visit. Never blocks or fails the response.
+        if (!existingToken) {
+          void warmOrbit(userId).catch((error: unknown) => {
+            log.warn('orbit warm trigger failed', {
+              userId,
+              error: error instanceof Error ? error.message : String(error),
+            });
           });
         }
 

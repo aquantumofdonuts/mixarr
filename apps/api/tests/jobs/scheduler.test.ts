@@ -148,6 +148,13 @@ describe('Scheduler Service', () => {
       });
     });
 
+    it('should register the daily constellation orbit re-wake job', async () => {
+      await initializeScheduler();
+
+      const expressions = vi.mocked(CronJob).mock.calls.map((c) => c[0]);
+      expect(expressions).toContain('0 4 * * *');
+    });
+
     it('should query active import sources with schedules', async () => {
       await initializeScheduler();
 

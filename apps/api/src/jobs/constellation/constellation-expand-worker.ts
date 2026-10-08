@@ -21,6 +21,7 @@
 
 import type { Server as SocketIOServer } from 'socket.io';
 import { createLogger } from '../../lib/logger.js';
+import { isApiBudgetExhausted } from '../../services/constellation/DailyApiBudget.js';
 
 const logger = createLogger('ConstellationExpandWorker');
 
@@ -124,6 +125,16 @@ export async function registerConstellationExpandWorker(io?: SocketIOServer): Pr
         });
 
         void job.updateProgress({ phase: 'expanded', ...result });
+        return result;
+      } catch (err) {
+        if (!isApiBudgetExhausted(err)) throw err;
+        // The day's live-API budget is spent. Retrying cannot help until the
+        // counter rolls over, so complete the job with an explicit result rather
+        // than burning BullMQ attempts; the client keeps the cached subgraph it
+        // already received from the route.
+        logger.warn(`Constellation expand for ${artistId} skipped: ${err.message}`);
+        const result = { artistId, published: false, budgetExhausted: true };
+        void job.updateProgress({ phase: 'budget-exhausted', ...result });
         return result;
       } finally {
         // The DumpIndexService (Setting-ON) opens a SQLite handle; release it when

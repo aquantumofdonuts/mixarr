@@ -75,7 +75,7 @@ export async function resolveConfiguredCreditSource(userId?: number): Promise<Cr
     return resolveCreditSource(settings);
   }
 
-  const discogs = await resolveDiscogsBackend(userId);
+  const discogs = await resolveDiscogsBackend(userId, settings.dailyApiBudget);
   return resolveCreditSource(settings, { discogs });
 }
 
@@ -85,10 +85,19 @@ export async function resolveConfiguredCreditSource(userId?: number): Promise<Cr
  * (authenticated, higher rate limit), otherwise a tokenless service hits the
  * public Discogs database API (rate-limited, works out of the box). This keeps
  * the live source buildable with no Discogs connection configured.
+ *
+ * Every request the returned service makes is charged against the shared
+ * {@link DailyApiBudget} (`dailyApiBudget` setting), so the orbit warm and
+ * interactive expansions together can never exceed the configured daily cap.
  */
-async function resolveDiscogsBackend(userId?: number): Promise<DiscogsCreditBackend> {
+async function resolveDiscogsBackend(
+  userId: number | undefined,
+  dailyApiBudget: number,
+): Promise<DiscogsCreditBackend> {
   const { default: prisma } = await import('../../lib/db.js');
   const { DiscogsService } = await import('../discogs.js');
+  const { redis } = await import('../../lib/redis.js');
+  const { DailyApiBudget } = await import('./DailyApiBudget.js');
 
   const conn = await prisma.connection.findFirst({
     where: {
@@ -101,6 +110,7 @@ async function resolveDiscogsBackend(userId?: number): Promise<DiscogsCreditBack
   });
 
   const token = (conn?.config as { token?: string } | null | undefined)?.token;
+  const budget = new DailyApiBudget(dailyApiBudget, redis);
   // token may be undefined -> tokenless public Discogs API.
-  return new DiscogsService(token);
+  return new DiscogsService(token, { onRequest: () => budget.take() });
 }

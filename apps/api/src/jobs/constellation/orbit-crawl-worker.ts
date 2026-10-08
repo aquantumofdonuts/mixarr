@@ -16,6 +16,17 @@
  * shell ({@link registerOrbitCrawlWorker}) dynamically imports bullmq/redis/queue
  * INSIDE the register function and is only ever called at app startup, so merely
  * importing this module opens no Redis connection (mirrors Task 8's worker).
+ *
+ * SCHEDULING (design §4.2 "idles once settled, re-wakes on new history"):
+ *   - {@link warmOrbitIfStale} is the single entry point. The constellation seed
+ *     route calls it when a user opens a fresh graph, and the daily scheduler
+ *     calls {@link rewakeStaleOrbits} for every user who has an orbit. Both go
+ *     through the same staleness gate, so a settled orbit is left alone and a
+ *     warm already in flight is never duplicated.
+ *   - Budgets: the materialized-edge cap is the `orbitEdgeBudget` setting; live
+ *     Discogs requests are charged against the `dailyApiBudget` setting via
+ *     {@link DailyApiBudget}. When the day's API budget runs out the crawl stops
+ *     early (no retries) and resumes on the next re-wake.
  */
 
 import type { Server as SocketIOServer } from 'socket.io';
@@ -25,16 +36,10 @@ import type {
   SeedSource,
   OrbitTier,
 } from '../../services/constellation/OrbitSeedCollector.js';
+import { isApiBudgetExhausted } from '../../services/constellation/DailyApiBudget.js';
 import { createLogger } from '../../lib/logger.js';
 
 const logger = createLogger('OrbitCrawlWorker');
-
-/**
- * Default materialized-edge budget for a background orbit crawl (Task 9's hard
- * bound). Sized so a single crawl warms a meaningful neighbourhood without
- * running away on small-world collaboration graphs. Tunable per-job later.
- */
-const DEFAULT_MAX_EDGES = 2_000;
 
 /**
  * BullMQ job priority for a background orbit crawl. In BullMQ, priority is a
@@ -137,7 +142,9 @@ export function makeExpandAdapter(
     // whole crawl. expandPerson is already hardened against per-release errors,
     // but a total getArtistReleases failure (source down) can still throw — treat
     // one unreachable/failing person as a dead end (no neighbours, no edges) so
-    // the rest of the warm proceeds.
+    // the rest of the warm proceeds. The ONE exception is the daily API budget:
+    // once it is spent every further person would fail the same way, so that
+    // error is rethrown to stop the crawl (the job wrapper handles it).
     try {
       await expansionService.expandPerson(personId);
       const edges = await prisma.constellationEdge.findMany({
@@ -147,6 +154,7 @@ export function makeExpandAdapter(
       const neighborIds = edges.map((e) => e.targetPersonId);
       return { neighborIds, edgesCreated: neighborIds.length };
     } catch (err) {
+      if (isApiBudgetExhausted(err)) throw err;
       logger.warn(
         `expand failed for person ${personId}, skipping: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -180,33 +188,51 @@ function makeMarkOrbitAdapter(prisma: {
  * Injectable resolvers for {@link buildSeedSources} so the seed wiring is
  * unit-testable without the connections table / live services.
  */
+/** Last.fm `user.gettopartists` periods used for the history tiers. */
+export type LastfmSeedPeriod = '7day' | '1month' | 'overall';
+/** ListenBrainz `stats/user/.../artists` ranges used for the history tiers. */
+export type ListenBrainzSeedRange = 'week' | 'month' | 'all_time';
+
 export interface SeedSourceDeps {
   /** The user's Lidarr library artists (each carries its MusicBrainz `foreignArtistId`). */
   getLidarrArtists?: (userId: number) => Promise<Array<{ foreignArtistId: string }>>;
-  /** The user's Last.fm recent top artists (name + optional MBID). */
-  getLastfmTopArtists?: (userId: number) => Promise<Array<{ mbid?: string; name: string }>>;
+  /** The user's Last.fm top artists for a period (name + optional MBID). */
+  getLastfmTopArtists?: (
+    userId: number,
+    period: LastfmSeedPeriod,
+  ) => Promise<Array<{ mbid?: string; name: string }>>;
+  /** The user's ListenBrainz top artists for a range (name + optional MBID). */
+  getListenBrainzTopArtists?: (
+    userId: number,
+    range: ListenBrainzSeedRange,
+  ) => Promise<Array<{ mbid?: string; name: string }>>;
 }
 
 /**
- * Build the tiered {@link SeedSource}s for a user.
+ * Build the tiered {@link SeedSource}s for a user (design §4.2 tiers:
+ * 1d → 7d → 30d → library-top → whole-library). One source per (tier, backend);
+ * the collector dedupes within and across tiers and survives a dead backend.
  *
- * WIRED (this task):
+ * WIRED:
+ *   - `hist7d`  <- Last.fm top artists, 7day  + ListenBrainz top artists, week
+ *   - `hist30d` <- Last.fm top artists, 1month + ListenBrainz top artists, month
+ *   - `libtop`  <- Last.fm top artists, overall + ListenBrainz top artists, all_time
+ *                  (all-time most-played is the closest available proxy for the
+ *                  "top slice of the library": Lidarr exposes no per-artist play
+ *                  rank, and Jellyfin favourites are name-only, see below)
  *   - `lib`     <- the user's Lidarr library artists, keyed by MBID
  *                  (`foreignArtistId`); the collector resolves each MBID to a
  *                  Discogs person id via IdentityService.mbidToDiscogs.
- *   - `hist30d` <- the user's Last.fm top artists over the last month
- *                  (a readily-available listening-history signal), as mbid/name
- *                  refs; name-only refs are skipped by the collector (name→discogs
- *                  resolution is out of scope), MBID-bearing refs resolve.
  *
- * DEFERRED (documented TODO): finer recency windows and the other backends still
- * need per-connection config / windowed queries not cleanly surfaced here:
- *   - hist1d / hist7d  <- Tautulli / ListenBrainz recent-play windows, and
- *                         Last.fm 7day; wire once those connections expose the
- *                         windowed queries + username config uniformly.
- *   - libtop           <- "top" slice of the library (Lidarr play stats /
- *                         Jellyfin favourites) — no per-artist play-rank is
- *                         exposed by the Lidarr artist list today.
+ * NOT WIRED, and why:
+ *   - `hist1d`: no configured backend exposes a one-day window that carries
+ *     MBIDs (Last.fm's shortest top-artists period is 7day, ListenBrainz's is
+ *     week). It would need per-listen aggregation (`user.getrecenttracks` /
+ *     `/1/user/{name}/listens`) that neither service wrapper implements.
+ *   - Tautulli / Plex and Jellyfin play history: both return artist NAMES only,
+ *     and the collector resolves MBIDs or Discogs ids, never names (name
+ *     matching against Discogs is the identity-reconciliation problem of
+ *     design §13 and is deliberately not done here).
  *
  * Every source is a lazy `getArtists` closure that resolves its connection at
  * call time and returns [] when the connection is absent, so a crawl for a user
@@ -215,25 +241,40 @@ export interface SeedSourceDeps {
 export function buildSeedSources(userId: number, deps: SeedSourceDeps = {}): SeedSource[] {
   const getLidarrArtists = deps.getLidarrArtists ?? defaultGetLidarrArtists;
   const getLastfmTopArtists = deps.getLastfmTopArtists ?? defaultGetLastfmTopArtists;
+  const getListenBrainzTopArtists =
+    deps.getListenBrainzTopArtists ?? defaultGetListenBrainzTopArtists;
 
-  return [
-    {
-      tier: 'hist30d',
-      getArtists: async () => {
-        const artists = await getLastfmTopArtists(userId);
-        return artists.map((a) => ({ mbid: a.mbid || undefined, name: a.name }));
-      },
-    },
-    {
-      tier: 'lib',
-      getArtists: async () => {
-        const artists = await getLidarrArtists(userId);
-        return artists
-          .filter((a) => !!a.foreignArtistId)
-          .map((a) => ({ mbid: a.foreignArtistId }));
-      },
-    },
+  const toRefs = (artists: Array<{ mbid?: string; name: string }>) =>
+    artists.map((a) => ({ mbid: a.mbid || undefined, name: a.name }));
+
+  const historyTiers: Array<{
+    tier: OrbitTier;
+    lastfm: LastfmSeedPeriod;
+    listenbrainz: ListenBrainzSeedRange;
+  }> = [
+    { tier: 'hist7d', lastfm: '7day', listenbrainz: 'week' },
+    { tier: 'hist30d', lastfm: '1month', listenbrainz: 'month' },
+    { tier: 'libtop', lastfm: 'overall', listenbrainz: 'all_time' },
   ];
+
+  const sources: SeedSource[] = [];
+  for (const { tier, lastfm, listenbrainz } of historyTiers) {
+    sources.push(
+      { tier, getArtists: async () => toRefs(await getLastfmTopArtists(userId, lastfm)) },
+      {
+        tier,
+        getArtists: async () => toRefs(await getListenBrainzTopArtists(userId, listenbrainz)),
+      },
+    );
+  }
+  sources.push({
+    tier: 'lib',
+    getArtists: async () => {
+      const artists = await getLidarrArtists(userId);
+      return artists.filter((a) => !!a.foreignArtistId).map((a) => ({ mbid: a.foreignArtistId }));
+    },
+  });
+  return sources;
 }
 
 /** Default `lib` supplier: the user's Lidarr library artists. */
@@ -244,9 +285,10 @@ async function defaultGetLidarrArtists(userId: number): Promise<Array<{ foreignA
   return lidarr.getArtists();
 }
 
-/** Default `hist30d` supplier: the user's Last.fm top artists over the last month. */
+/** Default Last.fm supplier: the user's top artists over `period`. */
 async function defaultGetLastfmTopArtists(
   userId: number,
+  period: LastfmSeedPeriod,
 ): Promise<Array<{ mbid?: string; name: string }>> {
   const { ConnectionResolver } = await import('../../lib/connection-resolver.js');
   const conn = await ConnectionResolver.getConnection('lastfm', userId);
@@ -256,23 +298,130 @@ async function defaultGetLastfmTopArtists(
 
   const { LastfmService } = await import('../../services/lastfm.js');
   const service = new LastfmService({ apiKey: cfg.apiKey });
-  const { artists } = await service.getUserTopArtists(cfg.username, '1month', 100);
+  const { artists } = await service.getUserTopArtists(cfg.username, period, 100);
   return artists.map((a) => ({ mbid: a.mbid || undefined, name: a.name }));
+}
+
+/** Default ListenBrainz supplier: the user's top artists over `range`. */
+async function defaultGetListenBrainzTopArtists(
+  userId: number,
+  range: ListenBrainzSeedRange,
+): Promise<Array<{ mbid?: string; name: string }>> {
+  const { ConnectionResolver } = await import('../../lib/connection-resolver.js');
+  const conn = await ConnectionResolver.getConnection('listenbrainz', userId);
+  if (!conn) return [];
+  const { isListenBrainzConfig } = await import('../../types/connections.js');
+  if (!isListenBrainzConfig(conn.config)) return [];
+
+  const { ListenBrainzService } = await import('../../services/listenbrainz.js');
+  const service = new ListenBrainzService(
+    conn.config.username,
+    conn.config.token,
+    undefined,
+    conn.config.url,
+  );
+  const { artists } = await service.getUserTopArtists(range, 100);
+  return artists.map((a) => ({ mbid: a.artist_mbid || undefined, name: a.artist_name }));
 }
 
 /**
  * Enqueue a background orbit-crawl job for a user at LOW priority. Guarded
  * (dynamic import of the crawl queue) so importing this module opens no Redis
- * connection; call it from the future idle/re-wake scheduler. A fixed jobId
- * de-duplicates concurrent warms for the same user.
+ * connection. A fixed jobId de-duplicates warms for the same user while one is
+ * queued or running; the job is removed on completion/failure so the id is free
+ * again for the next re-wake. Prefer {@link warmOrbitIfStale}, which adds the
+ * staleness gate.
  */
 export async function enqueueOrbitCrawl(userId: number): Promise<void> {
   const { constellationCrawlQueue } = await import('./queue.js');
   await constellationCrawlQueue.add(
     'orbit-crawl',
     { userId },
-    { jobId: `orbit-${userId}`, priority: LOW_PRIORITY },
+    { jobId: `orbit-${userId}`, priority: LOW_PRIORITY, removeOnComplete: true, removeOnFail: true },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Scheduling: staleness gate + daily re-wake (design §4.2).
+// ---------------------------------------------------------------------------
+
+/** How long a settled orbit is left alone before it is re-walked. */
+export const ORBIT_REWAKE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * A seed row left in `crawling` longer than this is treated as abandoned (the
+ * job died or ran out of API budget mid-crawl) rather than in flight.
+ */
+export const ORBIT_IN_FLIGHT_MAX_MS = 24 * 60 * 60 * 1000;
+
+/** The slice of Prisma the staleness gate reads (mock-friendly). */
+export interface OrbitStore {
+  constellationOrbit: {
+    findFirst(args: {
+      where: Record<string, unknown>;
+      orderBy?: Record<string, unknown>;
+      select?: Record<string, unknown>;
+    }): Promise<{ lastCrawledAt: Date | null } | null>;
+    groupBy(args: { by: ['userId'] }): Promise<Array<{ userId: number }>>;
+  };
+}
+
+export interface WarmOrbitDeps {
+  store?: OrbitStore;
+  enqueue?: (userId: number) => Promise<void>;
+  now?: () => Date;
+  /** Re-walk a settled orbit once it is older than this. */
+  rewakeAfterMs?: number;
+}
+
+/**
+ * Enqueue an orbit warm for `userId` unless one is already in flight or the
+ * user's orbit was crawled within `rewakeAfterMs`. Returns whether a job was
+ * enqueued. This is the only path that should start a crawl.
+ */
+export async function warmOrbitIfStale(userId: number, deps: WarmOrbitDeps = {}): Promise<boolean> {
+  const store = deps.store ?? ((await import('../../lib/db.js')).default as unknown as OrbitStore);
+  const enqueue = deps.enqueue ?? enqueueOrbitCrawl;
+  const now = (deps.now ?? (() => new Date()))().getTime();
+  const rewakeAfterMs = deps.rewakeAfterMs ?? ORBIT_REWAKE_AFTER_MS;
+
+  const inFlight = await store.constellationOrbit.findFirst({
+    where: { userId, status: 'crawling', lastCrawledAt: { gte: new Date(now - ORBIT_IN_FLIGHT_MAX_MS) } },
+    select: { lastCrawledAt: true },
+  });
+  if (inFlight) return false;
+
+  const latest = await store.constellationOrbit.findFirst({
+    where: { userId, status: 'crawled' },
+    orderBy: { lastCrawledAt: 'desc' },
+    select: { lastCrawledAt: true },
+  });
+  if (latest?.lastCrawledAt && now - latest.lastCrawledAt.getTime() < rewakeAfterMs) return false;
+
+  await enqueue(userId);
+  return true;
+}
+
+/**
+ * Daily re-wake: run the staleness gate for every user who has ever had an
+ * orbit. Users who never opened the constellation have no rows and are not
+ * crawled. Returns how many warms were enqueued. Never throws for one user's
+ * failure.
+ */
+export async function rewakeStaleOrbits(deps: WarmOrbitDeps = {}): Promise<number> {
+  const store = deps.store ?? ((await import('../../lib/db.js')).default as unknown as OrbitStore);
+  const users = await store.constellationOrbit.groupBy({ by: ['userId'] });
+
+  let enqueued = 0;
+  for (const { userId } of users) {
+    try {
+      if (await warmOrbitIfStale(userId, { ...deps, store })) enqueued += 1;
+    } catch (err) {
+      logger.warn(
+        `orbit re-wake failed for user ${userId}, continuing: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  return enqueued;
 }
 
 /**
@@ -284,9 +433,8 @@ export async function enqueueOrbitCrawl(userId: number): Promise<void> {
  * worker runs at LOW priority (higher `priority` number = lower priority in
  * BullMQ) so interactive expansions preempt this perpetual background crawl.
  *
- * TODO(constellation): a scheduler enqueues crawl jobs for idle users and
- * re-wakes stale orbits (design §4.2). That scheduling is out of scope here; this
- * worker owns only the RUN logic once a {userId} job is dequeued.
+ * Jobs are enqueued by {@link warmOrbitIfStale} (seed route + daily re-wake);
+ * this worker owns only the RUN logic once a {userId} job is dequeued.
  */
 export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<void> {
   const { Worker } = await import('bullmq');
@@ -300,6 +448,7 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
   const { resolveConfiguredCreditSource } = await import(
     '../../services/constellation/resolveCreditSource.js'
   );
+  const { SettingsService } = await import('../../services/settings.service.js');
 
   const worker = new Worker(
     CONSTELLATION_QUEUE_NAMES.CRAWL,
@@ -318,6 +467,7 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
       const creditSource = await resolveConfiguredCreditSource(userId);
       const expansionService = new ExpansionService(creditSource);
       const identity = new IdentityService();
+      const { orbitEdgeBudget } = await SettingsService.getConstellationSettings();
 
       const collector = new OrbitSeedCollector((mbid) => identity.mbidToDiscogs(mbid));
       const sources = buildSeedSources(userId);
@@ -332,7 +482,7 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
           collector,
           sources,
           crawler,
-          maxEdges: DEFAULT_MAX_EDGES,
+          maxEdges: orbitEdgeBudget,
           markOrbit: makeMarkOrbitAdapter(prisma),
         });
 
@@ -343,6 +493,16 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
         });
 
         void job.updateProgress({ phase: 'crawled', ...result });
+        return result;
+      } catch (err) {
+        if (!isApiBudgetExhausted(err)) throw err;
+        // Day's live-API budget is spent: stop without failing the job (a retry
+        // would only burn attempts). Seeds stay `crawling`, so the staleness gate
+        // holds this user for ORBIT_IN_FLIGHT_MAX_MS and the next re-wake resumes
+        // the crawl, skipping persons that are already full.
+        logger.info(`Orbit crawl for user ${userId} paused: ${err.message}`);
+        const result = { phase: 'budget-exhausted', userId };
+        void job.updateProgress(result);
         return result;
       } finally {
         // The DumpIndexService (Setting-ON) opens a SQLite handle; release it when

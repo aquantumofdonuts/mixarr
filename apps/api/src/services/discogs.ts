@@ -195,9 +195,19 @@ interface DiscogsArtistReleasesResponse {
 /** Default page cap for {@link DiscogsService.getArtistReleases} (100/page). */
 const DEFAULT_ARTIST_RELEASES_MAX_PAGES = 5;
 
+export interface DiscogsServiceOptions {
+  /**
+   * Called before EVERY HTTP request (one call per page of a paginated listing).
+   * Throwing aborts the request before it is sent. The constellation uses this
+   * to charge its daily live-API budget; subscription strategies leave it unset.
+   */
+  onRequest?: () => Promise<void>;
+}
+
 export class DiscogsService {
   private token: string | undefined;
   private baseUrl = 'https://api.discogs.com';
+  private readonly onRequest?: () => Promise<void>;
 
   /**
    * @param token - Discogs personal-access token. OPTIONAL: the Discogs public
@@ -206,8 +216,9 @@ export class DiscogsService {
    *   as an `Authorization` header; when absent only the (mandatory) `User-Agent`
    *   is sent — Discogs rejects requests without a User-Agent with 403.
    */
-  constructor(token?: string) {
+  constructor(token?: string, options: DiscogsServiceOptions = {}) {
     this.token = token;
+    this.onRequest = options.onRequest;
   }
 
   private getHeaders(): Record<string, string> {
@@ -224,6 +235,7 @@ export class DiscogsService {
   }
 
   private async request<T>(path: string): Promise<T> {
+    if (this.onRequest) await this.onRequest();
     await rateLimit('discogs');
 
     const response = await fetchWithTimeout(`${this.baseUrl}${path}`, {
@@ -305,7 +317,8 @@ export class DiscogsService {
    * up to `maxPages` (default {@link DEFAULT_ARTIST_RELEASES_MAX_PAGES}) at 100
    * items/page. The page cap bounds the live-Discogs API cost per artist (a prolific
    * artist can otherwise span dozens of pages); it is the live analog of the
-   * data-dump index and is governed at a higher level by the `dailyApiBudget` setting.
+   * data-dump index. The day-level bound is the `dailyApiBudget` setting, charged
+   * per request through {@link DiscogsServiceOptions.onRequest}.
    *
    * Returns the raw listing items; {@link LiveDiscogsCreditSource} maps them onto
    * the {@link CreditSource} shape.

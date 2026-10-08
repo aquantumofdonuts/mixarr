@@ -1,5 +1,12 @@
-import { describe, it, expect } from 'vitest';
-import { runOrbitCrawl, makeExpandAdapter } from '../../../src/jobs/constellation/orbit-crawl-worker.js';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  runOrbitCrawl,
+  makeExpandAdapter,
+  warmOrbitIfStale,
+  rewakeStaleOrbits,
+  type OrbitStore,
+} from '../../../src/jobs/constellation/orbit-crawl-worker.js';
+import { ApiBudgetExhaustedError } from '../../../src/services/constellation/DailyApiBudget.js';
 import {
   OrbitSeedCollector,
   type SeedSource,
@@ -259,6 +266,100 @@ describe('makeExpandAdapter resilience', () => {
     // degraded to a dead end rather than aborting the crawl.
     expect(result.personsExpanded).toBe(2);
     expect(result.edgesMaterialized).toBe(0);
+  });
+});
+
+describe('makeExpandAdapter and the daily API budget', () => {
+  it('rethrows ApiBudgetExhaustedError so the crawl stops instead of skipping every person', async () => {
+    const expansionService = {
+      async expandPerson() {
+        throw new ApiBudgetExhaustedError(5000, '2026-10-07');
+      },
+    };
+    const prisma = { constellationEdge: { async findMany() { return []; } } };
+    const expand = makeExpandAdapter(expansionService, prisma);
+    const crawler = new OrbitCrawler({ expand, async isFull() { return false; } });
+
+    await expect(crawler.crawl([1, 2, 3], { maxEdges: 100 })).rejects.toBeInstanceOf(
+      ApiBudgetExhaustedError,
+    );
+  });
+});
+
+describe('warmOrbitIfStale', () => {
+  const NOW = new Date('2026-10-07T12:00:00Z');
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  function fakeStore(rows: Array<{ userId: number; status: string; lastCrawledAt: Date | null }>): OrbitStore {
+    return {
+      constellationOrbit: {
+        async findFirst(args) {
+          const w = args.where as { userId: number; status: string; lastCrawledAt?: { gte: Date } };
+          const matches = rows
+            .filter((r) => r.userId === w.userId && r.status === w.status)
+            .filter((r) => !w.lastCrawledAt || (r.lastCrawledAt && r.lastCrawledAt >= w.lastCrawledAt.gte))
+            .sort((a, b) => (b.lastCrawledAt?.getTime() ?? 0) - (a.lastCrawledAt?.getTime() ?? 0));
+          return matches[0] ? { lastCrawledAt: matches[0].lastCrawledAt } : null;
+        },
+        async groupBy() {
+          return [...new Set(rows.map((r) => r.userId))].map((userId) => ({ userId }));
+        },
+      },
+    };
+  }
+
+  it('enqueues for a user with no orbit yet', async () => {
+    const enqueue = vi.fn(async () => {});
+    const result = await warmOrbitIfStale(1, { store: fakeStore([]), enqueue, now: () => NOW });
+    expect(result).toBe(true);
+    expect(enqueue).toHaveBeenCalledWith(1);
+  });
+
+  it('skips when a warm is in flight (crawling row younger than the in-flight window)', async () => {
+    const enqueue = vi.fn(async () => {});
+    const store = fakeStore([{ userId: 1, status: 'crawling', lastCrawledAt: new Date(NOW.getTime() - HOUR) }]);
+    expect(await warmOrbitIfStale(1, { store, enqueue, now: () => NOW })).toBe(false);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('treats an old crawling row as abandoned and re-enqueues', async () => {
+    const enqueue = vi.fn(async () => {});
+    const store = fakeStore([{ userId: 1, status: 'crawling', lastCrawledAt: new Date(NOW.getTime() - 2 * DAY) }]);
+    expect(await warmOrbitIfStale(1, { store, enqueue, now: () => NOW })).toBe(true);
+  });
+
+  it('skips a settled orbit crawled within the re-wake window, re-enqueues once it is older', async () => {
+    const enqueue = vi.fn(async () => {});
+    const fresh = fakeStore([{ userId: 1, status: 'crawled', lastCrawledAt: new Date(NOW.getTime() - 2 * DAY) }]);
+    expect(await warmOrbitIfStale(1, { store: fresh, enqueue, now: () => NOW })).toBe(false);
+
+    const stale = fakeStore([{ userId: 1, status: 'crawled', lastCrawledAt: new Date(NOW.getTime() - 8 * DAY) }]);
+    expect(await warmOrbitIfStale(1, { store: stale, enqueue, now: () => NOW })).toBe(true);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('honours a custom rewakeAfterMs', async () => {
+    const enqueue = vi.fn(async () => {});
+    const store = fakeStore([{ userId: 1, status: 'crawled', lastCrawledAt: new Date(NOW.getTime() - 2 * DAY) }]);
+    expect(await warmOrbitIfStale(1, { store, enqueue, now: () => NOW, rewakeAfterMs: DAY })).toBe(true);
+  });
+
+  it('rewakeStaleOrbits gates every user with an orbit and survives one failure', async () => {
+    const store = fakeStore([
+      { userId: 1, status: 'crawled', lastCrawledAt: new Date(NOW.getTime() - 8 * DAY) },
+      { userId: 2, status: 'crawled', lastCrawledAt: new Date(NOW.getTime() - DAY) },
+      { userId: 3, status: 'crawled', lastCrawledAt: new Date(NOW.getTime() - 9 * DAY) },
+    ]);
+    const enqueue = vi.fn(async (userId: number) => {
+      if (userId === 1) throw new Error('queue down');
+    });
+
+    const enqueued = await rewakeStaleOrbits({ store, enqueue, now: () => NOW });
+
+    // 1 failed (counted as not enqueued), 2 is fresh, 3 is stale -> 1 enqueued.
+    expect(enqueued).toBe(1);
+    expect(enqueue.mock.calls.map((c) => c[0])).toEqual([1, 3]);
   });
 });
 

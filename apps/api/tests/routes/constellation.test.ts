@@ -105,6 +105,7 @@ function makeDeps(overrides: Partial<ConstellationDeps> = {}): ConstellationDeps
     streams: new StreamRegistry(),
     subscribeToLidarr: vi.fn().mockResolvedValue({ added: true, target: 'artist' }),
     searchTrackPreview: vi.fn().mockResolvedValue(null),
+    warmOrbit: vi.fn().mockResolvedValue(false),
     ...overrides,
   };
 }
@@ -116,6 +117,49 @@ beforeEach(() => {
 // ---- /seed ------------------------------------------------------------------
 
 describe('GET /seed', () => {
+  it('kicks off the orbit warm (staleness-gated) for the caller on a fresh seed', async () => {
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const res = mockRes();
+    await h.seed(mockReq({ query: { type: 'artist', id: '42' } }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(deps.warmOrbit).toHaveBeenCalledWith(7);
+  });
+
+  it('does not re-trigger the orbit warm on a token re-seed (role-filter change)', async () => {
+    const deps = makeDeps();
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const first = mockRes();
+    await h.seed(mockReq({ query: { type: 'artist', id: '42' } }), first);
+    const token = first.body.streamToken.id as string;
+    (deps.warmOrbit as any).mockClear();
+
+    const res = mockRes();
+    await h.seed(mockReq({ query: { type: 'artist', id: '42', token } }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(deps.warmOrbit).not.toHaveBeenCalled();
+  });
+
+  it('still returns the seed when the orbit warm fails (fire-and-forget)', async () => {
+    const deps = makeDeps({ warmOrbit: vi.fn().mockRejectedValue(new Error('redis down')) });
+    (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+
+    const res = mockRes();
+    await h.seed(mockReq({ query: { type: 'artist', id: '42' } }), res);
+    // Let the rejected warm settle so its handler runs inside the test.
+    await new Promise((r) => setImmediate(r));
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.focusId).toBe(42);
+  });
+
   it('resolves a numeric discogs id and returns subgraph + stream token', async () => {
     const subgraph = { focusId: 42, nodes: [{ personId: 42 }], edges: [] };
     const deps = makeDeps();

@@ -65,7 +65,10 @@ export async function initializeScheduler(): Promise<void> {
 
   // Start the Soulseek 30-day sweep-back job
   startSoulseekSweepJob();
-  
+
+  // Start the daily constellation orbit re-wake job
+  startConstellationOrbitRewakeJob();
+
   // Load all active subscriptions with schedules
   const subscriptions = await prisma.subscription.findMany({
     where: {
@@ -196,6 +199,44 @@ export function stopAllJobs(): void {
     job.stop();
   }
   scheduledJobs.clear();
+}
+
+/**
+ * Constellation orbit re-wake job (design §4.2)
+ * Runs daily at 4 AM UTC. For every user who has an orbit, re-enqueues the
+ * low-priority orbit warm if their orbit is stale (see `rewakeStaleOrbits`).
+ * The worker module is imported lazily on tick so the scheduler stays free of
+ * the constellation module graph.
+ */
+let orbitRewakeJob: CronJob | null = null;
+
+export function startConstellationOrbitRewakeJob(): void {
+  if (orbitRewakeJob) {
+    orbitRewakeJob.stop();
+  }
+
+  orbitRewakeJob = new CronJob(
+    '0 4 * * *', // Daily at 4 AM UTC
+    async () => {
+      try {
+        const { rewakeStaleOrbits } = await import('./constellation/orbit-crawl-worker.js');
+        const enqueued = await rewakeStaleOrbits();
+        logger.info(`Constellation orbit re-wake: ${enqueued} warm(s) enqueued`);
+      } catch (error) {
+        logger.error('Constellation orbit re-wake failed', { error });
+      }
+    },
+    null,
+    true,
+    'UTC'
+  );
+}
+
+export function stopConstellationOrbitRewakeJob(): void {
+  if (orbitRewakeJob) {
+    orbitRewakeJob.stop();
+    orbitRewakeJob = null;
+  }
 }
 
 /**
