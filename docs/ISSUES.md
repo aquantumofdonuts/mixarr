@@ -1,15 +1,34 @@
 # Mixarr Issues & Technical Debt
 
-> **Last Updated:** February 18, 2026  
-> **Status:** PRODUCTION READY — Code quality cleanup in progress
+> **Last Updated:** October 7, 2026  
+> **Status:** PRODUCTION READY (v2.3.5) — Collaboration Constellation unreleased on `dev`
 > 
 > For completed issues, see [ISSUES-FIXED.md](ISSUES-FIXED.md)  
 > For future feature ideas, see [ROADMAP.md](ROADMAP.md)
 > 
-> **Implementation Plans (from Feb 18 full review):**
-> - [Plan 1: Critical Security & Reliability](plans/2026-02-18-critical-security-reliability-plan.md) — P0/P1 fixes (~4-6 hours)
-> - [Plan 2: Input Validation & Error Handling](plans/2026-02-18-input-validation-error-handling-plan.md) — Zod schemas + fetch timeouts (~2-3 days)
-> - [Plan 3: Architecture & Code Quality](plans/2026-02-18-architecture-code-quality-plan.md) — God-file refactoring, service extraction (~2-3 weeks)
+> The three Feb 18 implementation plans (critical security, input validation, architecture) shipped in v2.1.x–v2.2.0 and are archived under [plans/archive/](plans/archive/).
+
+---
+
+## 🔴 OPEN SECURITY FINDINGS (from the 2026-07-04 adversarial review)
+
+Six merge-blocking items from [plans/2026-07-04-adversarial-code-review.md](plans/2026-07-04-adversarial-code-review.md) are still open as of 2026-10-07 (verified in code; no commit has touched the affected files since):
+
+1. SAML accepts unsigned assertions and an empty IdP certificate — `apps/api/src/auth/strategies/saml.ts`
+2. Plex `restrictToServerId` is declared but never enforced — `apps/api/src/auth/strategies/plex.ts`
+3. No session regeneration on login (session fixation) — `apps/api/src/auth/passport.ts` and every `logIn` path
+4. Connection config is an open record (`z.record(z.unknown())`), bypassing per-type schemas; SSRF surface on test endpoints — `apps/api/src/schemas/connection.ts`, `apps/api/src/routes/connections.ts`
+5. Result reject is not scoped to the subscription (IDOR) — `apps/api/src/routes/subscriptions.ts` (approve is scoped correctly; mirror it)
+6. slskd routes have no user scoping and the webhook sits behind session auth — `apps/api/src/routes/slskd.ts`
+
+Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from that review have shipped.
+
+---
+
+## 🐛 OPEN GITHUB ISSUES WITH KNOWN FIXES
+
+- **#81 — TIDAL subscriptions 404.** All seven calls in `apps/api/src/services/tidal.ts` use the `/userCollections/{id}` and `/userRecommendations/{id}` paths TIDAL removed on 2026-09-14; the issue lists the replacement `/userCollection*/me/…` paths.
+- **#66 — "No test handler for type: slskd".** The `connectionTestHandlers` map in `apps/api/src/routes/connections.ts` has no `slskd` entry; the pre-save test endpoint in the same file does.
 
 ---
 
@@ -307,9 +326,9 @@ A comprehensive review identified violations of three-tier architecture (Databas
 
 ### SOC-003: Frontend Business Logic - Subscription Type Metadata
 
-**Priority:** High | **Severity:** High
+**Priority:** High | **Severity:** High | **Status:** ✅ Resolved — `GET /api/subscriptions/types` exists in `apps/api/src/routes/subscriptions.ts`
 
-**Problem:**
+**Problem (historical):**
 [apps/web/src/components/subscriptions/](apps/web/src/components/subscriptions/) contains 50+ subscription types with required fields, descriptions, icons, and validation rules hardcoded in frontend.
 
 **Impact:**
@@ -427,7 +446,7 @@ See [docs/plans/2026-01-18-separation-of-concerns-refactor.md](docs/plans/2026-0
 |-------|--------|------|-------|
 | **Phase 1** | SOC-001, SOC-002, SOC-006, SOC-008 | 🟢 Low | Safe wins - pure refactors, no behavior change |
 | **Phase 2** | SOC-005, SOC-007 | 🟡 Medium | Extract service layer, add DTOs - coordinated frontend/backend changes |
-| **Phase 3** | SOC-003 | 🟡 Medium | Subscription type metadata API - needs good test coverage first |
+| **Phase 3** | SOC-003 | ✅ Done | Subscription type metadata API (`GET /api/subscriptions/types`) |
 | **Phase 4** | SOC-004 | 🔴 High | Subscription config building - core functionality, defer until everything else is stable |
 
 **Total estimated effort:** 2-3 weeks with proper TDD

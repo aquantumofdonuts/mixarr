@@ -291,6 +291,13 @@ Aesthetic/interaction target: **LivePlasma**, plus library-aware powers it can't
   "stumble along a path node-to-node," and dissolves the physics-jitter + render-budget
   problems that continuous free-pan creates. Free-pan kept as a secondary "see the whole
   constellation" zoom-out.
+  > **Amendment (2026-10-07, commit da26fb3):** shipped as **expand-in-place** instead. A
+  > click merges the node's collaborators into the current field (the walk accumulates on
+  > screen) and drops a breadcrumb; the field is never replaced, and canvas node objects are
+  > kept stable so the force layout preserves positions as the graph grows. Re-centering
+  > (replace the field, bump the stream generation) remains available in the data hook for
+  > role-filter re-seeds but is no longer the click action. The render budget is now bounded
+  > only by how far the user wanders in one session; see the open questions in the handoff.
 - **Hover mini-actions** — ▶ play + ＋ subscribe inline (skip the panel).
 - **Player** — a node's **representative track** is a track from its **strongest collaboration
   edge** (the master behind its fattest tie), *not* a Last.fm "top track" — because session

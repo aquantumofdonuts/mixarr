@@ -141,7 +141,7 @@ Edges mean **"credited together on a record"** — never "listeners of X also li
 
 ### Live API vs. local index (the key operational decision)
 
-Collaboration data can come from live APIs or a local index. This is a global toggle in **Settings → Constellation**, and it's the one real decision to make:
+Collaboration data can come from live APIs or a local index. This is a global toggle (`constellationIndexEnabled`, see *Settings* below), and it's the one real decision to make:
 
 | | **Live API (default, OFF)** | **Local index (ON)** |
 |---|---|---|
@@ -169,7 +169,27 @@ Collaboration data can come from live APIs or a local index. This is a global to
 *   **Artist seeds only** for now — seeding from a specific album is not yet supported.
 *   **No sonic/audio analysis** — genre color is tag-derived, never from the audio itself.
 
-The index toggle and the crawl/API budgets live in **Settings → Constellation** (admin).
+### Background orbit warm and budgets
+
+Opening the constellation starts a low-priority background crawl of your **taste orbit**: seed artists come from your Last.fm and ListenBrainz top artists (7-day, 30-day, all-time) and your Lidarr library, nearest tier first, and their collaborators are materialized into the cache so later exploration is fast. The crawl is bounded two ways and both are settings:
+
+| Setting | Default | Bounds |
+|---|---|---|
+| `orbitEdgeBudget` | 250000 | Edges materialized per crawl |
+| `dailyApiBudget` | 5000 | Live Discogs requests per UTC day, shared by the crawl and interactive expansion |
+
+A settled orbit is left alone; it is re-walked once a week (daily 04:00 UTC check), or sooner if the previous crawl ran out of API budget. When the daily API budget is spent, background crawling pauses until the next day and interactive expansion returns only what is already cached.
+
+### Settings
+
+There is no settings page for the constellation yet. The settings are read and written through the API as an admin:
+
+```
+GET /api/settings/constellation
+PUT /api/settings/constellation   { "constellationIndexEnabled": true, "dailyApiBudget": 2000 }
+```
+
+Keys: `constellationIndexEnabled`, `constellationIndexPath`, `orbitEdgeBudget`, `dailyApiBudget`, `fanoutN`, `pathMaxDegrees`, `indexRefresh` (`monthly` or `off`).
 
 ---
 

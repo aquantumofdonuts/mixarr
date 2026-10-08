@@ -10,7 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Collaboration Constellation** — an interactive force-directed graph of *credited* album personnel (musicians, producers, songwriters, engineers) at the `/constellation` route. Explore who-actually-recorded-with-whom outward from an artist and send discoveries to Lidarr. Runs on the **live Discogs/MusicBrainz API by default** (no setup, but no genre coloring), with an **opt-in local Discogs credit index** for fast offline exploration and genre-based node coloring — at the honest cost of downloading and parsing the full Discogs releases dump. Uses Deezer for 30s previews and the Plex/Jellyfin/Lidarr "in your library" ring; YouTube is a link-out. Configured under **Settings → Constellation**.
+- **Constellation orbit warm is now scheduled**: opening a constellation starts a low-priority background crawl of the user's taste orbit (seeds from Last.fm and ListenBrainz top artists over 7 days, 30 days and all time, plus the Lidarr library), and a daily job re-walks orbits older than a week. Previously the crawl worker was registered but nothing ever enqueued it.
+- **Constellation budgets are enforced**: the `orbitEdgeBudget` setting now bounds each crawl (it was a hardcoded 2000), and the `dailyApiBudget` setting is charged per live Discogs request across the crawl and interactive expansion. When the day's budget is spent the crawl pauses until the next day instead of retrying.
+- **Collaboration Constellation** — an interactive force-directed graph of *credited* album personnel (musicians, producers, songwriters, engineers) at the `/constellation` route. Explore who-actually-recorded-with-whom outward from an artist and send discoveries to Lidarr. Runs on the **live Discogs/MusicBrainz API by default** (no setup, but no genre coloring), with an **opt-in local Discogs credit index** for fast offline exploration and genre-based node coloring — at the honest cost of downloading and parsing the full Discogs releases dump. Uses Deezer for 30s previews and the Plex/Jellyfin/Lidarr "in your library" ring; YouTube is a link-out. Configured through `GET`/`PUT /api/settings/constellation` (no settings page yet).
+
+### Changed
+- **Constellation navigation expands in place**: clicking a node, a path hop, or a breadcrumb merges that person's collaborators into the current field instead of replacing it, so the walk stays on screen; canvas node objects are kept stable so the layout no longer resets on every expansion.
+- **Notification channels of type telegram, pushover and email are rejected on create** with a clear 400. Nothing ever delivered to them; the API previously accepted the config and dropped the notification with a log line.
+
+### Fixed
+- **SSO provider test endpoint no longer reports success for an untested provider type** (unreachable with the current provider set, but the fallback said "not yet implemented" with `success: true`).
 
 ---
 
