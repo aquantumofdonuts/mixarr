@@ -7,8 +7,10 @@ for (const theme of ['light', 'dark'] as const) {
     await page.addInitScript(value => localStorage.setItem('theme', value), theme);
     await page.goto('/subscriptions');
     await waitForTheme(page, theme);
-    const edit = page.getByRole('button', { name: 'Edit', exact: true });
-    await edit.click();
+    const overflow = page.getByLabel('More actions for Weekly discoveries', { exact: true });
+    await overflow.focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: 'Edit subscription', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Edit Subscription', exact: true });
     await expect(dialog).toBeVisible();
     const save = dialog.getByRole('button', { name: 'Save', exact: true });
@@ -20,7 +22,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.screenshot({ animations: 'disabled', path: `/tmp/mixarr-catalog-evidence/controls/subscription-form-${theme}.png` });
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
-    await expect(edit).toBeFocused();
+    await expect(overflow).toBeFocused();
     expect(await page.evaluate(() => document.body.style.overflow)).not.toBe('hidden');
   });
 }
@@ -33,4 +35,38 @@ test('catalog navigation uses native destinations', async ({ catalogPage: page }
   await page.getByRole('link', { name: 'Review Queue', exact: true }).click();
   await expect(page).toHaveURL(/\/queue$/);
   await expect(page.getByText('Queue Artist 001', { exact: true })).toBeVisible();
+});
+
+test('dashboard record labels distinguish owner counts from broader administrative lists', async ({ catalogPage: page }) => {
+  await page.goto('/');
+  const summary = page.getByRole('region', { name: 'Your catalog summary' });
+  await expect(summary.getByRole('link', { name: /Pending discovery records/ })).toHaveAttribute('href', '/');
+  await expect(summary.getByText('Results marked added (30d)', { exact: true })).toBeVisible();
+  await expect(summary.getByRole('link', { name: /Results marked added/ })).toHaveCount(0);
+  await summary.getByRole('link', { name: 'Open all review records', exact: true }).click();
+  await expect(page).toHaveURL(/\/queue$/);
+  await expect(page.getByText('Queue Artist 001', { exact: true })).toBeVisible();
+});
+
+
+test('mobile subscription rows expose separate actions and explain delete consequences', async ({ catalogPage: page }) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto('/subscriptions');
+  await expect(page.getByRole('link', { name: 'Weekly discoveries', exact: true })).toHaveAttribute('href', '/subscriptions/11');
+  await expect(page.getByRole('link', { name: 'View results', exact: true })).toHaveAttribute('href', '/subscriptions/11?tab=results');
+  await expect(page.getByRole('button', { name: 'Run now', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause schedule', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const overflow = page.getByLabel('More actions for Weekly discoveries', { exact: true });
+  await overflow.focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Delete subscription', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete subscription?', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(/schedule/i);
+  await expect(dialog).toContainText(/results/i);
+  await expect(dialog).toContainText(/run history/i);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(overflow).toBeFocused();
 });

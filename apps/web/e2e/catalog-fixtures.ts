@@ -79,7 +79,7 @@ export const test = base.extend<CatalogFixtures>({
             const limit = Number(url.searchParams.get('limit') || 50);
             return reply({ items: items.slice(offset, offset + limit).map(({ status: _status, ...item }) => item), total: items.length, stats: { pending: items.length, addedToday: 0 } });
           }
-          case '/api/dashboard/stats': return reply({ stats: { activeSubscriptions: 1, artistsAdded: 0, pendingReviews: queue.length, runningJobs: 0, activeConnections: 1 } });
+          case '/api/dashboard/stats': return reply({ stats: { activeSubscriptions: 1, pendingDiscoveryRecords: items.length, subscriptionRecordsMarkedAdded: 0, pendingReviews: queue.length, runningJobs: 0, activeConnections: 1 } });
           case '/api/search/ai/status': return reply({ available: false });
           case '/api/search/lidarr/artists': return reply({ artists: [], total: 0, needingRefresh: 0, issueStats: { noAlbums: 0, noPoster: 0, noOverview: 0, noGenres: 0 }, healthScore: 100 });
           case '/api/search/discover': return reply({ results: catalogScenario === 'empty' ? [] : catalogFeed.map((item, index) => ({ name: item.artistName, mbid: item.artistMbid, imageUrl: item.imageUrl, sources: item.sources, spotifyId: `fixture-${index}`, inLibrary: added.has(item.artistMbid || '') })) });
