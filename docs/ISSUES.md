@@ -32,6 +32,18 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ---
 
+## UI/UX catalog redesign (planned)
+
+**Status:** Reviewed design and implementation plan only; implementation not started.
+**Scope:** All 25 UI/UX review recommendations and a distinctive music-catalog identity; compact artwork-thumbnail feed confirmed by the user.
+
+- [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
+- [Implementation tasks and verification gates](plans/2026-10-07-music-catalog-ux-plan.md)
+
+This initiative includes truthful acquisition feedback, artist/source drilldown, queue pagination, safe reversible decisions, and consistent responsive controls. Existing security findings above remain tracked independently; affected mutations must satisfy their scope checks before being exposed by the new UI.
+
+---
+
 ## 🔧 TECHNICAL DEBT (Deferred)
 
 ### TD-009: Unify "Artist Added" Tracking Across Add Paths
