@@ -1,6 +1,6 @@
 'use client';
 
-import type { AcquisitionOutcome, AcquisitionState, UndoDecisionResponse } from '@mixarr/shared-types';
+import type { AcquisitionOutcome, AcquisitionState, UndoDecisionResponse, ArtistSourceRecord } from '@mixarr/shared-types';
 
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { api } from './api';
@@ -76,6 +76,8 @@ export interface FeedItem {
   status?: 'pending' | 'adding' | 'failed' | 'added' | 'dismissed';
   acquisitionState?: AcquisitionState;
   acquisitionMessage?: string;
+  sourceRecords?: ArtistSourceRecord[];
+  sourceRecordCount?: number;
   // Metadata for display
   tags: string[] | null;
   listeners: number | null;

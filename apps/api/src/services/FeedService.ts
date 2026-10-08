@@ -9,7 +9,7 @@
  */
 
 import prisma from '../lib/db.js';
-import type { AcquisitionOutcome, AcquisitionState } from '@mixarr/shared-types';
+import type { AcquisitionOutcome, AcquisitionState, ArtistSourceRecord } from '@mixarr/shared-types';
 import { createDecisionUndo } from '../lib/decision-undo.js';
 import type { UndoDecisionResponse } from '@mixarr/shared-types';
 import { DecisionError, nextRevision } from '../lib/decision.js';
@@ -71,6 +71,8 @@ export interface AggregatedFeedItem {
   listeners: number | null;
   subscriptionName: string | null;
   acquisitionState?: AcquisitionState;
+  sourceRecords?: ArtistSourceRecord[];
+  sourceRecordCount?: number;
 }
 
 export interface SubscriptionResultInput {
@@ -84,6 +86,8 @@ export interface SubscriptionResultInput {
   status: string;
   processedAt?: Date | null;
   skipReason?: string | null;
+  runId?: number | null;
+  sourceUrl?: string | null;
   // Optional metadata from SubscriptionResult
   tags?: string | null;
   listeners?: number | null;
@@ -459,6 +463,19 @@ export class FeedService {
       }
       // If no subscriptionName was provided, leave as null
 
+      const sourceRecords: ArtistSourceRecord[] = [...groupResults].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id).slice(0, 50).map(row => {
+        let sourceUrl: string | null = null;
+        try {
+          if (row.sourceUrl) {
+            const url = new URL(row.sourceUrl);
+            if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) sourceUrl = url.href;
+          }
+        } catch { /* An invalid stored link is unavailable. */ }
+        return { key: `subscription-result:${row.id}`, kind: 'subscription-result',
+          label: row.subscriptionName ?? 'Subscription result', subscriptionId: row.subscriptionId,
+          runId: row.runId ?? null, recordedAt: row.createdAt.toISOString(), recordStatus: row.status, sourceUrl };
+      });
+
       aggregated.push({
         id: this.generateFeedId(linkedResultIds),
         artistName: primary.artistName,
@@ -467,6 +484,8 @@ export class FeedService {
         subscriptionCount: subscriptionIds.size,
         sourceTypes: Array.from(allSources),
         sourceCount: allSources.size,
+        sourceRecords,
+        sourceRecordCount: groupResults.length,
         linkedResultIds,
         earliestFound,
         acquisitionState: groupResults.some(r => r.status === 'adding' && (!r.processedAt || Date.now() - r.processedAt.getTime() < 120_000)) ? 'adding'
@@ -566,6 +585,7 @@ export class FeedService {
     // into memory. Run the count in parallel to detect truncation.
     const resultWhere = {
       subscriptionId: { in: subscriptionIds },
+      subscription: { userId },
       itemType: 'artist',
       status: { in: statusFilter },
     };
@@ -581,6 +601,8 @@ export class FeedService {
           artistName: true,
           mbid: true,
           subscriptionId: true,
+          runId: true,
+          sourceUrl: true,
           imageUrl: true,
           sources: true,
           createdAt: true,
@@ -611,6 +633,8 @@ export class FeedService {
       artistName: r.name,
       artistMbid: r.mbid,
       subscriptionId: r.subscriptionId,
+      runId: r.runId,
+      sourceUrl: r.sourceUrl,
       imageUrl: r.imageUrl,
       sources: r.sources,
       createdAt: r.createdAt,

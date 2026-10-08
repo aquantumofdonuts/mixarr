@@ -382,6 +382,7 @@ describe('FeedService', () => {
         expect.objectContaining({
           where: {
             subscriptionId: { in: [1] },
+            subscription: { userId: 123 },
             itemType: 'artist',
             status: { in: ['pending', 'queued', 'adding', 'failed'] },
           },
@@ -1617,5 +1618,25 @@ describe('FeedService', () => {
       // Should not throw
       await expect(service.persistEnrichment(before, after)).resolves.toBeUndefined();
     });
+  });
+});
+
+describe('feed provenance previews', () => {
+  it('returns actual record/subscription/run/time references without treating them as confirmations', () => {
+    const service = new FeedService();
+    const source = { id: 9, artistName: 'Artist', artistMbid: '11111111-1111-4111-8111-111111111111', subscriptionId: 2, runId: 4,
+      subscriptionName: 'My source', sources: ['lastfm'], createdAt: new Date('2026-10-07T12:00:00Z'), status: 'failed', sourceUrl: 'https://example.org/discovery' };
+    const result = service.aggregateResults([source, { ...source, id: 10, runId: null, sourceUrl: 'javascript:alert(1)' }])[0];
+    expect(result.sourceRecords).toEqual([
+      { key: 'subscription-result:9', kind: 'subscription-result', label: 'My source', subscriptionId: 2, runId: 4, recordedAt: '2026-10-07T12:00:00.000Z', recordStatus: 'failed', sourceUrl: 'https://example.org/discovery' },
+      { key: 'subscription-result:10', kind: 'subscription-result', label: 'My source', subscriptionId: 2, runId: null, recordedAt: '2026-10-07T12:00:00.000Z', recordStatus: 'failed', sourceUrl: null },
+    ]);
+    expect(result.sourceRecordCount).toBe(2);
+  });
+  it('bounds previews while keeping the actual aggregate record count', () => {
+    const service = new FeedService();
+    const records = Array.from({ length: 80 }, (_, index) => ({ id: index + 1, artistName: 'Artist', artistMbid: null, subscriptionId: 2, sources: [], createdAt: new Date(), status: 'pending' }));
+    const result = service.aggregateResults(records)[0];
+    expect(result.sourceRecords).toHaveLength(50); expect(result.sourceRecordCount).toBe(80);
   });
 });
