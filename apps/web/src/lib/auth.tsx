@@ -121,6 +121,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return res.json();
     },
     onSuccess: async (data) => {
+      await queryClient.cancelQueries({ queryKey: ['auth'], exact: true });
       await queryClient.cancelQueries(protectedQueries);
       queryClient.removeQueries(protectedQueries);
       setCacheActor(data.user?.id ?? null);
@@ -142,6 +143,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (!res.ok) throw new Error('Logout failed');
     },
     onSuccess: async () => {
+      await queryClient.cancelQueries({ queryKey: ['auth'], exact: true });
       await queryClient.cancelQueries(protectedQueries);
       queryClient.removeQueries(protectedQueries);
       setCacheActor(null);

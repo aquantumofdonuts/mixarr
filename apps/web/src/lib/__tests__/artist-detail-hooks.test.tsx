@@ -130,6 +130,23 @@ describe('protected query cache auth boundary', () => {
     expect(result.current.auth.user).toBeNull();
     expect(push).toHaveBeenCalledWith('/login');
   });
+  it.each(['login', 'logout'] as const)('prevents a pre-%s auth refresh from resurrecting the old actor', async action => {
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    let refreshSignal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementation((url, options) => String(url).includes('/auth/me') ? new Promise(resolve => {
+      resolveRefresh = resolve;
+      refreshSignal = options!.signal!;
+    }) : Promise.resolve(json(auth(2))));
+    const { client, wrapper } = setup();
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    act(() => result.current.refetchAuth());
+    await waitFor(() => expect(resolveRefresh).toBeDefined());
+    await act(async () => { if (action === 'login') await result.current.login('two', 'password'); else await result.current.logout(); });
+    await act(async () => { resolveRefresh!(json(auth(1))); });
+    expect(client.getQueryData(['auth'])).toEqual(auth(action === 'login' ? 2 : null));
+    expect(refreshSignal?.aborted).toBe(true);
+    await waitFor(() => expect(result.current.user?.id ?? null).toBe(action === 'login' ? 2 : null));
+  });
   it('does not claim logout succeeded when the session endpoint rejects it', async () => {
     vi.mocked(fetch).mockResolvedValue(json({ error: 'Logout rejected' }, 500));
     const { client, wrapper } = setup(); client.setQueryData(['feed'], { private: true });
