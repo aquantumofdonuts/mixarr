@@ -13,7 +13,7 @@ export function DashboardTiles() {
   const summaries = [
     { label: 'Pending discovery records', value: stats?.pendingDiscoveryRecords, href: '/', description: 'Pending and queued artist source records; artists may appear in multiple records.' },
     { label: 'Your pending review records', value: stats?.pendingReviews, href: admin ? undefined : '/queue' },
-    { label: 'Active subscriptions', value: stats?.activeSubscriptions, href: admin ? undefined : '/subscriptions' },
+    { label: 'Active subscriptions', value: stats?.activeSubscriptions },
     { label: 'Results marked added (30d)', value: stats?.subscriptionRecordsMarkedAdded, description: 'Your subscription result records, including legacy records. This is not a distinct artist or confirmed library count.' },
     ...(admin ? [{ label: 'Active connections', value: stats?.activeConnections }] : []),
   ];
@@ -28,6 +28,9 @@ export function DashboardTiles() {
         </li>;
       })}
     </ul>
+    {!admin && <nav aria-label="Your record lists" className="border-t border-border px-3 py-2 text-xs">
+      <Link href="/subscriptions" className="text-primary underline">Open your subscriptions</Link>
+    </nav>}
     {admin && <nav aria-label="Administrative record lists" className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border px-3 py-2 text-xs">
       <Link href="/queue" className="text-primary underline">Open all review records</Link>
       <Link href="/subscriptions" className="text-primary underline">Open all subscriptions</Link>

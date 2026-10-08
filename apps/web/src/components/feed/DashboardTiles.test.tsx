@@ -10,11 +10,12 @@ beforeEach(() => {
   mocks.stats.current = { data: { activeSubscriptions: 2, pendingDiscoveryRecords: 8, artistsAdded: 99, subscriptionRecordsMarkedAdded: 4, pendingReviews: 3, activeConnections: 5 }, refetch: mocks.refetch };
 });
 describe('catalog summary', () => {
-  it('links record counts to supported discovery, pending review and subscription scopes', () => {
+  it('links discovery and pending review scopes and separates subscription navigation from its active count', () => {
     render(<DashboardTiles />);
     expect(screen.getByRole('link', { name: /8 Pending discovery records/ })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: /3 Your pending review records/ })).toHaveAttribute('href', '/queue');
-    expect(screen.getByRole('link', { name: /2 Active subscriptions/ })).toHaveAttribute('href', '/subscriptions');
+    expect(screen.getByText('Active subscriptions').closest('a')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Open your subscriptions' })).toHaveAttribute('href', '/subscriptions');
     expect(screen.queryByText(/Connections/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Artists added|Added today/i)).not.toBeInTheDocument();
   });
