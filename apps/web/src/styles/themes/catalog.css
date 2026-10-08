@@ -1,0 +1,122 @@
+/* Catalog themes. HSL aliases preserve existing Tailwind consumers.
+ * --accent is a neutral hover surface; --link/--ring carry interactive slate.
+ * Dividers are subtle; --input supplies the higher contrast control boundary.
+ */
+:root {
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-text: -apple-system, BlinkMacSystemFont, "Segoe UI Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 4px;
+}
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: 180.00 6.67% 97.06%; /* #F7F8F8 */
+  --foreground: 210.00 10.71% 10.98%; /* #191C1F */
+  --card: 0.00 0.00% 100.00%; /* #FFFFFF */
+  --card-foreground: 210.00 10.71% 10.98%; /* #191C1F */
+  --popover: 0.00 0.00% 100.00%; /* #FFFFFF */
+  --popover-foreground: 210.00 10.71% 10.98%; /* #191C1F */
+  --primary: 210.00 10.71% 10.98%; /* #191C1F */
+  --primary-foreground: 0.00 0.00% 100.00%; /* #FFFFFF */
+  --primary-hover: 207.14 32.31% 25.49%; /* #2C4356 */
+  --secondary: 210.00 11.11% 92.94%; /* #EBEDEF */
+  --secondary-foreground: 210.00 10.71% 10.98%; /* #191C1F */
+  --muted: 210.00 11.11% 92.94%; /* #EBEDEF */
+  --muted-foreground: 210.00 6.60% 41.57%; /* #636A71 */
+  --accent: 210.00 11.11% 92.94%; /* #EBEDEF */
+  --accent-foreground: 210.00 10.71% 10.98%; /* #191C1F */
+  --link: 207.78 30.68% 34.51%; /* #3D5A73 */
+  --destructive: 1.86 59.45% 42.55%; /* #AD302C */
+  --destructive-foreground: 0.00 0.00% 100.00%; /* #FFFFFF */
+  --border: 210.00 9.09% 87.06%; /* #DBDEE1 */
+  --input: 210.00 5.60% 49.02%; /* #767D84 */
+  --ring: 207.78 30.68% 34.51%; /* #3D5A73 */
+  --sidebar: 180.00 6.67% 97.06%; /* #F7F8F8 */
+  --sidebar-foreground: 210.00 10.71% 10.98%; /* #191C1F */
+  --sidebar-border: 210.00 9.09% 87.06%; /* #DBDEE1 */
+  --success: 141.05 32.20% 34.71%; /* #3C7550 - adjusted for tinted-background text contrast */
+  --success-background: 136.36 26.83% 91.96%; /* #E5F0E8 */
+  --warning: 44.00 69.54% 29.61%; /* #806417 - adjusted for tinted-background text contrast */
+  --warning-background: 43.64 47.83% 90.98%; /* #F3EDDD */
+  --error: 1.86 59.45% 42.55%; /* #AD302C */
+  --error-background: 3.53 62.96% 94.71%; /* #FAEAE9 */
+  --info: 207.78 30.68% 34.51%; /* #3D5A73 */
+  --row-hover: 40.00 42.86% 98.63%; /* #FDFCFA */
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: 210.00 11.54% 10.20%; /* #171A1D */
+  --foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+  --card: 210.00 11.11% 14.12%; /* #202428 */
+  --card-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+  --popover: 210.00 11.11% 14.12%; /* #202428 */
+  --popover-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+  --primary: 204.00 15.15% 93.53%; /* #ECEFF1 */
+  --primary-foreground: 210.00 10.71% 10.98%; /* #191C1F */
+  --primary-hover: 207.17 43.80% 76.27%; /* #A8C5DD */
+  --secondary: 210.00 12.00% 19.61%; /* #2C3238 */
+  --secondary-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+  --muted: 210.00 12.00% 19.61%; /* #2C3238 */
+  --muted-foreground: 210.00 10.77% 74.51%; /* #B7BEC5 */
+  --accent: 210.00 12.00% 19.61%; /* #2C3238 */
+  --accent-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+  --link: 207.17 43.80% 76.27%; /* #A8C5DD */
+  --destructive: 2.07 73.11% 76.67%; /* #EF9B98 */
+  --destructive-foreground: 210.00 10.71% 10.98%; /* #191C1F */
+  --border: 210.00 10.39% 30.20%; /* #454D55 */
+  --input: 210.00 8.62% 54.51%; /* #818B95 */
+  --ring: 207.17 43.80% 76.27%; /* #A8C5DD */
+  --sidebar: 210.00 11.54% 10.20%; /* #171A1D */
+  --sidebar-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+  --sidebar-border: 210.00 10.39% 30.20%; /* #454D55 */
+  --success: 138.37 32.45% 70.39%; /* #9BCCAA */
+  --success-background: 140.00 22.58% 18.24%; /* #24392B */
+  --warning: 46.30 56.79% 68.24%; /* #DCC780 */
+  --warning-background: 45.00 26.67% 17.65%; /* #393321 */
+  --error: 2.07 73.11% 76.67%; /* #EF9B98 */
+  --error-background: 2.31 25.00% 20.39%; /* #412827 */
+  --info: 207.17 43.80% 76.27%; /* #A8C5DD */
+  --row-hover: 210.00 12.00% 19.61%; /* #2C3238 */
+}
+
+/* Before next-themes hydrates, system preference uses the same dark values. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --background: 210.00 11.54% 10.20%; /* #171A1D */
+    --foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+    --card: 210.00 11.11% 14.12%; /* #202428 */
+    --card-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+    --popover: 210.00 11.11% 14.12%; /* #202428 */
+    --popover-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+    --primary: 204.00 15.15% 93.53%; /* #ECEFF1 */
+    --primary-foreground: 210.00 10.71% 10.98%; /* #191C1F */
+    --primary-hover: 207.17 43.80% 76.27%; /* #A8C5DD */
+    --secondary: 210.00 12.00% 19.61%; /* #2C3238 */
+    --secondary-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+    --muted: 210.00 12.00% 19.61%; /* #2C3238 */
+    --muted-foreground: 210.00 10.77% 74.51%; /* #B7BEC5 */
+    --accent: 210.00 12.00% 19.61%; /* #2C3238 */
+    --accent-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+    --link: 207.17 43.80% 76.27%; /* #A8C5DD */
+    --destructive: 2.07 73.11% 76.67%; /* #EF9B98 */
+    --destructive-foreground: 210.00 10.71% 10.98%; /* #191C1F */
+    --border: 210.00 10.39% 30.20%; /* #454D55 */
+    --input: 210.00 8.62% 54.51%; /* #818B95 */
+    --ring: 207.17 43.80% 76.27%; /* #A8C5DD */
+    --sidebar: 210.00 11.54% 10.20%; /* #171A1D */
+    --sidebar-foreground: 204.00 15.15% 93.53%; /* #ECEFF1 */
+    --sidebar-border: 210.00 10.39% 30.20%; /* #454D55 */
+    --success: 138.37 32.45% 70.39%; /* #9BCCAA */
+    --success-background: 140.00 22.58% 18.24%; /* #24392B */
+    --warning: 46.30 56.79% 68.24%; /* #DCC780 */
+    --warning-background: 45.00 26.67% 17.65%; /* #393321 */
+    --error: 2.07 73.11% 76.67%; /* #EF9B98 */
+    --error-background: 2.31 25.00% 20.39%; /* #412827 */
+    --info: 207.17 43.80% 76.27%; /* #A8C5DD */
+    --row-hover: 210.00 12.00% 19.61%; /* #2C3238 */
+  }
+}

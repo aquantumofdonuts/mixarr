@@ -1,101 +1,13 @@
-# Mixarr Theme System
+# Catalog themes
 
-The Mixarr theme system provides a unified "Listening Room" aesthetic with light and dark mode support.
+`index.css` imports only `catalog.css`. The legacy listening-room stylesheet is inactive.
 
-## Theme Files
+Paper, charcoal, and graphite surfaces let artwork supply the color. Links and focus rings use slate. Primary buttons use ink (light neutral in dark mode); secondary controls and selection use neutral fills. Green/amber describe real outcomes; red describes errors and destructive consequences.
 
-```
-themes/
-├── index.css           # Theme imports (entry point)
-├── listening-room.css  # Main theme with light/dark modes
-└── README.md           # This file
-```
+Tokens remain HSL triples for existing `hsl(var(--…))` and Tailwind consumers. `--accent` is the neutral hover surface, `--link` is slate, `--primary-hover` is the button hover, and `--input` is a control boundary with greater contrast than the subtle `--border` divider. Readable metadata uses adjusted `--muted-foreground`; the originally proposed light ink-500 does not meet body-text contrast on every surface.
 
-## Color Palette
+`next-themes` sets `data-theme="light"` or `data-theme="dark"`; system mode follows OS preference, including a CSS fallback before hydration. Tailwind's selector dark strategy uses that same attribute. There is no second dark class.
 
-### "Listening Room" Theme
+`--font-display`, `--font-text`, and `--font-mono` resolve to system stacks without font downloads. Names and prose use the text stack; identifiers, counts, and timestamps use mono. Controls use the shared 4px radius.
 
-Inspired by warm, inviting spaces where music is meant to be enjoyed. Uses natural tones that complement album artwork without competing with it.
-
-| Variable | Light Mode | Dark Mode | Purpose |
-|----------|------------|-----------|---------|
-| `--background` | `#f8f6f3` (warm white) | `#1c1b19` (warm black) | Page background |
-| `--foreground` | `#1c1b19` | `#e8e6e3` | Primary text |
-| `--primary` | `#bf7a56` (rust/copper) | `#bf7a56` | Accent buttons, links |
-| `--secondary` | `#5a8a87` (muted teal) | `#5a8a87` | Secondary accents |
-| `--muted` | `#e8e6e3` | `#2a2927` | Subtle backgrounds |
-| `--card` | `#ffffff` | `#242321` | Card surfaces |
-
-## Usage
-
-### CSS Variables
-
-All colors use CSS custom properties in HSL format:
-
-```css
-.my-component {
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-  border: 1px solid hsl(var(--border));
-}
-```
-
-### Tailwind Classes
-
-The theme integrates with Tailwind via the config:
-
-```tsx
-<div className="bg-background text-foreground">
-  <button className="bg-primary text-primary-foreground">
-    Click me
-  </button>
-</div>
-```
-
-### Theme Switching
-
-The app uses `next-themes` for theme switching:
-
-- **Light Mode**: `data-theme="light"` on `<html>`
-- **Dark Mode**: `data-theme="dark"` on `<html>`
-- **System**: Follows OS preference
-
-The `ThemePicker` component provides a Light/Dark/System toggle.
-
-## Accessibility
-
-### Reduced Motion
-
-The theme respects `prefers-reduced-motion`:
-
-```css
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --transition-base: 0.01ms;
-  }
-}
-```
-
-### Color Contrast
-
-All color combinations meet WCAG AA contrast requirements:
-- Text on backgrounds: 4.5:1 minimum
-- Large text/UI: 3:1 minimum
-
-## Typography
-
-The theme uses system fonts for optimal performance:
-
-```css
-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-```
-
-This eliminates external font requests and ensures consistent rendering across platforms.
-
-## Design Principles
-
-1. **Warmth over sterility**: Colors have warm undertones, avoiding clinical blue-grays
-2. **Restraint**: Limited palette prevents visual noise
-3. **Music-first**: UI recedes to let album art and content shine
-4. **Accessibility**: High contrast, motion preferences respected
-5. **Performance**: System fonts, CSS variables, no external dependencies
+`src/lib/__tests__/catalog-contrast.test.ts` reads the actual declarations, verifies text pairs at 4.5:1 and focus/control boundaries at 3:1, and checks generated dark utilities. These checks cover token pairs, not every page-specific opacity, chart encoding, or overridden class; the route sweep and browser audit remain required.

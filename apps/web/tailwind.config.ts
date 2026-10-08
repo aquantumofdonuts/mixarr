@@ -1,7 +1,7 @@
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
-  darkMode: 'class',
+  darkMode: ['selector', '[data-theme="dark"]'],
   content: [
     './src/**/*.{js,ts,jsx,tsx,mdx}',
     '../../packages/ui/src/**/*.{js,ts,jsx,tsx}',
@@ -12,6 +12,8 @@ const config: Config = {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
+        link: 'hsl(var(--link))',
+        'primary-hover': 'hsl(var(--primary-hover))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
         primary: {
@@ -109,13 +111,14 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ['var(--font-body)', 'DM Sans', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+        sans: ['var(--font-text)'],
+        display: ['var(--font-display)'],
+        mono: ['var(--font-mono)'],
       },
       borderRadius: {
-        'card': '1.25rem',       // 20px - generous card rounding
-        'container': '0.75rem',  // 12px - list items, inner containers, banners
-        'button': '0.625rem',    // 10px - pill-ish buttons
+        'card': 'var(--radius)',
+        'container': 'var(--radius)',
+        'button': 'var(--radius)'
       },
       boxShadow: {
         // Elevation system
@@ -123,10 +126,10 @@ const config: Config = {
         'elevation-2': '0 4px 16px rgba(0, 0, 0, 0.1)',
         'elevation-3': '0 8px 30px rgba(0, 0, 0, 0.14)',
         'elevation-4': '0 16px 48px rgba(0, 0, 0, 0.18)',
-        // Glow variants using Listening Room copper (#bf7a56)
-        'glow-sm': '0 0 12px rgba(191, 122, 86, 0.2)',
-        'glow-md': '0 4px 16px rgba(191, 122, 86, 0.3)',
-        'glow-primary': '0 4px 20px rgba(191, 122, 86, 0.25), 0 0 0 1px rgba(191, 122, 86, 0.1)',
+        // ponytail: compatibility until existing glow consumers migrate in T03.
+        'glow-sm': 'none',
+        'glow-md': 'none',
+        'glow-primary': 'none',
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
