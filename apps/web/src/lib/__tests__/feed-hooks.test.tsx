@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { useFeed, useApproveFeedItem, useDismissFeedItem, useRestoreDecision } from '../hooks';
@@ -209,4 +209,39 @@ it('removes only a confirmed dismissed row from each cached feed while keeping u
   const cache = client.getQueryData<{ pages: { items: { id: string; status: string }[]; total: number }[] }>(['feed', 50])!;
   expect(cache.pages.flatMap(page => page.items)).toEqual([{ id: 'feed-2', status: 'adding' }, { id: 'feed-3', status: 'pending' }]);
   expect(cache.pages.map(page => page.total)).toEqual([2, 2]); client.clear();
+});
+
+it.each(['added', 'already-in-library'] as const)('uses the shifted raw offset after %s confirmation even when Load more cancels a slow refresh', async state => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const row = (id: string) => ({ id, artistName: id, artistMbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', status: 'pending', acquisitionState: 'available' });
+  const original = ['A', 'B', 'C', 'D'].map(row), remaining = original.slice(1);
+  let confirmed = false, deferred = false, releaseRefresh!: () => void;
+  const offsets: number[] = [];
+  vi.mocked(api.get).mockImplementation(async path => {
+    const offset = Number(new URL(path, 'http://mixarr.invalid').searchParams.get('offset'));
+    offsets.push(offset);
+    if (confirmed && offset === 0 && !deferred) {
+      deferred = true;
+      await new Promise<void>(resolve => { releaseRefresh = resolve; });
+    }
+    const rows = confirmed ? remaining : original;
+    return { data: { items: rows.slice(offset, offset + 2), total: rows.length, stats: { pending: confirmed ? 6 : 8, addedToday: confirmed ? 1 : 0 } }, error: null, status: 200 };
+  });
+  vi.mocked(api.post).mockImplementation(async () => {
+    confirmed = true;
+    return { data: { artistName: 'A', outcome: { state, artistMbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', message: 'Confirmed' } }, error: null, status: 200 };
+  });
+  const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result, unmount } = renderHook(() => ({ feed: useFeed(2), approve: useApproveFeedItem() }), { wrapper });
+  try {
+    await waitFor(() => expect(result.current.feed.data?.pages[0].items.map(item => item.id)).toEqual(['A', 'B']));
+    await act(async () => { await result.current.approve.mutateAsync('A'); });
+    await waitFor(() => expect(releaseRefresh).toBeTypeOf('function'));
+    // Pending stats count original source records, so an artist removal cannot decrement them by one.
+    expect(result.current.feed.data?.pages[0].stats.pending).toBe(8);
+    await act(async () => { await result.current.feed.fetchNextPage(); });
+    expect(offsets).toEqual([0, 0, 1]);
+    await waitFor(() => expect(result.current.feed.data?.pages.flatMap(page => page.items).map(item => item.id)).toEqual(['B', 'C', 'D']));
+    expect(result.current.feed.hasNextPage).toBe(false);
+  } finally { releaseRefresh?.(); unmount(); client.clear(); }
 });

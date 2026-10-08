@@ -194,11 +194,18 @@ export function useApproveFeedItem() {
     },
     onSuccess: (data, id) => {
       const confirmed = data.outcome.state === 'added' || data.outcome.state === 'already-in-library';
-      updateItem(id, { status: confirmed ? 'added' : 'failed', acquisitionState: data.outcome.state, acquisitionMessage: data.outcome.message });
       if (confirmed) {
+        queryClient.setQueriesData<import('@tanstack/react-query').InfiniteData<FeedResponse>>(
+          { queryKey: queryKeys.feed }, old => {
+            if (!old?.pages.some(page => page.items.some(item => item.id === id))) return old;
+            // Recent outcome rows belong to the page UI; raw query rows must match the server's shifted offset.
+            return { ...old, pages: old.pages.map(page => ({ ...page, total: Math.max(0, page.total - 1), items: page.items.filter(item => item.id !== id) })) };
+          });
         queryClient.invalidateQueries({ queryKey: ['discover', 'library'] });
         queryClient.invalidateQueries({ queryKey: ['review'] });
         queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
+      } else {
+        updateItem(id, { status: 'failed', acquisitionState: data.outcome.state, acquisitionMessage: data.outcome.message });
       }
     },
     onError: (error, id) => {
