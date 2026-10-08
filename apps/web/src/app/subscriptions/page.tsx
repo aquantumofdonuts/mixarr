@@ -196,7 +196,7 @@ export default function SubscriptionsPage() {
 
       {/* Subscription List */}
       {!isLoading && subscriptions.length > 0 && (
-        <div className="space-y-4">
+        <div className="border-t border-border">
           {subscriptions.map((sub) => (
             <SubscriptionCard
               key={sub.id}
@@ -217,7 +217,8 @@ export default function SubscriptionsPage() {
         onClose={() => setConfirmTarget(null)}
         onConfirm={confirmDelete}
         title="Delete subscription?"
-        description="This action cannot be undone."
+        description="This removes the subscription’s schedule, saved results, and run history. Artists already added to Lidarr remain there. This action cannot be undone."
+        loading={deleteMutation.isPending}
         confirmLabel="Delete"
         variant="destructive"
       />

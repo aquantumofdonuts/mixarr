@@ -1,22 +1,12 @@
 'use client';
 
+import { useRef } from 'react';
 import Link from 'next/link';
-import Clock from 'lucide-react/dist/esm/icons/clock';
-import Edit from 'lucide-react/dist/esm/icons/edit';
-import Eye from 'lucide-react/dist/esm/icons/eye';
-import Pause from 'lucide-react/dist/esm/icons/pause';
-import Play from 'lucide-react/dist/esm/icons/play';
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
-import TrendingUp from 'lucide-react/dist/esm/icons/trending-up';
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { subscriptionTypes, scheduleOptions } from '@/lib/subscription-constants';
-import { buildSubscriptionDescriptor, isDefaultName } from '@/lib/subscription-descriptor';
-
-// ============================================================================
-// Type Definitions
-// ============================================================================
+import { buildSubscriptionDescriptor } from '@/lib/subscription-descriptor';
 
 /**
  * User type for ownership display
@@ -47,10 +37,6 @@ export interface Subscription {
   user?: { username: string; displayName: string };
 }
 
-// ============================================================================
-// Component Props
-// ============================================================================
-
 export interface SubscriptionCardProps {
   /** The subscription data to display */
   subscription: Subscription;
@@ -68,141 +54,51 @@ export interface SubscriptionCardProps {
   onDelete: (id: number) => void;
 }
 
-// ============================================================================
-// Component
-// ============================================================================
-
-/**
- * SubscriptionCard displays a single subscription with its status, info, and action buttons.
- *
- * Features:
- * - Icon based on subscription type
- * - Active/Paused badge
- * - Last run status badge with artist count
- * - Owner badge (for admins viewing other users' subscriptions)
- * - Schedule and last run info
- * - Action buttons: View, Run, Toggle, Edit, Delete
- */
-export function SubscriptionCard({
-  subscription: sub,
-  currentUser: user,
-  isRunning,
-  onRun,
-  onToggle,
-  onEdit,
-  onDelete,
-}: SubscriptionCardProps) {
-  // Get the type config for icon and label
-  const typeConfig = subscriptionTypes.find(t => t.value === sub.type);
-  const SubIcon = typeConfig?.icon || TrendingUp;
-  const typeLabel = typeConfig?.label;
-
-  // Get the schedule label
-  const scheduleLabel = scheduleOptions.find(s => s.value === sub.schedule)?.label || sub.schedule;
-
-  // Build the computed descriptor from type + config
-  const descriptor = buildSubscriptionDescriptor(sub.type, sub.config, typeLabel || sub.type);
-  const showCustomName = sub.name && !isDefaultName(sub.name, typeLabel || sub.type, descriptor);
+export function SubscriptionCard({ subscription: sub, currentUser: user, isRunning, onRun, onToggle, onEdit, onDelete }: SubscriptionCardProps) {
+  const overflow = useRef<HTMLDetailsElement>(null);
+  const typeLabel = subscriptionTypes.find(type => type.value === sub.type)?.label || sub.type;
+  const descriptor = buildSubscriptionDescriptor(sub.type, sub.config, typeLabel);
+  const name = sub.name || descriptor;
+  const scheduleLabel = scheduleOptions.find(option => option.value === (sub.schedule || ''))?.label || sub.schedule;
+  const runStatus = sub.lastRunStatus === 'completed' || sub.lastRunStatus === 'success' ? 'Completed' : sub.lastRunStatus === 'failed' ? 'Failed' : sub.lastRunStatus === 'running' ? 'Running' : 'Status unavailable';
+  const closeOverflow = () => {
+    if (overflow.current) {
+      overflow.current.open = false;
+      overflow.current.querySelector('summary')?.focus();
+    }
+  };
 
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-center gap-4">
-          {/* Icon */}
-          <div className="rounded-container bg-primary/10 p-3 text-primary">
-            <SubIcon className="h-5 w-5" />
+    <article className="border-b border-border py-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 className="min-w-0 break-words font-semibold"><Link href={`/subscriptions/${sub.id}`} className="text-primary hover:underline">{name}</Link></h3>
+            {sub.schedule && <Badge variant="secondary">{sub.isActive ? 'Schedule active' : 'Schedule paused'}</Badge>}
+            {user?.role === 'admin' && sub.user && sub.userId !== user.id && <Badge variant="outline">{sub.user.displayName || sub.user.username}</Badge>}
           </div>
-
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            {/* Header row with name and badges */}
-            <div className="flex items-center gap-2">
-              <h3 className="font-semibold truncate">
-                {descriptor}
-              </h3>
-              <Badge variant={sub.isActive ? 'success' : 'secondary'}>
-                {sub.isActive ? 'Active' : 'Paused'}
-              </Badge>
-              {sub.lastRunStatus && (
-                <Badge
-                  variant={
-                    sub.lastRunStatus === 'success' || sub.lastRunStatus === 'completed'
-                      ? 'success'
-                      : sub.lastRunStatus === 'failed'
-                        ? 'destructive'
-                        : 'secondary'
-                  }
-                  className="text-xs"
-                >
-                  {sub.lastRunStatus === 'success' || sub.lastRunStatus === 'completed'
-                    ? `✓ ${sub.lastRunCount ?? 0} artists`
-                    : sub.lastRunStatus === 'failed'
-                      ? '✗ Failed'
-                      : '⟳ Running'}
-                </Badge>
-              )}
-              {/* Show owner badge for admins viewing other users' subscriptions */}
-              {user?.role === 'admin' && sub.user && sub.userId !== user.id && (
-                <Badge variant="outline" className="text-xs">
-                  {sub.user.displayName || sub.user.username}
-                </Badge>
-              )}
-            </div>
-
-            {/* Custom name (only shown when user set a non-default name) */}
-            {showCustomName && (
-              <p className="text-sm text-muted-foreground truncate">
-                {sub.name}
-              </p>
-            )}
-
-            {/* Schedule and last run */}
-            <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-              {sub.schedule && (
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {scheduleLabel}
-                </span>
-              )}
-              {sub.lastRun && (
-                <span>Last: {new Date(sub.lastRun).toLocaleDateString()}</span>
-              )}
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-1">
-            <Link href={`/subscriptions/${sub.id}`}>
-              <Button variant="ghost" size="icon" title="View results">
-                <Eye className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onRun(sub.id)}
-              disabled={isRunning}
-              title="Run now"
-            >
-              <Play className={`h-4 w-4 ${isRunning ? 'animate-pulse' : ''}`} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onToggle(sub)}
-              title={sub.isActive ? 'Pause' : 'Resume'}
-            >
-              {sub.isActive ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => onEdit(sub)} title="Edit">
-              <Edit className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => onDelete(sub.id)} title="Delete">
-              <Trash2 className="h-4 w-4 text-destructive" />
-            </Button>
+          {descriptor !== name && <p className="mt-1 break-words text-sm text-muted-foreground">{descriptor}</p>}
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>{scheduleLabel}</span>
+            {sub.lastRun || sub.lastRunStatus ? <span><span className={sub.lastRunStatus === 'failed' ? 'text-destructive' : undefined}>Last run: {runStatus}{sub.lastRunCount !== null && <> · <span className="font-mono">{sub.lastRunCount}</span> results</>}</span>{sub.lastRun && <> · <time dateTime={sub.lastRun}>{new Date(sub.lastRun).toLocaleString()}</time></>}</span> : <span>Not run yet</span>}
           </div>
         </div>
-      </CardContent>
-    </Card>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={`/subscriptions/${sub.id}?tab=results`} className="inline-flex min-h-11 items-center px-2 text-sm text-primary hover:underline">View results</Link>
+          <Button variant="outline" size="sm" onClick={() => onRun(sub.id)} disabled={isRunning}>Run now</Button>
+          <Button variant="outline" size="sm" onClick={() => onToggle(sub)}>{sub.isActive ? 'Pause schedule' : 'Resume schedule'}</Button>
+          <details ref={overflow} className="group relative">
+            <summary aria-label={`More actions for ${name}`} className="flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-button border border-border px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+              <ChevronRight aria-hidden="true" className="h-4 w-4 transition-transform duration-[140ms] ease-in-out group-open:rotate-90" />
+              <span>More actions</span>
+            </summary>
+            <div className="absolute right-0 top-full z-10 mt-1 flex w-44 flex-col items-stretch gap-1 rounded-button border border-border bg-background p-1 shadow-sm">
+              <Button variant="ghost" size="sm" onClick={() => { closeOverflow(); onEdit(sub); }}>Edit subscription</Button>
+              <Button variant="ghost" size="sm" className="text-destructive" onClick={() => { closeOverflow(); onDelete(sub.id); }}>Delete subscription</Button>
+            </div>
+          </details>
+        </div>
+      </div>
+    </article>
   );
 }
