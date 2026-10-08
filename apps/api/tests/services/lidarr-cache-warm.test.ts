@@ -67,7 +67,7 @@ describe('LidarrService.addArtistWithCacheWarm', () => {
       '/music'
     );
 
-    expect(mockWarmer.warmArtist).toHaveBeenCalledWith('df494a19-4657-4a77-92b6-80325c63510f');
+    expect(mockWarmer.warmArtist).toHaveBeenCalledWith('df494a19-4657-4a77-92b6-80325c63510f', { signal: undefined });
     expect(result.cacheWarmed).toBe(true);
     expect(result.artist.artistName).toBe('Test Artist');
   });
