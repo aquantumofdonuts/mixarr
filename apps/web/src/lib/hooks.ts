@@ -147,6 +147,7 @@ export interface FeedResponse {
   items: FeedItem[];
   stats: FeedStats;
   total: number;
+  truncation?: { totalBeforeAggregationCap: number; aggregationTruncated: boolean };
 }
 
 // Feed Hooks
@@ -161,6 +162,7 @@ export function useFeed(limit = 50) {
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.items.length === 0) return undefined;
       const totalFetched = allPages.reduce((sum, page) => sum + page.items.length, 0);
       return totalFetched < lastPage.total ? totalFetched : undefined;
     },
@@ -218,6 +220,14 @@ export function useDismissFeedItem() {
       const { data, error } = await api.post<{ artistName: string } & UndoDecisionResponse>(`/api/feed/${id}/dismiss`);
       if (error) throw new Error(error);
       return data!;
+    },
+    onSuccess: (_data, id) => {
+      queryClient.setQueriesData<import('@tanstack/react-query').InfiniteData<FeedResponse>>(
+        { queryKey: queryKeys.feed }, old => {
+          if (!old?.pages.some(page => page.items.some(item => item.id === id))) return old;
+          // This confirmed deletion also shifts the server's next raw artist offset by one.
+          return { ...old, pages: old.pages.map(page => ({ ...page, total: Math.max(0, page.total - 1), items: page.items.filter(item => item.id !== id) })) };
+        });
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.feed });

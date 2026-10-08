@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { EmptyState, Skeleton } from '@/components/ui';
+import { EmptyState, Skeleton, Button } from '@/components/ui';
 import { FeedCard } from './FeedCard';
 import Calendar from 'lucide-react/dist/esm/icons/calendar';
 import type { FeedItem } from '@/lib/hooks';
@@ -15,6 +15,8 @@ export interface FeedGridProps {
   hasMore: boolean;
   isLoading?: boolean;
   loadingIds?: Set<string>;
+  view?: 'list' | 'artwork';
+  onOpen?: (trigger: HTMLElement) => void;
 }
 
 export function FeedGrid({
@@ -25,12 +27,14 @@ export function FeedGrid({
   hasMore,
   isLoading = false,
   loadingIds = new Set(),
+  view = 'list',
+  onOpen,
 }: FeedGridProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   // Infinite scroll with IntersectionObserver
   useEffect(() => {
-    if (!hasMore || isLoading) return;
+    if (!hasMore || isLoading || typeof IntersectionObserver === 'undefined') return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -59,9 +63,9 @@ export function FeedGrid({
   // Skeleton loading state
   if (isLoading && items.length === 0) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div className="space-y-3" aria-label="Loading discovery">
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="aspect-square">
+          <div key={i} className="h-20">
             <Skeleton className="w-full h-full rounded-container" />
           </div>
         ))}
@@ -81,18 +85,27 @@ export function FeedGrid({
     );
   }
 
+  const uniqueItems = [...new Map(items.map(item => [item.id, item])).values()];
   return (
     <div>
-      {/* Grid */}
+      <p role="status" aria-live="polite" className="py-2 font-mono text-xs text-muted-foreground">{uniqueItems.length} artists loaded{hasMore ? ' · more available' : ''}</p>
       <div
         data-testid="feed-grid"
-        className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
+        data-view={view}
+        className={view === 'artwork' ? 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'border-t'}
       >
-        {items.map((item, i) => (
+        {uniqueItems.map(item => (
           <FeedCard
             key={item.id}
             id={item.id}
             artistName={item.artistName}
+            artistMbid={item.artistMbid}
+            acquisitionState={item.acquisitionState}
+            acquisitionMessage={item.acquisitionMessage}
+            sourceRecords={item.sourceRecords}
+            sourceRecordCount={item.sourceRecordCount}
+            view={view}
+            onOpen={onOpen}
             imageUrl={item.imageUrl}
             status={item.status ?? (item.acquisitionState === 'adding' ? 'adding' : item.acquisitionState === 'failed' || item.acquisitionState === 'uncertain' ? 'failed' : 'pending')}
             isLoading={loadingIds.has(item.id)}
@@ -101,14 +114,14 @@ export function FeedGrid({
             tags={item.tags}
             listeners={item.listeners}
             subscriptionName={item.subscriptionName}
-            index={i}
           />
         ))}
       </div>
 
       {/* Infinite scroll sentinel */}
       {hasMore && (
-        <div ref={sentinelRef} className="h-10 mt-4">
+        <div ref={sentinelRef} className="mt-4">
+          <Button variant="outline" disabled={isLoading} onClick={onLoadMore}>Load more</Button>
           {isLoading && (
             <div data-testid="loading-spinner" className="flex justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />

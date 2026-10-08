@@ -1,196 +1,63 @@
 import { render, screen, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
 import { FeedCard } from './FeedCard';
-
-// Mock Next.js Image component
-vi.mock('next/image', () => ({
-  default: ({ src, alt, fill, ...props }: { src: string; alt: string; fill?: boolean; [key: string]: unknown }) => {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={src} alt={alt} data-fill={fill ? 'true' : undefined} {...props} />;
-  },
-}));
-
-describe('FeedCard', () => {
-  const defaultProps = {
-    id: 'feed-1',
-    artistName: 'Radiohead',
-    imageUrl: 'https://example.com/image.jpg',
-    onApprove: vi.fn(),
-    onDismiss: vi.fn(),
-    tags: null as string[] | null,
-    listeners: null as number | null,
-    subscriptionName: null as string | null,
-  };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
+vi.mock('next/image', () => ({ default: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} /> }));
+vi.mock('next/navigation', () => ({ usePathname: () => '/', useSearchParams: () => new URLSearchParams('view=list&seed=one'), useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('@/hooks/useListContext', () => ({ useListContext: () => ({ remember: vi.fn() }) }));
+const props = { id: 'feed-1-2', artistName: 'Radiohead', artistMbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', imageUrl: null, onApprove: vi.fn(), onDismiss: vi.fn() };
+describe('compact discovery row', () => {
+  it('offers primary actions without hover or touch activation and opens the shared inspector', async () => {
+    const user = userEvent.setup(), approve = vi.fn(), dismiss = vi.fn();
+    render(<FeedCard {...props} onApprove={approve} onDismiss={dismiss} />);
+    expect(screen.getByRole('link', { name: 'Radiohead' })).toHaveAttribute('href', '/?view=list&seed=one&artist=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    const add = screen.getByRole('button', { name: 'Add artist Radiohead' });
+    add.focus(); await user.keyboard('{Enter}'); expect(approve).toHaveBeenCalledWith('feed-1-2');
+    fireEvent.touchStart(screen.getByRole('button', { name: 'Dismiss Radiohead' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss Radiohead' })); expect(dismiss).toHaveBeenCalledWith('feed-1-2');
+    expect(add.closest('article')).not.toHaveClass('group');
   });
-
-  it('renders artist name', () => {
-    render(<FeedCard {...defaultProps} />);
-    expect(screen.getByText('Radiohead')).toBeInTheDocument();
+  it('uses original source evidence and relevant metadata', () => {
+    render(<FeedCard {...props} tags={['rock', 'alternative']} listeners={5000000} sourceRecords={[{ key: 'result:1', kind: 'subscription-result', label: 'New releases', subscriptionId: 3, runId: 7, recordedAt: '2026-10-01T00:00:00Z', recordStatus: 'pending', sourceUrl: null }]} sourceRecordCount={2} />);
+    expect(screen.getByRole('link', { name: 'New releases' })).toHaveAttribute('href', '/subscriptions/3?tab=results');
+    expect(screen.getByText(/Discovered through/)).toHaveTextContent('1 more source record');
+    expect(screen.getByText(/5M listeners/)).toBeInTheDocument(); expect(screen.getByText(/rock/)).toBeInTheDocument();
   });
-
-  it('renders artist image', () => {
-    render(<FeedCard {...defaultProps} />);
-    const img = screen.getByRole('img');
-    expect(img).toHaveAttribute('src', 'https://example.com/image.jpg');
-    expect(img).toHaveAttribute('alt', 'Radiohead');
+  it('keeps disabled actions and a precise pending status during acquisition', () => {
+    render(<FeedCard {...props} acquisitionState="adding" />);
+    expect(screen.getByRole('button', { name: 'Add artist Radiohead' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Dismiss Radiohead' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for Lidarr confirmation');
   });
-
-  it('renders placeholder when no image', () => {
-    render(<FeedCard {...defaultProps} imageUrl={null} />);
+  it.each(['added', 'already-in-library'] as const)('retains %s as a confirmed row', state => {
+    render(<FeedCard {...props} acquisitionState={state} />);
+    expect(screen.getByRole('status')).toHaveTextContent(state === 'added' ? 'Added to Lidarr' : 'Already in Lidarr');
+    expect(screen.queryByRole('button', { name: /Add artist/ })).not.toBeInTheDocument();
+  });
+  it.each(['failed', 'uncertain'] as const)('shows the actual %s message and Retry', state => {
+    render(<FeedCard {...props} acquisitionState={state} acquisitionMessage="Provider timed out; membership is unknown" />);
+    expect(screen.getByRole('status')).toHaveTextContent('Provider timed out; membership is unknown');
+    expect(screen.getByRole('button', { name: 'Retry Radiohead' })).toBeEnabled();
+  });
+  it('requires explicit identity recovery instead of guessing an MBID', () => {
+    render(<FeedCard {...props} artistMbid={null} acquisitionState="identity-required" />);
+    expect(screen.queryByRole('button', { name: /Add artist/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Identify artist Radiohead' })).toHaveAttribute('href', '/search');
+    expect(screen.getByRole('status')).toHaveTextContent('matching MusicBrainz artist');
+  });
+  it('links connection recovery to settings', () => {
+    render(<FeedCard {...props} acquisitionState="connection-required" />);
+    expect(screen.getByRole('link', { name: 'Connect Lidarr' })).toHaveAttribute('href', '/connections');
+  });
+  it('uses the same persistent actions in the artwork view', () => {
+    render(<FeedCard {...props} view="artwork" />);
+    expect(screen.getByRole('button', { name: 'Add artist Radiohead' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Dismiss Radiohead' })).toBeVisible();
     expect(screen.getByTestId('image-placeholder')).toBeInTheDocument();
   });
+});
 
-  it('truncates long artist names with title attribute', () => {
-    const longName = 'This Is A Very Long Artist Name That Should Be Truncated';
-    render(<FeedCard {...defaultProps} artistName={longName} />);
-    const name = screen.getByText(longName);
-    expect(name).toHaveClass('truncate');
-    expect(name).toHaveAttribute('title', longName);
-  });
-
-  it('calls onApprove with id when approve button clicked', () => {
-    const onApprove = vi.fn();
-    render(<FeedCard {...defaultProps} onApprove={onApprove} />);
-    
-    fireEvent.click(screen.getByLabelText('Add to Lidarr'));
-    expect(onApprove).toHaveBeenCalledWith('feed-1');
-  });
-
-  it('calls onDismiss with id when dismiss button clicked', () => {
-    const onDismiss = vi.fn();
-    render(<FeedCard {...defaultProps} onDismiss={onDismiss} />);
-    
-    fireEvent.click(screen.getByLabelText('Dismiss'));
-    expect(onDismiss).toHaveBeenCalledWith('feed-1');
-  });
-
-  it('shows "Added" overlay when status is added', () => {
-    render(<FeedCard {...defaultProps} status="added" />);
-    expect(screen.getByText('Added')).toBeInTheDocument();
-    // Buttons should not be visible
-    expect(screen.queryByLabelText('Add to Lidarr')).not.toBeInTheDocument();
-  });
-
-  it('shows "Dismissed" overlay when status is dismissed', () => {
-    render(<FeedCard {...defaultProps} status="dismissed" />);
-    expect(screen.getByText('Dismissed')).toBeInTheDocument();
-    // Buttons should not be visible
-    expect(screen.queryByLabelText('Dismiss')).not.toBeInTheDocument();
-  });
-
-  it('shows spinner and hides buttons when loading', () => {
-    render(<FeedCard {...defaultProps} isLoading />);
-    // Spinner should be visible
-    expect(screen.getByTestId('card-loading-spinner')).toBeInTheDocument();
-    // Buttons should be hidden during loading
-    expect(screen.queryByLabelText('Add to Lidarr')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Dismiss')).not.toBeInTheDocument();
-  });
-
-  it('has accessible button labels', () => {
-    render(<FeedCard {...defaultProps} />);
-    expect(screen.getByLabelText('Add to Lidarr')).toBeInTheDocument();
-    expect(screen.getByLabelText('Dismiss')).toBeInTheDocument();
-  });
-
-  describe('metadata display', () => {
-    it('displays genre tags when available', () => {
-      render(<FeedCard {...defaultProps} tags={['rock', 'alternative', 'british']} />);
-      expect(screen.getByText('rock')).toBeInTheDocument();
-      expect(screen.getByText('alternative')).toBeInTheDocument();
-      expect(screen.getByText('british')).toBeInTheDocument();
-    });
-
-    it('does not show tags section when tags is null', () => {
-      render(<FeedCard {...defaultProps} tags={null} />);
-      expect(screen.queryByTestId('metadata-tags')).not.toBeInTheDocument();
-    });
-
-    it('does not show tags section when tags is empty array', () => {
-      render(<FeedCard {...defaultProps} tags={[]} />);
-      expect(screen.queryByTestId('metadata-tags')).not.toBeInTheDocument();
-    });
-
-    it('displays listener count when available', () => {
-      render(<FeedCard {...defaultProps} listeners={5000000} />);
-      expect(screen.getByText('5M listeners')).toBeInTheDocument();
-    });
-
-    it('formats listener count correctly for thousands', () => {
-      render(<FeedCard {...defaultProps} listeners={123456} />);
-      expect(screen.getByText('123K listeners')).toBeInTheDocument();
-    });
-
-    it('formats listener count correctly for small numbers', () => {
-      render(<FeedCard {...defaultProps} listeners={999} />);
-      expect(screen.getByText('999 listeners')).toBeInTheDocument();
-    });
-
-    it('does not show listeners when null', () => {
-      render(<FeedCard {...defaultProps} listeners={null} />);
-      expect(screen.queryByText('listeners')).not.toBeInTheDocument();
-    });
-
-    it('displays subscription name when available', () => {
-      render(<FeedCard {...defaultProps} subscriptionName="New Releases" />);
-      expect(screen.getByText('New Releases')).toBeInTheDocument();
-    });
-
-    it('displays "Found in X subs" when multiple subscriptions', () => {
-      render(<FeedCard {...defaultProps} subscriptionName="Found in 3 subs" />);
-      expect(screen.getByText('Found in 3 subs')).toBeInTheDocument();
-    });
-
-    it('does not show subscription name when null', () => {
-      render(<FeedCard {...defaultProps} subscriptionName={null} />);
-      expect(screen.queryByTestId('metadata-source')).not.toBeInTheDocument();
-    });
-
-    it('displays tags on first metadata line', () => {
-      render(
-        <FeedCard
-          {...defaultProps}
-          tags={['rock', 'alternative']}
-          listeners={5000000}
-          subscriptionName="New Releases"
-        />
-      );
-      const tagsLine = screen.getByTestId('metadata-tags');
-      expect(tagsLine).toBeInTheDocument();
-      expect(tagsLine).toHaveTextContent('rock');
-      expect(tagsLine).toHaveTextContent('alternative');
-    });
-
-    it('displays listeners and source on second metadata line', () => {
-      render(
-        <FeedCard
-          {...defaultProps}
-          tags={['rock', 'alternative']}
-          listeners={5000000}
-          subscriptionName="New Releases"
-        />
-      );
-      const metadataLine = screen.getByTestId('metadata-line');
-      expect(metadataLine).toBeInTheDocument();
-      expect(metadataLine).toHaveTextContent('5M listeners');
-      expect(metadataLine).toHaveTextContent('New Releases');
-    });
-
-    it('renders metadata with separator dot between listeners and source', () => {
-      render(
-        <FeedCard
-          {...defaultProps}
-          tags={['rock']}
-          listeners={1000000}
-          subscriptionName="New Releases"
-        />
-      );
-      // Check for dot separator between listeners and source
-      const metadataLine = screen.getByTestId('metadata-line');
-      expect(metadataLine.textContent).toMatch(/·|•/);
-    });
-  });
+it('opens the inspector from artwork with the same stable identity', () => {
+  render(<FeedCard {...props} />);
+  expect(screen.getByRole('link', { name: 'Inspect artwork for Radiohead' })).toHaveAttribute('href', '/?view=list&seed=one&artist=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 });

@@ -11,9 +11,9 @@ import { Button } from '@/components/ui/button';
 import { useArtistAdd } from '@/app/search/hooks/useArtistAdd';
 import { canonicalArtistMbid } from './ArtistLink';
 
-export function ArtistInspector() {
+export function ArtistInspector({ restoreContext = true }: { restoreContext?: boolean }) {
   const params = useSearchParams();
-  const { closeInspector } = useListContext({ ready: true, selectionOwner: false });
+  const { closeInspector } = useListContext({ ready: true, selectionOwner: false, restore: restoreContext });
   const { user } = useAuth();
   const identity = canonicalArtistMbid(params.get('artist'));
   // A new identity owns a fresh add action. A previous request cannot mark its replacement as acquired.

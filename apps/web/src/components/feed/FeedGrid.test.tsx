@@ -20,8 +20,10 @@ vi.mock('next/link', () => ({
 // Mock Next.js navigation
 const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush }), usePathname: () => '/', useSearchParams: () => new URLSearchParams(),
 }));
+
+vi.mock('@/hooks/useListContext', () => ({ useListContext: () => ({ remember: vi.fn() }) }));
 
 // Mock IntersectionObserver (jsdom doesn't support it)
 const mockObserve = vi.fn();
@@ -127,7 +129,7 @@ describe('FeedGrid', () => {
     expect(screen.getByTestId('loading-spinner')).toBeInTheDocument();
   });
 
-  it('renders in responsive grid layout', () => {
+  it('defaults to compact rows with an announced loaded range', () => {
     render(
       <FeedGrid
         items={mockItems}
@@ -139,9 +141,8 @@ describe('FeedGrid', () => {
     );
 
     const grid = screen.getByTestId('feed-grid');
-    expect(grid).toHaveClass('grid-cols-2');
-    expect(grid).toHaveClass('md:grid-cols-3');
-    expect(grid).toHaveClass('lg:grid-cols-4');
+    expect(grid).toHaveAttribute('data-view', 'list');
+    expect(screen.getByText('2 artists loaded')).toHaveAttribute('role', 'status');
   });
 
   it('sets up IntersectionObserver when hasMore is true', () => {
@@ -225,4 +226,12 @@ describe('FeedGrid', () => {
 
     expect(screen.queryByTestId('loading-spinner')).not.toBeInTheDocument();
   });
+});
+
+it('offers explicit Load more and deduplicates overlapping rows', () => {
+  vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+  const more = vi.fn(), item = { id: 'feed-1', artistName: 'One', artistMbid: null, imageUrl: null, score: 1, subscriptionCount: 1, sourceCount: 1, sources: [], createdAt: '', tags: null, listeners: null, subscriptionName: null };
+  render(<FeedGrid items={[item, item]} onApprove={vi.fn()} onDismiss={vi.fn()} onLoadMore={more} hasMore />);
+  expect(screen.getAllByText('One')).toHaveLength(1);
+  screen.getByRole('button', { name: 'Load more' }).click(); expect(more).toHaveBeenCalledOnce();
 });

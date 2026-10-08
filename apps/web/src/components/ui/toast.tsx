@@ -33,6 +33,7 @@ export function useToast() {
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = React.useState<Toast[]>([]);
   const nextId = React.useRef(0);
+  const mounted = React.useRef(true);
   const timers = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const removeToast = React.useCallback((id: string) => {
     clearTimeout(timers.current.get(id));
@@ -40,6 +41,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts(previous => previous.filter(toast => toast.id !== id));
   }, []);
   const addToast = React.useCallback((toast: Omit<Toast, 'id'>) => {
+    if (!mounted.current) return;
     const id = `toast-${++nextId.current}`;
     setToasts(previous => [...previous, { ...toast, id }]);
     // Actionable feedback (including Undo) gets ten seconds by default.
@@ -47,8 +49,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     if (duration > 0) timers.current.set(id, setTimeout(() => removeToast(id), duration));
   }, [removeToast]);
   React.useEffect(() => {
+    mounted.current = true;
     const activeTimers = timers.current;
-    return () => { activeTimers.forEach(clearTimeout); activeTimers.clear(); };
+    return () => { mounted.current = false; activeTimers.forEach(clearTimeout); activeTimers.clear(); };
   }, []);
 
   return <ToastContext.Provider value={{ toasts, addToast, removeToast }}>

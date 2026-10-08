@@ -176,3 +176,37 @@ describe('rejected decision restoration', () => {
     expect(invalidate).not.toHaveBeenCalled(); client.clear();
   });
 });
+
+it('stops pagination on an empty page even when the server total is larger', async () => {
+  vi.mocked(api.get).mockResolvedValueOnce({ data: { items: [], stats: { pending: 5, addedToday: 0 }, total: 5 }, error: null, status: 200 });
+  const { result } = renderHook(() => useFeed(), { wrapper: createWrapper() });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.hasNextPage).toBe(false);
+});
+
+it('refetches the real active feed after signed Undo restoration', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  let dismissed = false;
+  vi.mocked(api.get).mockImplementation(async () => ({ data: { items: dismissed ? [] : [{ id: 'feed-1', artistName: 'Restored artist' }], total: dismissed ? 0 : 1, stats: { pending: dismissed ? 0 : 1, addedToday: 0 } }, error: null, status: 200 }));
+  vi.mocked(api.post).mockImplementation(async (path) => { dismissed = path !== '/api/feed/restore'; return { data: { artistName: 'Restored artist', undoToken: 'signed', undoExpiresAt: new Date(Date.now() + 120000).toISOString(), restoredIds: [1] }, error: null, status: 200 }; });
+  const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result } = renderHook(() => ({ feed: useFeed(), dismiss: useDismissFeedItem(), restore: useRestoreDecision('feed') }), { wrapper });
+  await waitFor(() => expect(result.current.feed.data?.pages[0].items).toHaveLength(1));
+  const decision = await result.current.dismiss.mutateAsync('feed-1');
+  await waitFor(() => expect(result.current.feed.data?.pages[0].items).toHaveLength(0));
+  await result.current.restore.mutateAsync(decision.undoToken);
+  await waitFor(() => expect(result.current.feed.data?.pages[0].items[0].artistName).toBe('Restored artist'));
+  client.clear();
+});
+
+it('removes only a confirmed dismissed row from each cached feed while keeping unrelated acquisition state', async () => {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  client.setQueryData(['feed', 50], { pages: [{ items: [{ id: 'feed-1', status: 'pending' }, { id: 'feed-2', status: 'adding' }], total: 3, stats: { pending: 3, addedToday: 0 } }, { items: [{ id: 'feed-3', status: 'pending' }], total: 3, stats: { pending: 3, addedToday: 0 } }], pageParams: [0, 2] });
+  vi.mocked(api.post).mockResolvedValueOnce({ data: { artistName: 'Dismissed artist', undoToken: 'signed', undoExpiresAt: new Date(Date.now() + 120000).toISOString() }, error: null, status: 200 });
+  const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result } = renderHook(() => useDismissFeedItem(), { wrapper });
+  await result.current.mutateAsync('feed-1');
+  const cache = client.getQueryData<{ pages: { items: { id: string; status: string }[]; total: number }[] }>(['feed', 50])!;
+  expect(cache.pages.flatMap(page => page.items)).toEqual([{ id: 'feed-2', status: 'adding' }, { id: 'feed-3', status: 'pending' }]);
+  expect(cache.pages.map(page => page.total)).toEqual([2, 2]); client.clear();
+});

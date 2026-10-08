@@ -82,3 +82,11 @@ describe('recoverable feedback', () => {
     expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 });
+
+it('ignores a retained async notification callback after provider teardown', () => {
+  vi.useFakeTimers(); let late!: ReturnType<typeof useToast>['addToast'];
+  function Capture() { late = useToast().addToast; return null; }
+  const { unmount } = render(<ToastProvider><Capture /></ToastProvider>); unmount();
+  act(() => late({ type: 'info', title: 'Late private outcome' }));
+  expect(vi.getTimerCount()).toBe(0);
+});

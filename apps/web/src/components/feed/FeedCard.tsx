@@ -1,197 +1,65 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
-import Check from 'lucide-react/dist/esm/icons/check';
-import X from 'lucide-react/dist/esm/icons/x';
 import Music from 'lucide-react/dist/esm/icons/music';
+import { ArtistLink, canonicalArtistMbid } from '@/components/artists/ArtistLink';
+import { Button } from '@/components/ui/button';
+import type { AcquisitionState, ArtistSourceRecord } from '@mixarr/shared-types';
 import { cn } from '@/lib/utils';
-
-/**
- * Format listener count to human-readable format.
- * Examples: 5000000 -> "5M", 123456 -> "123K", 999 -> "999"
- */
-function formatListeners(count: number): string {
-  if (count < 0) return '0';
-  if (count >= 1000000) {
-    return `${Math.floor(count / 1000000)}M`;
-  }
-  if (count >= 1000) {
-    return `${Math.floor(count / 1000)}K`;
-  }
-  return count.toString();
-}
 
 export interface FeedCardProps {
   id: string;
   artistName: string;
+  artistMbid?: string | null;
   imageUrl: string | null;
   status?: 'pending' | 'adding' | 'failed' | 'added' | 'dismissed';
+  acquisitionState?: AcquisitionState;
+  acquisitionMessage?: string;
   isLoading?: boolean;
   onApprove: (id: string) => void;
   onDismiss: (id: string) => void;
-  // Metadata fields
+  onOpen?: (trigger: HTMLElement) => void;
   tags?: string[] | null;
   listeners?: number | null;
   subscriptionName?: string | null;
-  /** Position index for staggered entrance animation */
-  index?: number;
+  sourceRecords?: ArtistSourceRecord[];
+  sourceRecordCount?: number;
+  view?: 'list' | 'artwork';
 }
 
-export function FeedCard({
-  id,
-  artistName,
-  imageUrl,
-  status = 'pending',
-  isLoading: loading = false,
-  onApprove,
-  onDismiss,
-  tags,
-  listeners,
-  subscriptionName,
-  index = 0,
-}: FeedCardProps) {
-  const isLoading = loading || status === 'adding';
-  const [isHovered, setIsHovered] = useState(false);
-  const [isTouched, setIsTouched] = useState(false);
-  const touchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+function formatListeners(count: number) {
+  return count >= 1_000_000 ? `${Math.floor(count / 1_000_000)}M` : count >= 1_000 ? `${Math.floor(count / 1_000)}K` : String(Math.max(0, count));
+}
 
-  // Clear any pending touch-hover timer on unmount
-  useEffect(() => {
-    return () => clearTimeout(touchTimerRef.current);
-  }, []);
-
-  const showOverlay = status === 'added' || status === 'dismissed';
-  const overlayText = status === 'added' ? 'Added' : status === 'dismissed' ? 'Dismissed' : '';
-
-  // Build metadata sections
-  const hasTags = tags && tags.length > 0;
-  const hasListeners = listeners !== null && listeners !== undefined;
-  const hasSource = subscriptionName !== null && subscriptionName !== undefined;
-
-  return (
-    <div
-      style={{ animationDelay: `${Math.min(index * 50, 500)}ms` }}
-      className="animate-fade-in opacity-0 [animation-fill-mode:forwards] motion-reduce:animate-none motion-reduce:opacity-100"
-    >
-    <div
-      className={cn(
-        'relative group rounded-card overflow-hidden bg-card transition-all duration-300 hover:shadow-elevation-2',
-        showOverlay && 'opacity-50 scale-95'
-      )}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onTouchStart={() => setIsTouched(true)}
-      onTouchEnd={() => {
-        clearTimeout(touchTimerRef.current);
-        touchTimerRef.current = setTimeout(() => setIsTouched(false), 3000);
-      }}
-    >
-      {status === 'adding' && <p role="status" className="px-3 py-2 text-xs">Waiting for Lidarr confirmation…</p>}
-      {status === 'failed' && <p role="status" className="px-3 py-2 text-xs">Addition is unconfirmed. <button type="button" className="underline" onClick={() => onApprove(id)} disabled={isLoading} aria-label={`Retry ${artistName}`}>Retry</button> checks Lidarr first.</p>}
-      {/* Image */}
-      <div className="aspect-square relative">
-        {imageUrl ? (
-          <Image
-            src={imageUrl}
-            alt={artistName}
-            fill
-            className="object-cover"
-            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-          />
-        ) : (
-          <div
-            data-testid="image-placeholder"
-            className="w-full h-full bg-muted flex items-center justify-center"
-          >
-            <Music className="w-12 h-12 text-muted-foreground" aria-hidden="true" />
-          </div>
-        )}
-
-        {/* Status overlay (Added/Dismissed) */}
-        {showOverlay && (
-          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-            <span className="text-white font-semibold text-lg">{overlayText}</span>
-          </div>
-        )}
-
-        {/* Action buttons */}
-        {!showOverlay && (
-          <div
-            className={cn(
-              'absolute inset-0 bg-black/50 backdrop-blur-[2px] flex items-center justify-center gap-4 transition-opacity',
-              isHovered || isTouched || isLoading ? 'opacity-100' : 'opacity-0'
-            )}
-          >
-            {isLoading ? (
-              <div 
-                data-testid="card-loading-spinner"
-                className="animate-spin rounded-full h-10 w-10 border-b-2 border-white" 
-              />
-            ) : (
-              <>
-                <button
-                  type="button"
-                  aria-label="Add to Lidarr"
-                  disabled={isLoading}
-                  onClick={() => onApprove(id)}
-                  className="p-3 rounded-full bg-status-success hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  <Check className="w-6 h-6 text-primary-foreground" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Dismiss"
-                  disabled={isLoading}
-                  onClick={() => onDismiss(id)}
-                  className="p-3 rounded-full bg-status-error hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  <X className="w-6 h-6 text-primary-foreground" aria-hidden="true" />
-                </button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Artist name and metadata */}
-      <div className="p-3">
-        <p className="text-card-foreground font-medium truncate" title={artistName}>
-          {artistName}
-        </p>
-        {/* Metadata line 1: tags */}
-        {hasTags && (
-          <div
-            data-testid="metadata-tags"
-            className="text-xs text-muted-foreground truncate mt-1"
-          >
-            {tags!.map((tag, idx) => (
-              <span key={`${tag}-${idx}`} className="inline-flex items-center">
-                {idx > 0 && <span className="mx-0.5 text-muted-foreground/60">,</span>}
-                <span className="text-foreground/80">{tag}</span>
-              </span>
-            ))}
-          </div>
-        )}
-        {/* Metadata line 2: listeners · source */}
-        {(hasListeners || hasSource) && (
-          <div
-            data-testid="metadata-line"
-            className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1"
-          >
-            {hasListeners && (
-              <span>{formatListeners(listeners!)} listeners</span>
-            )}
-            {hasListeners && hasSource && (
-              <span className="mx-1 text-muted-foreground/60">·</span>
-            )}
-            {hasSource && (
-              <span data-testid="metadata-source">{subscriptionName}</span>
-            )}
-          </div>
-        )}
-      </div>
+export function FeedCard({ id, artistName, artistMbid, imageUrl, status, acquisitionState, acquisitionMessage, isLoading,
+  onApprove, onDismiss, onOpen, tags, listeners, subscriptionName, sourceRecords, sourceRecordCount, view = 'list' }: FeedCardProps) {
+  const state = acquisitionState ?? (status === 'added' ? 'added' : status === 'adding' ? 'adding' : status === 'failed' ? 'uncertain' : 'available');
+  const pending = isLoading || state === 'adding';
+  const confirmed = state === 'added' || state === 'already-in-library';
+  const identify = !canonicalArtistMbid(artistMbid) || state === 'identity-required';
+  const source = sourceRecords?.[0];
+  const additional = Math.max(0, (sourceRecordCount ?? sourceRecords?.length ?? 0) - 1);
+  const message = acquisitionMessage || (state === 'adding' ? 'Waiting for Lidarr confirmation…' : state === 'added' ? 'Added to Lidarr' : state === 'already-in-library' ? 'Already in Lidarr'
+    : state === 'connection-required' ? 'A working Lidarr connection is required.' : identify ? `Search for ${artistName} and choose the matching MusicBrainz artist.`
+    : state === 'failed' ? 'Addition failed. Retry checks Lidarr first.' : state === 'uncertain' ? 'Addition is unconfirmed. Retry checks Lidarr first.' : '');
+  return <article data-feed-id={id} aria-label={artistName} aria-busy={pending || undefined}
+    className={cn('border-b border-border bg-background py-3', view === 'list' ? 'flex flex-wrap items-start gap-3' : 'flex flex-col gap-3 border p-3')}>
+    <div className={cn('relative shrink-0 overflow-hidden rounded-button bg-muted', view === 'list' ? 'h-12 w-12' : 'aspect-square w-full')}>
+      <ArtistLink mbid={artistMbid} onOpen={onOpen} aria-label={`Inspect artwork for ${artistName}`} className="block h-full w-full">{imageUrl ? <Image src={imageUrl} alt="" fill sizes={view === 'list' ? '48px' : '(max-width: 640px) 100vw, 240px'} className="object-cover" />
+        : <div data-testid="image-placeholder" className="flex h-full items-center justify-center"><Music className="h-5 w-5 text-muted-foreground" aria-hidden="true" /></div>}</ArtistLink>
     </div>
+    <div className={cn("min-w-0 flex-1 space-y-1", view === 'list' && 'basis-40')}>
+      <ArtistLink mbid={artistMbid} onOpen={onOpen} className="break-words font-semibold">{artistName}</ArtistLink>
+      <p className="text-xs text-muted-foreground">{source ? <>Discovered through {source.subscriptionId !== null ? <a className="text-link hover:underline" href={`/subscriptions/${source.subscriptionId}?tab=results`}>{source.label}</a> : source.label}{additional > 0 && ` · ${additional} more source record${additional === 1 ? '' : 's'}`}</>
+        : subscriptionName ? `Discovered through ${subscriptionName}` : 'Discovery source unavailable'}</p>
+      {(tags?.length || listeners !== null && listeners !== undefined) ? <p className="text-xs text-muted-foreground">{tags?.slice(0, 3).join(' · ')}{tags?.length && listeners !== null && listeners !== undefined ? ' · ' : ''}{listeners !== null && listeners !== undefined && <span className="font-mono">{formatListeners(listeners)} listeners</span>}</p> : null}
+      {message && <p role="status" className={cn('text-xs', confirmed ? 'text-status-success' : 'text-muted-foreground')}>{message}</p>}
     </div>
-  );
+    {!confirmed && status !== 'dismissed' && <div className="flex shrink-0 flex-wrap gap-2 sm:ml-auto">
+      {state === 'connection-required' ? <a href="/connections" className="inline-flex min-h-11 items-center text-sm text-link hover:underline">Connect Lidarr</a>
+        : identify ? <a href="/search" aria-label={`Identify artist ${artistName}`} className="inline-flex min-h-11 items-center text-sm text-link hover:underline">Identify artist</a>
+        : <Button size="sm" disabled={pending} aria-label={`${state === 'failed' || state === 'uncertain' ? 'Retry' : 'Add artist'} ${artistName}`} onClick={() => onApprove(id)}>{state === 'failed' || state === 'uncertain' ? 'Retry' : 'Add artist'}</Button>}
+      <Button size="sm" variant="outline" disabled={pending} aria-label={`Dismiss ${artistName}`} onClick={() => onDismiss(id)}>Dismiss</Button>
+    </div>}
+  </article>;
 }
