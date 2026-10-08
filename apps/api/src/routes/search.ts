@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import { z } from 'zod';
+import { ArtistDetailInputError, ArtistDetailService } from '../services/artist-detail.js';
+import { readBeforeDeadline } from '../lib/acquisition-deadline.js';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { parseIntParam } from '../utils/params.js';
@@ -1213,20 +1216,78 @@ searchRouter.get('/year', async (req, res) => {
   }
 });
 
-// Get artist releases
-searchRouter.get('/artist/:mbid/releases', async (req, res) => {
-  try {
-    const { mbid } = req.params;
-    const { limit = '100', offset = '0' } = req.query;
+const artistIdentity = z.string().uuid().transform(value => value.toLowerCase());
+const pagingInteger = (min: number, max: number) => z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(min).max(max));
+const detailQuery = z.object({
+  sourceLimit: pagingInteger(1, 100).optional(),
+  sourceCursor: z.string().min(1).max(1024).regex(/^[A-Za-z0-9_-]+$/).optional(),
+});
+const releaseQuery = z.object({
+  limit: pagingInteger(1, 100).default('100'),
+  offset: pagingInteger(0, 1_000_000).default('0'),
+});
 
-    const mb = new MusicBrainzService();
-    const result = await mb.getArtistReleases(mbid, parseInt(limit as string), parseInt(offset as string));
-    
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Failed to get releases' 
+// Owned provenance and optional metadata share one budget, including connection lookup.
+searchRouter.get('/artist/:mbid/detail', async (req, res) => {
+  const mbid = artistIdentity.safeParse(req.params.mbid);
+  const query = detailQuery.safeParse(req.query);
+  if (!mbid.success || !query.success) {
+    res.status(400).json({ error: 'Invalid artist identity or source paging', code: 'INVALID_INPUT' });
+    return;
+  }
+  const cancellation = new AbortController();
+  const signal = AbortSignal.any([AbortSignal.timeout(20_000), cancellation.signal]);
+  const close = () => { if (!res.writableEnded) cancellation.abort(); };
+  res.on('close', close);
+  try {
+    const service = new ArtistDetailService(prisma, {
+      getArtistByMbid: async (identity, providerSignal) => {
+        const lidarr = await getLidarrService(req.user!.id, providerSignal);
+        if (!lidarr) throw new Error('No active Lidarr connection');
+        return lidarr.getArtistByMbid(identity, providerSignal);
+      },
     });
+    const detail = await service.getArtistDetail(mbid.data, req.user!.id, {
+      limit: query.data.sourceLimit, cursor: query.data.sourceCursor, signal,
+    });
+    if (!cancellation.signal.aborted) res.json(detail);
+  } catch (error) {
+    if (cancellation.signal.aborted) return;
+    if (error instanceof ArtistDetailInputError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+    } else if (error && typeof error === 'object' && 'status' in error && (error.status === 401 || error.status === 403)) {
+      res.status(error.status).json({ error: 'Artist detail access denied' });
+    } else {
+      log.error('Artist detail lookup failed:', error);
+      res.status(signal.aborted ? 504 : 500).json({ error: 'Artist detail unavailable' });
+    }
+  } finally {
+    res.off('close', close);
+  }
+});
+
+// Reuse the MusicBrainz release-group contract with strict bounded paging.
+searchRouter.get('/artist/:mbid/releases', async (req, res) => {
+  const mbid = artistIdentity.safeParse(req.params.mbid);
+  const query = releaseQuery.safeParse(req.query);
+  if (!mbid.success || !query.success) {
+    res.status(400).json({ error: 'Invalid artist identity or release paging', code: 'INVALID_INPUT' });
+    return;
+  }
+  const cancellation = new AbortController();
+  const signal = AbortSignal.any([AbortSignal.timeout(20_000), cancellation.signal]);
+  const close = () => { if (!res.writableEnded) cancellation.abort(); };
+  res.on('close', close);
+  try {
+    const mb = new MusicBrainzService();
+    const result = await readBeforeDeadline(mb.getArtistReleases(mbid.data, query.data.limit, query.data.offset), signal);
+    if (!cancellation.signal.aborted) res.json(result);
+  } catch (error) {
+    if (cancellation.signal.aborted) return;
+    log.error('Artist releases lookup failed:', error);
+    res.status(signal.aborted ? 504 : 500).json({ error: 'Artist releases unavailable' });
+  } finally {
+    res.off('close', close);
   }
 });
 

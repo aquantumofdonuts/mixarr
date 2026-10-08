@@ -102,6 +102,11 @@ export class ArtistDetailService {
         return this.lidarrService.getArtistByMbid(mbid, signal);
       }), signal),
     ]);
+    for (const result of [evidence, metadata, membership]) {
+      if (result.status === 'rejected' && result.reason && (result.reason.status === 401 || result.reason.status === 403)) {
+        throw result.reason;
+      }
+    }
     const unavailable: ArtistDetail['unavailable'] = [];
     const sourceData = evidence.status === 'fulfilled' ? evidence.value : null;
     if (!sourceData) unavailable.push('sources');

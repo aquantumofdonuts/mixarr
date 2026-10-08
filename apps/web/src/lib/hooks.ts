@@ -1,9 +1,10 @@
 'use client';
 
-import type { AcquisitionOutcome, AcquisitionState, UndoDecisionResponse, ArtistSourceRecord } from '@mixarr/shared-types';
+import type { AcquisitionOutcome, AcquisitionState, UndoDecisionResponse, ArtistSourceRecord, ArtistDetail } from '@mixarr/shared-types';
 
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
-import { api } from './api';
+import { api, endpoints } from './api';
+import { useAuth } from './auth';
 
 // Query Keys - Centralized for cache invalidation
 
@@ -51,6 +52,8 @@ export const queryKeys = {
   
   // Search
   searchArtists: (query: string) => ['search', 'artists', query] as const,
+  artistDetail: (actorId: number | null, mbid: string | null, limit: number) => ['artists', actorId, mbid, 'detail', limit] as const,
+  artistReleases: (actorId: number | null, mbid: string | null, limit: number) => ['artists', actorId, mbid, 'releases', limit] as const,
   
   // Settings
   settings: ['settings'] as const,
@@ -60,6 +63,57 @@ export const queryKeys = {
   feed: ['feed'] as const,
   feedItems: (limit: number, offset: number) => ['feed', 'items', limit, offset] as const,
 };
+
+export interface ArtistReleaseGroup {
+  id: string;
+  title: string;
+  'primary-type'?: string;
+  'secondary-types'?: string[];
+  'first-release-date'?: string;
+}
+export interface ArtistReleasePage { releaseGroups: ArtistReleaseGroup[]; count: number; }
+
+const artistMbidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function useArtistDetail(mbid: string | null, sourceLimit = 50) {
+  const identity = mbid && artistMbidPattern.test(mbid) ? mbid.toLowerCase() : null;
+  const { user } = useAuth();
+  return useInfiniteQuery({
+    queryKey: queryKeys.artistDetail(user?.id ?? null, identity, sourceLimit),
+    enabled: !!user && !!identity,
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam, signal }) => {
+      const params = new URLSearchParams({ sourceLimit: String(sourceLimit) });
+      if (pageParam) params.set('sourceCursor', pageParam);
+      const { data, error } = await api.get<ArtistDetail>(`${endpoints.search.artistDetail(identity!)}?${params}`, { signal });
+      if (error || !data) throw new Error(error || 'Artist detail unavailable');
+      return data;
+    },
+    getNextPageParam: lastPage => lastPage.sourcesNextCursor ?? undefined,
+    staleTime: 30_000,
+  });
+}
+
+export function useArtistReleases(mbid: string | null, limit = 25) {
+  const identity = mbid && artistMbidPattern.test(mbid) ? mbid.toLowerCase() : null;
+  const { user } = useAuth();
+  return useInfiniteQuery({
+    queryKey: queryKeys.artistReleases(user?.id ?? null, identity, limit),
+    enabled: !!user && !!identity,
+    initialPageParam: 0,
+    queryFn: async ({ pageParam, signal }) => {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(pageParam) });
+      const { data, error } = await api.get<ArtistReleasePage>(`${endpoints.search.artistReleases(identity!)}?${params}`, { signal });
+      if (error || !data) throw new Error(error || 'Artist releases unavailable');
+      return data;
+    },
+    getNextPageParam: (lastPage, pages) => {
+      const fetched = pages.reduce((count, page) => count + page.releaseGroups.length, 0);
+      return lastPage.releaseGroups.length && fetched < lastPage.count && fetched <= 1_000_000 ? fetched : undefined;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
 
 // Feed Types
 

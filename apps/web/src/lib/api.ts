@@ -113,6 +113,8 @@ export const endpoints = {
   // Search
   search: {
     artist: '/api/search/artist',
+    artistDetail: (mbid: string) => `/api/search/artist/${encodeURIComponent(mbid)}/detail`,
+    artistReleases: (mbid: string) => `/api/search/artist/${encodeURIComponent(mbid)}/releases`,
     lidarr: '/api/search/lidarr',
     add: '/api/search/add',
   },
