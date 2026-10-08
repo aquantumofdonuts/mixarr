@@ -40,6 +40,7 @@ export const test = base.extend<CatalogFixtures>({
     const items = catalogScenario === 'empty' ? [] : [...catalogFeed];
     const queue = catalogScenario === 'empty' ? [] : [...catalogQueue];
     const added = new Set<string>();
+    const dismissed = new Map<string, FeedItem>();
     const unhandled: string[] = [];
     await page.context().route(/\/api\//, async (route) => {
       const request = route.request();
@@ -48,6 +49,25 @@ export const test = base.extend<CatalogFixtures>({
       const method = request.method();
       const reply = (json: unknown, status = 200) => route.fulfill({ status, json });
       if (method === 'GET') {
+        const artistPath = path.match(/^\/api\/search\/artist\/([^/]+)\/(detail|releases)$/);
+        if (artistPath) {
+          const mbid = artistPath[1];
+          const artist = catalogFeed.find(item => item.artistMbid === mbid);
+          if (!artist) return reply({ error: 'Unknown fixture identity' }, 400);
+          if (artistPath[2] === 'detail') return reply({
+            mbid, name: artist.artistName, imageUrl: artist.imageUrl, disambiguation: 'Fixture identity',
+            membership: added.has(mbid) ? 'in-library' : 'not-in-library',
+            sources: [{ key: 'subscription-result:1', kind: 'subscription-result', label: 'Weekly discoveries', subscriptionId: 11, runId: 71, recordedAt, recordStatus: 'pending', sourceUrl: null }],
+            sourcesNextCursor: null, unavailable: [],
+          });
+          const releases = Array.from({ length: 26 }, (_, index) => ({
+            id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, title: `Catalog release ${index + 1}`,
+            'first-release-date': String(1990 + index), 'primary-type': 'Album',
+          }));
+          const offset = Number(url.searchParams.get('offset') || 0);
+          const limit = Number(url.searchParams.get('limit') || 100);
+          return reply({ releaseGroups: releases.slice(offset, offset + limit), count: releases.length });
+        }
         switch (path) {
           case '/api/auth/me': return reply({ user: authenticated ? user : null, setupRequired: false });
           case '/api/auth/setup-required': return reply({ setupRequired: false });
@@ -93,6 +113,14 @@ export const test = base.extend<CatalogFixtures>({
           added.add(body.foreignArtistId);
           return reply({ success: true, artist: { foreignArtistId: body.foreignArtistId } });
         }
+        if (path === '/api/feed/restore') {
+          const token = request.postDataJSON().undoToken;
+          const item = dismissed.get(token);
+          if (!item) return reply({ error: 'Decision can no longer be restored' }, 409);
+          dismissed.delete(token);
+          items.push(item);
+          return reply({ restoredIds: item.id.replace('feed-', '').split('-').map(Number) });
+        }
         if (/^\/api\/feed\/[^/]+\/(approve|dismiss)$/.test(path)) {
           const id = decodeURIComponent(path.split('/')[3]);
           const index = items.findIndex(item => item.id === id);
@@ -101,14 +129,17 @@ export const test = base.extend<CatalogFixtures>({
           if (path.endsWith('/approve')) {
             if (!item.artistMbid) return reply({ error: 'Choose an artist identity', code: 'IDENTITY_REQUIRED' }, 422);
             if (catalogScenario === 'add-failed') {
-              items[index] = { ...item, acquisitionState: 'uncertain' };
+              items[index] = { ...item, acquisitionState: 'uncertain', acquisitionMessage: 'Retry to check membership' };
               return reply({ success: false, artistName: item.artistName, outcome: { artistMbid: item.artistMbid, state: 'uncertain', message: 'Retry to check membership' } });
             }
+            added.add(item.artistMbid);
             items.splice(index, 1);
             return reply({ success: true, artistName: item.artistName, outcome: { artistMbid: item.artistMbid, state: 'added', message: 'Artist added to Lidarr' } });
           }
           items.splice(index, 1);
-          return reply({ success: true, artistName: item.artistName });
+          const undoToken = `catalog-undo-${item.id}`;
+          dismissed.set(undoToken, item);
+          return reply({ success: true, artistName: item.artistName, undoToken, undoExpiresAt: new Date(Date.now() + 120_000).toISOString() });
         }
       }
       unhandled.push(`${method} ${path}${url.search}`);

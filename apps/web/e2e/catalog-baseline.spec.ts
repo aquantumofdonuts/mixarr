@@ -4,7 +4,7 @@ import { waitForTheme } from './fixtures';
 
 const evidence = process.env.CATALOG_EVIDENCE_DIR || '/tmp/mixarr-catalog-evidence';
 const routes = [
-  ['/', 'Discovery Feed'], ['/search', 'Search'], ['/subscriptions', 'Subscriptions'],
+  ['/', 'Discovery'], ['/search', 'Search'], ['/subscriptions', 'Subscriptions'],
   ['/queue', 'Review Queue'], ['/connections', 'Connections'], ['/downloads', 'slskd Downloads'],
   ['/settings', 'Settings'], ['/constellation', 'Constellation'],
 ] as const;
@@ -16,7 +16,7 @@ for (const [path, heading] of routes) {
       await page.emulateMedia({ colorScheme: 'dark' });
       await page.addInitScript(value => localStorage.setItem('theme', value), theme);
       await page.goto(path);
-      await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: heading, exact: true, level: 1 })).toBeVisible();
       await waitForTheme(page, theme === 'system' ? 'dark' : theme);
       if (path === '/') await expect(page.getByText('Common Name', { exact: true })).toHaveCount(2);
       if (path === '/queue') await expect(page.getByText('Queue Artist 001', { exact: true })).toBeVisible();
@@ -53,7 +53,7 @@ test.describe('username login', () => {
     await page.getByLabel('Username', { exact: true }).fill(CATALOG_USER.username);
     await page.getByLabel('Password', { exact: true }).fill('catalog-fixture-password');
     await page.getByRole('button', { name: /sign in/i }).click();
-    await expect(page.getByRole('heading', { name: 'Discovery Feed', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Discovery', exact: true, level: 1 })).toBeVisible();
   });
 });
 
@@ -62,8 +62,14 @@ test.describe('unconfirmed feed acquisition', () => {
   test.use({ catalogScenario: 'add-failed' });
   test('retains the failed identity with Retry and never announces it as added', async ({ catalogPage: page }) => {
     await page.goto('/');
-    await page.getByText('Common Name', { exact: true }).first().hover();
-    await page.getByRole('button', { name: 'Add to Lidarr', exact: true }).first().click();
+    const add = page.getByTestId('feed-grid').getByRole('button', { name: /^Add artist/ }).first();
+    expect(await add.evaluate(button => {
+      for (let element: Element | null = button; element; element = element.parentElement) {
+        if (Number(getComputedStyle(element).opacity) === 0) return false;
+      }
+      return true;
+    })).toBe(true);
+    await add.click();
     await expect(page.getByText('Addition unconfirmed', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Retry Common Name', exact: true })).toBeVisible();
     await expect(page.getByText('Common Name', { exact: true })).toHaveCount(2);

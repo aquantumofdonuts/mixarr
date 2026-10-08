@@ -68,7 +68,7 @@ test.describe('login return targets', () => {
       await page.getByLabel('Password', { exact: true }).fill('catalog-fixture-password');
       await page.getByRole('button', { name: /sign in/i }).click();
       await expect(page).toHaveURL(/:\d+\/$/);
-      await expect(page.getByRole('heading', { name: 'Discovery Feed', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Discovery', exact: true, level: 1 })).toBeVisible();
     });
   }
 });
