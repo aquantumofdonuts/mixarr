@@ -110,7 +110,7 @@ export default function SubscriptionsPage() {
           data: {
             name: data.name,
             config: data.config,
-            schedule: data.schedule || undefined,
+            schedule: data.schedule,
             resultHandling: data.resultHandling as 'preview' | 'queue' | 'auto',
           },
         });
