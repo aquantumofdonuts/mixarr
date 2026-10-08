@@ -56,3 +56,17 @@ test.describe('username login', () => {
     await expect(page.getByRole('heading', { name: 'Discovery Feed', exact: true })).toBeVisible();
   });
 });
+
+// These fixtures verify visible outcome handling, not live provider behavior.
+test.describe('unconfirmed feed acquisition', () => {
+  test.use({ catalogScenario: 'add-failed' });
+  test('retains the failed identity with Retry and never announces it as added', async ({ catalogPage: page }) => {
+    await page.goto('/');
+    await page.getByText('Common Name', { exact: true }).first().hover();
+    await page.getByRole('button', { name: 'Add to Lidarr', exact: true }).first().click();
+    await expect(page.getByText('Addition unconfirmed', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Retry Common Name', exact: true })).toBeVisible();
+    await expect(page.getByText('Common Name', { exact: true })).toHaveCount(2);
+    await expect(page.getByText('Added to Lidarr', { exact: true })).toHaveCount(0);
+  });
+});

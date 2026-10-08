@@ -57,7 +57,7 @@ export const test = base.extend<CatalogFixtures>({
             if (catalogScenario === 'error') return reply({ error: 'Catalog source unavailable' }, 503);
             const offset = Number(url.searchParams.get('offset') || 0);
             const limit = Number(url.searchParams.get('limit') || 50);
-            return reply({ items: items.slice(offset, offset + limit), total: items.length, stats: { pending: items.length, addedToday: 0 } });
+            return reply({ items: items.slice(offset, offset + limit).map(({ status: _status, ...item }) => item), total: items.length, stats: { pending: items.length, addedToday: 0 } });
           }
           case '/api/dashboard/stats': return reply({ stats: { activeSubscriptions: 1, artistsAdded: 0, pendingReviews: queue.length, runningJobs: 0, activeConnections: 1 } });
           case '/api/search/ai/status': return reply({ available: false });
