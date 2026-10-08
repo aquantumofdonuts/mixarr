@@ -122,3 +122,24 @@ describe('list inspector context', () => {
     renderHook(() => useListContext({ ready: true }), { wrapper }); flushFrame(); expect(pane.scrollTop).toBe(0);
   });
 });
+
+it('retains page-owned selection when inspector and row-link instances save their context', () => {
+  const page = renderHook(() => useListContext({ ready: true }), { wrapper });
+  const link = renderHook(() => useListContext({ ready: true, selectionOwner: false }), { wrapper });
+  const host = renderHook(() => useListContext({ ready: true, selectionOwner: false }), { wrapper });
+  act(() => { page.result.current.setSelected(new Set(['artist:a', 'artist:b'])); page.result.current.remember(trigger); });
+  act(() => link.result.current.remember(trigger));
+  page.unmount(); host.unmount(); link.unmount();
+  const restored = renderHook(() => useListContext({ ready: true }), { wrapper });
+  expect(restored.result.current.selected).toEqual(new Set(['artist:a', 'artist:b']));
+});
+
+it('lets row links remember context without each installing a restoration observer', () => {
+  const page = renderHook(() => useListContext({ ready: true }), { wrapper });
+  pane.scrollTop = 600; act(() => page.result.current.remember(trigger)); page.unmount();
+  const observe = vi.fn();
+  vi.stubGlobal('ResizeObserver', class { constructor() { observe(); } observe() {} disconnect() {} });
+  const links = Array.from({ length: 20 }, () => renderHook(() => useListContext({ ready: true, selectionOwner: false, restore: false }), { wrapper }));
+  expect(observe).not.toHaveBeenCalled();
+  links.forEach(link => link.unmount());
+});

@@ -12,7 +12,7 @@ interface ModalProps {
   description?: string;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
-  placement?: 'center' | 'drawer';
+  placement?: 'center' | 'drawer' | 'inspector';
 }
 const sizeClasses = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-xl', full: 'max-w-4xl' };
 const FooterContext = React.createContext<HTMLDivElement | null | undefined>(undefined);
@@ -112,11 +112,11 @@ export function Modal({ isOpen, onClose, title, description, children, size = 'm
   });
 
   if (!isOpen) return null;
-  return <div className={cn('fixed inset-0 z-50 flex', placement === 'drawer' ? 'items-stretch justify-start' : 'items-center justify-center p-4')}>
+  return <div className={cn('fixed inset-0 z-50 flex', placement === 'drawer' ? 'items-stretch justify-start' : placement === 'inspector' ? 'items-stretch justify-end' : 'items-center justify-center p-4')}>
     <div className="absolute inset-0 bg-black/50" onClick={handleClose} aria-hidden="true" />
     <div ref={modalRef} role="dialog" aria-modal="true" tabIndex={-1}
       aria-labelledby={title ? titleId : undefined} aria-describedby={description ? descriptionId : undefined}
-      className={cn('relative z-10 flex w-full flex-col border bg-card text-card-foreground shadow-lg', placement === 'drawer' ? 'h-dvh max-w-[18rem]' : 'max-h-[90dvh] rounded-container motion-safe:animate-scale-in', placement === 'center' && sizeClasses[size])}>
+      className={cn('relative z-10 flex w-full flex-col border bg-card text-card-foreground shadow-lg', placement === 'drawer' ? 'h-dvh max-w-[18rem]' : placement === 'inspector' ? 'h-dvh sm:max-w-2xl' : 'max-h-[90dvh] rounded-container motion-safe:animate-scale-in', placement === 'center' && sizeClasses[size])}>
       <div className="flex shrink-0 items-start justify-between gap-4 border-b p-4">
         <div className="min-w-0">
           {title && <h2 id={titleId} className="text-lg font-semibold">{title}</h2>}

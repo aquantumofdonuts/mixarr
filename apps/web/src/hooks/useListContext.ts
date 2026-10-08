@@ -18,7 +18,7 @@ function save(key: string, url: string, snapshot: Snapshot) {
   if (snapshots.size > MAX_CONTEXTS) snapshots.delete(snapshots.keys().next().value!);
 }
 
-export function useListContext({ ready }: { ready: boolean }) {
+export function useListContext({ ready, selectionOwner = true, restore: restoreScroll = true }: { ready: boolean; selectionOwner?: boolean; restore?: boolean }) {
   const pathname = usePathname(), params = useSearchParams(), router = useRouter();
   const { user } = useAuth();
   const scrollElement = useContext(ListScrollContext);
@@ -43,10 +43,10 @@ export function useListContext({ ready }: { ready: boolean }) {
   const remember = useCallback((trigger: HTMLElement | null) => {
     triggerRef.current = trigger;
     const top = scrollElement?.scrollTop ?? 0;
-    save(key, parentUrl, { top, selected: [...selectionRef.current] });
+    save(key, parentUrl, { top, selected: selectionOwner ? [...selectionRef.current] : snapshots.get(key)?.selected ?? [] });
     pendingTop.current = top;
     return parentUrl;
-  }, [key, parentUrl, scrollElement]);
+  }, [key, parentUrl, scrollElement, selectionOwner]);
 
   const closeInspector = useCallback(() => {
     // The current parent scope owns closure, including directly opened inspectors.
@@ -54,9 +54,9 @@ export function useListContext({ ready }: { ready: boolean }) {
   }, [parentUrl, router]);
 
   useLayoutEffect(() => {
-    if (!scrollElement || inspectorOpen) return;
-    return () => save(key, parentUrl, { top: pendingTop.current ?? scrollElement.scrollTop, selected: [...selectionRef.current] });
-  }, [key, parentUrl, scrollElement, inspectorOpen]);
+    if (!restoreScroll || !scrollElement || inspectorOpen) return;
+    return () => save(key, parentUrl, { top: pendingTop.current ?? scrollElement.scrollTop, selected: selectionOwner ? [...selectionRef.current] : snapshots.get(key)?.selected ?? [] });
+  }, [key, parentUrl, scrollElement, inspectorOpen, selectionOwner, restoreScroll]);
 
   useLayoutEffect(() => {
     if (scopeRef.current !== key) {
@@ -68,7 +68,7 @@ export function useListContext({ ready }: { ready: boolean }) {
       pendingTop.current = snapshots.get(key)?.top ?? null;
     }
     wasOpen.current = inspectorOpen;
-    if (inspectorOpen || !scrollElement || pendingTop.current === null) return;
+    if (!restoreScroll || inspectorOpen || !scrollElement || pendingTop.current === null) return;
 
     let frame = 0, lastApplied: number | null = null;
     const observer = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(restore); });
@@ -102,7 +102,7 @@ export function useListContext({ ready }: { ready: boolean }) {
     for (const child of scrollElement.children) observer.observe(child);
     frame = requestAnimationFrame(restore);
     return cleanup;
-  }, [key, inspectorOpen, ready, scrollElement, setSelected]);
+  }, [key, inspectorOpen, ready, scrollElement, setSelected, restoreScroll]);
 
   return { selected, setSelected, remember, closeInspector, parentUrl };
 }

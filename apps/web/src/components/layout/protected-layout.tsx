@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/toast';
 import { MobileNav } from './mobile-nav';
 import Menu from 'lucide-react/dist/esm/icons/menu';
+import { ArtistInspector } from '@/components/artists/ArtistInspector';
 import { ListScrollContext } from '@/hooks/useListContext';
 
 interface ProtectedLayoutProps {
@@ -18,6 +19,7 @@ interface ProtectedLayoutProps {
 
 // Routes that don't require authentication and have their own layout
 const publicRoutes = ['/login', '/setup'];
+const artistRoutes = ['/', '/search', '/discover', '/library', '/queue', '/constellation'];
 
 export function ProtectedLayout({ children }: ProtectedLayoutProps) {
   return <Suspense fallback={<LoadingPage text="Checking authentication..." />}><AuthenticatedLayout>{children}</AuthenticatedLayout></Suspense>;
@@ -115,7 +117,9 @@ function AuthenticatedLayout({ children }: ProtectedLayoutProps) {
           <span className="hidden font-mono text-xs text-muted-foreground lg:inline">Music catalog</span>
         </header>
         <div className="mx-auto px-3 py-4 lg:px-4">
-          <ListScrollContext.Provider value={scrollElement}>{children}</ListScrollContext.Provider>
+          <ListScrollContext.Provider value={scrollElement}>{children}
+            {(artistRoutes.includes(pathname) || /^\/subscriptions\/\d+$/.test(pathname)) && <ArtistInspector />}
+          </ListScrollContext.Provider>
         </div>
       </main>
       <MobileNav isOpen={mobileOpen} onClose={closeMenu} />

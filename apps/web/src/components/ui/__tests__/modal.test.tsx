@@ -125,3 +125,12 @@ describe('modal lifecycle', () => {
     expect(screen.getByLabelText('Name')).toHaveFocus();
   });
 });
+
+it('uses the same modal lifecycle for a full-height right artist panel', () => {
+  const close = vi.fn();
+  const { unmount } = render(<Modal isOpen onClose={close} placement="inspector" title="Artist"><button>Artist action</button></Modal>);
+  expect(screen.getByRole('dialog')).toHaveClass('h-dvh', 'sm:max-w-2xl');
+  expect(screen.getByRole('dialog').parentElement).toHaveClass('justify-end');
+  fireEvent.keyDown(document, { key: 'Escape' }); expect(close).toHaveBeenCalledTimes(1);
+  unmount(); expect(document.body.style.overflow).toBe('');
+});
