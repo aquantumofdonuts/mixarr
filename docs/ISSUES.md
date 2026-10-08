@@ -34,7 +34,7 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ## UI/UX catalog redesign (in progress)
 
-**Status:** T01–T03 implemented and verified on local branch `feat/music-catalog-ux`; first execution checkpoint reached. T04 is next. The complete redesign, integration, completion audit, and final full review remain pending.
+**Status:** T01–T06 implemented and verified on local branch `feat/music-catalog-ux`; batch A foundations complete. T07 is next. The complete redesign, page adoption of the new foundations, completion audit, and final full review remain pending.
 **Scope:** All 25 UI/UX review recommendations and a distinctive music-catalog identity; compact artwork-thumbnail feed confirmed by the user.
 
 - [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
