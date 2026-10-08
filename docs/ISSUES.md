@@ -1,6 +1,6 @@
 # Mixarr Issues & Technical Debt
 
-> **Last Updated:** October 7, 2026  
+> **Last Updated:** October 8, 2026
 > **Status:** PRODUCTION READY (v2.3.5) — Collaboration Constellation unreleased on `dev`
 > 
 > For completed issues, see [ISSUES-FIXED.md](ISSUES-FIXED.md)  
@@ -32,13 +32,14 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ---
 
-## UI/UX catalog redesign (planned)
+## UI/UX catalog redesign (in progress)
 
-**Status:** Reviewed design and implementation plan only; implementation not started.
+**Status:** T01–T03 implemented and verified on local branch `feat/music-catalog-ux`; first execution checkpoint reached. T04 is next. The complete redesign, integration, completion audit, and final full review remain pending.
 **Scope:** All 25 UI/UX review recommendations and a distinctive music-catalog identity; compact artwork-thumbnail feed confirmed by the user.
 
 - [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
 - [Implementation tasks and verification gates](plans/2026-10-07-music-catalog-ux-plan.md)
+- [Execution checkpoint and resume instructions](plans/2026-10-08-music-catalog-ux-progress.md)
 
 This initiative includes truthful acquisition feedback, artist/source drilldown, queue pagination, safe reversible decisions, and consistent responsive controls. Existing security findings above remain tracked independently; affected mutations must satisfy their scope checks before being exposed by the new UI.
 
