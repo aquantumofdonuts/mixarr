@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryFunctionContext } from '@tanstack/react-query';
 
 interface User {
   id: number;
@@ -45,9 +45,10 @@ export function useAuth() {
 }
 
 // Auth query function - can be used outside of React components
-async function fetchAuthStatus(): Promise<AuthResponse> {
+async function fetchAuthStatus({ signal }: QueryFunctionContext): Promise<AuthResponse> {
   const res = await fetch('/api/auth/me', {
     credentials: 'include',
+    signal,
   });
   
   if (!res.ok) {

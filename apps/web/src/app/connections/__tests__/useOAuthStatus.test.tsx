@@ -65,7 +65,7 @@ describe('useOAuthStatus', () => {
       );
 
       await waitFor(() => expect(result.current.status).toEqual(mockStatus));
-      expect(api.get).toHaveBeenCalledWith('/api/connections/42/spotify/status');
+      expect(api.get).toHaveBeenCalledWith('/api/connections/42/spotify/status', { signal: expect.any(AbortSignal) });
     });
 
     it('does not fetch when connectionId is null', async () => {
@@ -362,7 +362,7 @@ describe('useOAuthStatus', () => {
       );
 
       await waitFor(() => {
-        expect(api.get).toHaveBeenCalledWith(`/api/connections/${id}/${type}/status`);
+        expect(api.get).toHaveBeenCalledWith(`/api/connections/${id}/${type}/status`, { signal: expect.any(AbortSignal) });
       });
     });
   });

@@ -86,8 +86,8 @@ export default function JobsPage() {
   // React Query for jobs with auto-refresh
   const { data: jobs = [], isLoading, isFetching: isRefreshing } = useQuery({
     queryKey: ['jobs', activeQueue],
-    queryFn: async () => {
-      const { data, error } = await api.get<{ jobs: Job[] }>(`/api/jobs/recent/${activeQueue}?limit=50`);
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ jobs: Job[] }>(`/api/jobs/recent/${activeQueue}?limit=50`, { signal });
       if (error) throw new Error(error);
       return data!.jobs;
     },

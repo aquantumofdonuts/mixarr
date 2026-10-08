@@ -46,7 +46,8 @@ describe('useSubscriptionResults', () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(api.get).toHaveBeenCalledWith(
-      `/api/subscriptions/7/results?limit=${RESULTS_PAGE_SIZE}&offset=${2 * RESULTS_PAGE_SIZE}&status=pending`
+      `/api/subscriptions/7/results?limit=${RESULTS_PAGE_SIZE}&offset=${2 * RESULTS_PAGE_SIZE}&status=pending`,
+      { signal: expect.any(AbortSignal) }
     );
   });
 });

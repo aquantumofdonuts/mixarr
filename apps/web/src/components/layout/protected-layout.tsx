@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/toast';
 import { MobileNav } from './mobile-nav';
 import Menu from 'lucide-react/dist/esm/icons/menu';
+import { ListScrollContext } from '@/hooks/useListContext';
 
 interface ProtectedLayoutProps {
   children: React.ReactNode;
@@ -30,6 +31,7 @@ function AuthenticatedLayout({ children }: ProtectedLayoutProps) {
   const { addToast } = useToast();
   const [updateToastShown, setUpdateToastShown] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const closeMenu = useCallback(() => setMobileOpen(false), []);
   const query = searchParams.toString();
   useEffect(closeMenu, [pathname, query, closeMenu]);
@@ -104,7 +106,7 @@ function AuthenticatedLayout({ children }: ProtectedLayoutProps) {
   return (
     <div className="flex h-dvh min-w-0 overflow-hidden">
       <Sidebar />
-      <main data-list-scroll className="min-w-0 flex-1 overflow-y-auto">
+      <main ref={setScrollElement} data-list-scroll className="min-w-0 flex-1 overflow-y-auto">
         <header data-catalog-topbar className="sticky top-0 z-30 flex h-[57px] items-center gap-3 border-b bg-background px-3 lg:px-4">
           <button type="button" aria-label="Open menu" aria-haspopup="dialog" aria-expanded={mobileOpen} onClick={() => setMobileOpen(true)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-button hover:bg-muted lg:hidden">
             <Menu className="h-5 w-5" aria-hidden="true" />
@@ -113,7 +115,7 @@ function AuthenticatedLayout({ children }: ProtectedLayoutProps) {
           <span className="hidden font-mono text-xs text-muted-foreground lg:inline">Music catalog</span>
         </header>
         <div className="mx-auto px-3 py-4 lg:px-4">
-          {children}
+          <ListScrollContext.Provider value={scrollElement}>{children}</ListScrollContext.Provider>
         </div>
       </main>
       <MobileNav isOpen={mobileOpen} onClose={closeMenu} />

@@ -94,10 +94,8 @@ export interface FeedResponse {
 export function useFeed(limit = 50) {
   return useInfiniteQuery({
     queryKey: [...queryKeys.feed, limit],
-    queryFn: async ({ pageParam = 0 }) => {
-      const { data, error } = await api.get<FeedResponse>(
-        `/api/feed?limit=${limit}&offset=${pageParam}`
-      );
+    queryFn: async ({ pageParam = 0, signal }) => {
+      const { data, error } = await api.get<FeedResponse>(`/api/feed?limit=${limit}&offset=${pageParam}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
@@ -245,8 +243,8 @@ interface ConnectionSummary {
 export function useDashboardStats() {
   return useQuery({
     queryKey: queryKeys.dashboardStats,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ stats: DashboardStats }>('/api/dashboard/stats');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ stats: DashboardStats }>('/api/dashboard/stats', { signal });
       if (error) throw new Error(error);
       return data!.stats;
     },
@@ -257,8 +255,8 @@ export function useDashboardStats() {
 export function useDashboardActivity() {
   return useQuery({
     queryKey: queryKeys.dashboardActivity,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ activities: Activity[] }>('/api/dashboard/activity');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ activities: Activity[] }>('/api/dashboard/activity', { signal });
       if (error) throw new Error(error);
       return data!.activities;
     },
@@ -269,8 +267,8 @@ export function useDashboardActivity() {
 export function useDashboardConnections() {
   return useQuery({
     queryKey: queryKeys.dashboardConnections,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ summary: ConnectionSummary }>('/api/dashboard/connections/summary');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ summary: ConnectionSummary }>('/api/dashboard/connections/summary', { signal });
       if (error) throw new Error(error);
       return data!.summary;
     },
@@ -308,8 +306,8 @@ interface Preset {
 export function useSubscriptions() {
   return useQuery({
     queryKey: queryKeys.subscriptions,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ subscriptions: Subscription[] }>('/api/subscriptions');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ subscriptions: Subscription[] }>('/api/subscriptions', { signal });
       if (error) throw new Error(error);
       return data!.subscriptions;
     },
@@ -320,8 +318,8 @@ export function useSubscriptions() {
 export function usePresets() {
   return useQuery({
     queryKey: queryKeys.presets,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ presets: Preset[] }>('/api/subscriptions/presets/list');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ presets: Preset[] }>('/api/subscriptions/presets/list', { signal });
       if (error) throw new Error(error);
       return data!.presets;
     },
@@ -443,13 +441,11 @@ interface ReviewItem {
 export function useReviewQueue(status: 'pending' | 'approved' | 'rejected', itemType?: 'artist' | 'album') {
   return useQuery({
     queryKey: queryKeys.reviewQueue(status, itemType),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       // 500 is the API's max page size; total lets the UI show truncation
       const params = new URLSearchParams({ status, limit: '500' });
       if (itemType) params.append('itemType', itemType);
-      const { data, error } = await api.get<{ items: ReviewItem[]; total: number }>(
-        `/api/imports/review/queue?${params.toString()}`
-      );
+      const { data, error } = await api.get<{ items: ReviewItem[]; total: number }>(`/api/imports/review/queue?${params.toString()}`, { signal });
       if (error) throw new Error(error);
       return { items: data!.items, total: data!.total ?? data!.items.length };
     },
@@ -503,8 +499,8 @@ interface Connection {
 export function useConnections() {
   return useQuery({
     queryKey: queryKeys.connections,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ connections: Connection[] }>('/api/connections');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ connections: Connection[] }>('/api/connections', { signal });
       if (error) throw new Error(error);
       return data!.connections;
     },
@@ -542,8 +538,8 @@ export function useDeleteConnection() {
 export function useHasLidarr() {
   return useQuery({
     queryKey: queryKeys.hasLidarr,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ hasLidarr: boolean }>('/api/connections/has-lidarr');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ hasLidarr: boolean }>('/api/connections/has-lidarr', { signal });
       if (error) throw new Error(error);
       return data!.hasLidarr;
     },
@@ -568,8 +564,8 @@ interface Job {
 export function useJobs() {
   return useQuery({
     queryKey: queryKeys.jobs,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ jobs: Job[] }>('/api/jobs');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ jobs: Job[] }>('/api/jobs', { signal });
       if (error) throw new Error(error);
       return data!.jobs;
     },
@@ -607,14 +603,14 @@ export function useLogs(params: LogsParams) {
   
   return useQuery({
     queryKey: queryKeys.logs(Object.fromEntries(queryParams)),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const { data, error } = await api.get<{ 
         logs: LogEntry[]; 
         total: number; 
         hasMore: boolean;
         limit: number;
         offset: number;
-      }>(`/api/logs?${queryParams.toString()}`);
+      }>(`/api/logs?${queryParams.toString()}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
@@ -636,8 +632,8 @@ interface User {
 export function useUsers() {
   return useQuery({
     queryKey: queryKeys.users,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ users: User[] }>('/api/auth/users');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ users: User[] }>('/api/auth/users', { signal });
       if (error) throw new Error(error);
       return data!.users;
     },
@@ -690,11 +686,11 @@ export function useLibrary(params: { page: number; limit: number; search?: strin
   
   return useQuery({
     queryKey: queryKeys.library({ ...params }),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const { data, error } = await api.get<{
         artists: LibraryArtist[];
         pagination: { page: number; limit: number; total: number; totalPages: number };
-      }>(`/api/discover/library?${queryParams}`);
+      }>(`/api/discover/library?${queryParams}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
@@ -705,8 +701,8 @@ export function useLibrary(params: { page: number; limit: number; search?: strin
 export function useProfiles() {
   return useQuery({
     queryKey: queryKeys.profiles,
-    queryFn: async () => {
-      const { data, error } = await api.get<Profiles>('/api/discover/profiles');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<Profiles>('/api/discover/profiles', { signal });
       if (error) throw new Error(error);
       return data!;
     },
@@ -719,8 +715,8 @@ export function useProfiles() {
 export function useSettings() {
   return useQuery({
     queryKey: queryKeys.settings,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ settings: Record<string, unknown> }>('/api/settings');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ settings: Record<string, unknown> }>('/api/settings', { signal });
       if (error) throw new Error(error);
       return data!.settings;
     },
@@ -731,8 +727,8 @@ export function useSettings() {
 export function useAISettings() {
   return useQuery({
     queryKey: queryKeys.aiSettings,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ settings: Record<string, unknown> }>('/api/ai/settings');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ settings: Record<string, unknown> }>('/api/ai/settings', { signal });
       if (error) throw new Error(error);
       return data!.settings;
     },
@@ -762,8 +758,8 @@ export function useSlskdDownloads(status?: string) {
   const queryParams = status ? `?status=${status}` : '';
   return useQuery({
     queryKey: ['slskd', 'downloads', status],
-    queryFn: async () => {
-      const { data, error } = await api.get<SlskdDownload[]>(`/api/slskd/downloads${queryParams}`);
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<SlskdDownload[]>(`/api/slskd/downloads${queryParams}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
@@ -854,8 +850,8 @@ export interface SubscriptionResultsPage {
 export function useSubscriptionDetail(id: number) {
   return useQuery({
     queryKey: queryKeys.subscription(id),
-    queryFn: async () => {
-      const { data, error } = await api.get<{ subscription: SubscriptionDetail }>(`/api/subscriptions/${id}`);
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ subscription: SubscriptionDetail }>(`/api/subscriptions/${id}`, { signal });
       if (error) throw new Error(error);
       return data!.subscription;
     },
@@ -867,8 +863,8 @@ export function useSubscriptionDetail(id: number) {
 export function useSubscriptionRuns(id: number) {
   return useQuery({
     queryKey: queryKeys.subscriptionRuns(id),
-    queryFn: async () => {
-      const { data, error } = await api.get<{ runs: SubscriptionRun[] }>(`/api/subscriptions/${id}/runs`);
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ runs: SubscriptionRun[] }>(`/api/subscriptions/${id}/runs`, { signal });
       if (error) throw new Error(error);
       return data!.runs;
     },
@@ -880,15 +876,13 @@ export function useSubscriptionRuns(id: number) {
 export function useSubscriptionResults(id: number, status: string, page: number) {
   return useQuery({
     queryKey: queryKeys.subscriptionResults(id, status, page),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const params = new URLSearchParams({
         limit: String(RESULTS_PAGE_SIZE),
         offset: String(page * RESULTS_PAGE_SIZE),
       });
       if (status) params.set('status', status);
-      const { data, error } = await api.get<SubscriptionResultsPage>(
-        `/api/subscriptions/${id}/results?${params.toString()}`
-      );
+      const { data, error } = await api.get<SubscriptionResultsPage>(`/api/subscriptions/${id}/results?${params.toString()}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
@@ -901,10 +895,8 @@ export function useSubscriptionResults(id: number, status: string, page: number)
 export function useSubscriptionRunDetails(id: number, runId: number | null) {
   return useQuery({
     queryKey: queryKeys.subscriptionRunDetails(id, runId ?? -1),
-    queryFn: async () => {
-      const { data, error } = await api.get<{ run: SubscriptionRun; results: SubscriptionResult[] }>(
-        `/api/subscriptions/${id}/runs/${runId}`
-      );
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ run: SubscriptionRun; results: SubscriptionResult[] }>(`/api/subscriptions/${id}/runs/${runId}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },

@@ -27,8 +27,8 @@ export function Sidebar() {
     update?: { latest: string; url: string } | null;
   }>({
     queryKey: ['health-live'],
-    queryFn: async () => {
-      const res = await fetch('/api/health/live');
+    queryFn: async ({ signal }) => {
+      const res = await fetch('/api/health/live', { signal });
       return res.json();
     },
     staleTime: 5 * 60 * 1000,

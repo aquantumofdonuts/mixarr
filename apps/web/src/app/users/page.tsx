@@ -56,8 +56,8 @@ export default function UsersPage() {
   // Fetch users with React Query (only for admins)
   const { data: usersData, isLoading, isFetching } = useQuery({
     queryKey: ['admin', 'users'],
-    queryFn: async () => {
-      const { data, error } = await api.get<{ users: UserData[] }>('/api/admin/users');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ users: UserData[] }>('/api/admin/users', { signal });
       if (error) throw new Error(error);
       return data?.users ?? [];
     },

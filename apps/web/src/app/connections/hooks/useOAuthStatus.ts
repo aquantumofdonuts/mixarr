@@ -27,10 +27,8 @@ export function useOAuthStatus(type: OAuthType, connectionId: number | null) {
 
   const statusQuery = useQuery({
     queryKey: oauthQueryKeys.status(type, connectionId ?? 0),
-    queryFn: async () => {
-      const { data, error } = await api.get<OAuthStatus>(
-        `/api/connections/${connectionId}/${type}/status`
-      );
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<OAuthStatus>(`/api/connections/${connectionId}/${type}/status`, { signal });
       if (error) throw new Error(error);
       return data!;
     },

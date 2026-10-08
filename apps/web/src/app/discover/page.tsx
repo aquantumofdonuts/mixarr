@@ -109,11 +109,11 @@ export default function DiscoverPage() {
     refetch: refetchRecs,
   } = useQuery<RecommendationsResponse>({
     queryKey: queryKeys.recommendations,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const { data, error } = await api.post<RecommendationsResponse>('/api/discover/similar', {
         artistNames: Array.from(selectedArtists),
         limit: 100,
-      });
+      }, { signal });
       if (error) throw new Error(error);
       return data!;
     },
