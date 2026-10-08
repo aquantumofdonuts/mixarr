@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/layout/page-header';
 import { DashboardTiles } from '@/components/feed/DashboardTiles';
-import { StatsBar } from '@/components/feed/StatsBar';
 import { FeedGrid } from '@/components/feed/FeedGrid';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -30,7 +29,6 @@ export default function Home() {
     for (const item of recent) rows.set(item.id, { ...rows.get(item.id), ...item });
     return [...rows.values()];
   }, [data, recent]);
-  const stats = data?.pages[0]?.stats ?? { pending: 0, addedToday: 0 };
   const truncation = data?.pages[0]?.truncation;
   function keep(item: FeedItem) {
     if (live.current) setRecent(previous => [...previous.filter(row => row.id !== item.id), item].slice(-20));
@@ -109,7 +107,6 @@ export default function Home() {
       </div>
     </PageHeader>
     <DashboardTiles />
-    <StatsBar pending={stats.pending} addedToday={stats.addedToday} />
     {error && <div role="alert" className="mb-4 border p-3 text-sm"><p>{items.length ? 'Some discoveries are unavailable. Existing discoveries remain visible.' : 'Discovery is unavailable. Please try again.'}</p><Button variant="outline" className="mt-2" onClick={() => void refetch()}>Retry discovery</Button></div>}
     {truncation?.aggregationTruncated && <p role="status" className="mb-3 text-sm text-muted-foreground">Showing a capped discovery sample from <span className="font-mono">{truncation.totalBeforeAggregationCap}</span> eligible source records. More records may contain additional artists.</p>}
     {(!error || items.length > 0) && <FeedGrid items={items} onApprove={handleApprove} onDismiss={handleDismiss} onLoadMore={handleLoadMore}

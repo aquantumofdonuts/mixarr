@@ -12,7 +12,6 @@ vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('
 vi.mock('@/hooks/useListContext', () => ({ useListContext: (options: any) => { mocks.context(options); return { remember: vi.fn() }; } }));
 beforeEach(() => { vi.clearAllMocks(); mocks.feed.current = { data: { pages: [{ items: [{ id: 'feed-1', artistName: 'Artist', artistMbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }], stats: { pending: 1, addedToday: 0 } }] }, fetchNextPage: vi.fn(), refetch: vi.fn() }; });
 vi.mock('@/components/feed/DashboardTiles', () => ({ DashboardTiles: () => null }));
-vi.mock('@/components/feed/StatsBar', () => ({ StatsBar: () => null }));
 vi.mock('@/components/layout/page-header', () => ({ PageHeader: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 describe('feed acquisition feedback', () => {
   it.each(['failed', 'uncertain'] as const)('never announces %s as a successful addition', async state => {

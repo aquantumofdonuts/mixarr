@@ -266,7 +266,8 @@ export function useRestoreDecision(kind: 'feed' | 'review') {
 
 interface DashboardStats {
   activeSubscriptions: number;
-  artistsAdded: number;
+  subscriptionRecordsMarkedAdded: number;
+  pendingDiscoveryRecords: number;
   pendingReviews: number;
   runningJobs: number;
   activeConnections: number;
@@ -293,8 +294,10 @@ interface ConnectionSummary {
 }
 
 export function useDashboardStats() {
+  const { user } = useAuth();
   return useQuery({
-    queryKey: queryKeys.dashboardStats,
+    queryKey: [...queryKeys.dashboardStats, user?.id ?? null],
+    enabled: !!user,
     queryFn: async ({ signal }) => {
       const { data, error } = await api.get<{ stats: DashboardStats }>('/api/dashboard/stats', { signal });
       if (error) throw new Error(error);
