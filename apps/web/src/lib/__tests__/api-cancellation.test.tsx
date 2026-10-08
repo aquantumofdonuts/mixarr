@@ -18,6 +18,10 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('request cancellation', () => {
+  it('preserves machine-readable error codes and recovery details', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Choose an identity', code: 'IDENTITY_REQUIRED', details: { artistId: 7 } }), { status: 422, headers: { 'Content-Type': 'application/json' } }));
+    expect(await api.post('/api/feed/feed-7/approve')).toEqual({ data: null, error: 'Choose an identity', status: 422, code: 'IDENTITY_REQUIRED', details: { artistId: 7 } });
+  });
   it('composes caller cancellation with the request timeout and rejects cancellation', async () => {
     const controller = new AbortController();
     const request = api.get('/api/items', { signal: controller.signal });
