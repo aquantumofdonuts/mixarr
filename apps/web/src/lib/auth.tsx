@@ -181,7 +181,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         refetchAuth,
       }}
     >
-      {cacheActor === actor ? children : null}
+      {/* Reset consumer state and detach old notification closures when the verified actor changes. */}
+      {cacheActor === actor ? <React.Fragment key={String(cacheActor)}>{children}</React.Fragment> : null}
     </AuthContext.Provider>
   );
 }
