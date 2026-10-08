@@ -70,3 +70,22 @@ test('mobile subscription rows expose separate actions and explain delete conseq
   await expect(dialog).toHaveCount(0);
   await expect(overflow).toBeFocused();
 });
+
+test('editing a recurring subscription sends an explicit manual-only schedule', async ({ catalogPage: page }) => {
+  const submitted: Record<string, unknown>[] = [];
+  await page.route('**/api/subscriptions/11', async route => {
+    if (route.request().method() !== 'PUT') return route.fallback();
+    const body = route.request().postDataJSON();
+    submitted.push(body);
+    await route.fulfill({ json: { subscription: { id: 11, ...body } } });
+  });
+  await page.goto('/subscriptions');
+  await page.getByLabel('More actions for Weekly discoveries', { exact: true }).click();
+  await page.getByRole('button', { name: 'Edit subscription', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit Subscription', exact: true });
+  await dialog.getByLabel('Schedule', { exact: true }).selectOption('');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.poll(() => submitted.length).toBe(1);
+  expect(submitted[0]).toHaveProperty('schedule', '');
+  await expect(dialog).toHaveCount(0);
+});
