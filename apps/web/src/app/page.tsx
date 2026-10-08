@@ -53,10 +53,11 @@ export default function Home() {
     
     try {
       const result = await approveMutation.mutateAsync(id);
-      addToast({ 
-        type: 'success', 
-        title: 'Added to Lidarr', 
-        message: `${result.artistName} added successfully` 
+      const confirmed = result.outcome.state === 'added' || result.outcome.state === 'already-in-library';
+      addToast({
+        type: confirmed ? 'success' : 'error',
+        title: result.outcome.state === 'already-in-library' ? 'Already in Lidarr' : confirmed ? 'Added to Lidarr' : 'Addition unconfirmed',
+        message: result.outcome.message,
       });
     } catch {
       addToast({ 

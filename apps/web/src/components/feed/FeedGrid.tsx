@@ -94,7 +94,7 @@ export function FeedGrid({
             id={item.id}
             artistName={item.artistName}
             imageUrl={item.imageUrl}
-            status={item.status}
+            status={item.status ?? (item.acquisitionState === 'adding' ? 'adding' : item.acquisitionState === 'failed' || item.acquisitionState === 'uncertain' ? 'failed' : 'pending')}
             isLoading={loadingIds.has(item.id)}
             onApprove={onApprove}
             onDismiss={onDismiss}

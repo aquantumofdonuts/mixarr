@@ -26,7 +26,7 @@ export interface FeedCardProps {
   id: string;
   artistName: string;
   imageUrl: string | null;
-  status?: 'pending' | 'added' | 'dismissed';
+  status?: 'pending' | 'adding' | 'failed' | 'added' | 'dismissed';
   isLoading?: boolean;
   onApprove: (id: string) => void;
   onDismiss: (id: string) => void;
@@ -43,7 +43,7 @@ export function FeedCard({
   artistName,
   imageUrl,
   status = 'pending',
-  isLoading = false,
+  isLoading: loading = false,
   onApprove,
   onDismiss,
   tags,
@@ -51,6 +51,7 @@ export function FeedCard({
   subscriptionName,
   index = 0,
 }: FeedCardProps) {
+  const isLoading = loading || status === 'adding';
   const [isHovered, setIsHovered] = useState(false);
   const [isTouched, setIsTouched] = useState(false);
   const touchTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -86,6 +87,8 @@ export function FeedCard({
         touchTimerRef.current = setTimeout(() => setIsTouched(false), 3000);
       }}
     >
+      {status === 'adding' && <p role="status" className="px-3 py-2 text-xs">Waiting for Lidarr confirmation…</p>}
+      {status === 'failed' && <p role="status" className="px-3 py-2 text-xs">Addition is unconfirmed. <button type="button" className="underline" onClick={() => onApprove(id)} disabled={isLoading} aria-label={`Retry ${artistName}`}>Retry</button> checks Lidarr first.</p>}
       {/* Image */}
       <div className="aspect-square relative">
         {imageUrl ? (

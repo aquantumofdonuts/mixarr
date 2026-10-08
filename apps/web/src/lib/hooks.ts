@@ -1,5 +1,7 @@
 'use client';
 
+import type { AcquisitionOutcome, AcquisitionState } from '@mixarr/shared-types';
+
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { api } from './api';
 
@@ -71,7 +73,9 @@ export interface FeedItem {
   sourceCount: number;
   sources: string[];
   createdAt: string;
-  status?: 'pending' | 'added' | 'dismissed';
+  status?: 'pending' | 'adding' | 'failed' | 'added' | 'dismissed';
+  acquisitionState?: AcquisitionState;
+  acquisitionMessage?: string;
   // Metadata for display
   tags: string[] | null;
   listeners: number | null;
@@ -106,57 +110,45 @@ export function useFeed(limit = 50) {
     },
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
+    refetchInterval: query => query.state.data?.pages.some(page => page.items.some(item => item.acquisitionState === 'adding')) ? 5_000 : false,
   });
 }
 
 export function useApproveFeedItem() {
   const queryClient = useQueryClient();
-
+  const updateItem = (id: string, changes: Partial<FeedItem>) => {
+    queryClient.setQueriesData<import('@tanstack/react-query').InfiniteData<FeedResponse>>(
+      { queryKey: queryKeys.feed }, old => old ? { ...old, pages: old.pages.map(page => ({
+        ...page, items: page.items.map(item => item.id === id ? { ...item, ...changes } : item),
+      })) } : old);
+  };
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await api.post<{ artistName: string }>(
-        `/api/feed/${id}/approve`
-      );
-      if (error) throw new Error(error);
-      return data!;
+      const { data, error, code } = await api.post<{ artistName: string; outcome: AcquisitionOutcome }>(
+        `/api/feed/${id}/approve`, undefined, { timeoutMs: 70_000 });
+      if (error) throw Object.assign(new Error(error), { code });
+      if (!data?.outcome) throw new Error('Artist confirmation is unavailable. Refresh before retrying.');
+      return data;
     },
-    onMutate: async (id) => {
-      // Cancel any outgoing refetches to prevent race condition
+    onMutate: async id => {
       await queryClient.cancelQueries({ queryKey: queryKeys.feed });
-
-      // Snapshot every feed query for rollback. Feed queries are keyed
-      // ['feed', limit], so prefix-matching setQueriesData/getQueriesData
-      // must be used here — exact-key setQueryData(['feed']) would miss them.
-      const previousData = queryClient.getQueriesData({ queryKey: queryKeys.feed });
-
-      // Optimistic update - mark item as 'added'
-      queryClient.setQueriesData({ queryKey: queryKeys.feed }, (old: any) => {
-        if (!old?.pages) return old;
-        return {
-          ...old,
-          pages: old.pages.map((page: FeedResponse) => ({
-            ...page,
-            items: page.items.map((item: FeedItem) =>
-              item.id === id ? { ...item, status: 'added' as const } : item
-            ),
-            stats: {
-              pending: Math.max(0, page.stats.pending - 1),
-              addedToday: page.stats.addedToday + 1,
-            },
-          })),
-        };
-      });
-
-      return { previousData };
+      updateItem(id, { status: 'adding', acquisitionState: 'adding', acquisitionMessage: undefined });
     },
-    onError: (_err, _id, context) => {
-      // Rollback each snapshotted query on error
-      for (const [key, data] of context?.previousData ?? []) {
-        queryClient.setQueryData(key, data);
+    onSuccess: (data, id) => {
+      const confirmed = data.outcome.state === 'added' || data.outcome.state === 'already-in-library';
+      updateItem(id, { status: confirmed ? 'added' : 'failed', acquisitionState: data.outcome.state, acquisitionMessage: data.outcome.message });
+      if (confirmed) {
+        queryClient.invalidateQueries({ queryKey: ['discover', 'library'] });
+        queryClient.invalidateQueries({ queryKey: ['review'] });
+        queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
       }
     },
+    onError: (error, id) => {
+      const code = (error as Error & { code?: string }).code;
+      updateItem(id, { status: code === 'IN_PROGRESS' ? 'adding' : 'failed', acquisitionState: code === 'IDENTITY_REQUIRED' ? 'identity-required'
+        : code === 'CONNECTION_REQUIRED' ? 'connection-required' : code === 'IN_PROGRESS' ? 'adding' : 'uncertain', acquisitionMessage: error.message });
+    },
     onSettled: () => {
-      // Always refetch to ensure consistency
       queryClient.invalidateQueries({ queryKey: queryKeys.feed });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
     },

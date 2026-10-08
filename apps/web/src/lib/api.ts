@@ -16,6 +16,7 @@ interface ApiResponse<T> {
   data: T | null;
   error: string | null;
   status: number;
+  code?: string;
 }
 
 async function request<T>(
@@ -49,15 +50,17 @@ async function request<T>(
 
     if (!res.ok) {
       let message = `HTTP ${res.status}`;
+      let code: string | undefined;
       if (isJson) {
-        const parsed = (await res.json()) as { error?: string };
+        const parsed = (await res.json()) as { error?: string; code?: string };
+        code = parsed.code;
         message = parsed.error || message;
       } else {
         // Non-JSON response (likely HTML error page from Caddy/proxy)
         const text = await res.text();
         message = `Server error (${res.status}): ${text.substring(0, 100)}`;
       }
-      return { data: null, error: message, status: res.status };
+      return { data: null, error: message, status: res.status, ...(code ? { code } : {}) };
     }
 
     // Successful response without a JSON body (e.g. 204 No Content)

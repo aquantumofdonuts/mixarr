@@ -70,7 +70,7 @@ describe('useApproveFeedItem', () => {
 
   it('calls approve endpoint', async () => {
     vi.mocked(api.post).mockResolvedValueOnce({
-      data: { artistName: 'Test Artist' },
+      data: { artistName: 'Test Artist', outcome: { artistMbid: 'a', state: 'added', message: 'Confirmed' } },
       error: null,
       status: 200,
     });
@@ -79,7 +79,7 @@ describe('useApproveFeedItem', () => {
 
     await result.current.mutateAsync('feed-123');
 
-    expect(api.post).toHaveBeenCalledWith('/api/feed/feed-123/approve');
+    expect(api.post).toHaveBeenCalledWith('/api/feed/feed-123/approve', undefined, { timeoutMs: 70_000 });
   });
 
   it('throws on error', async () => {
@@ -124,5 +124,28 @@ describe('useDismissFeedItem', () => {
     const { result } = renderHook(() => useDismissFeedItem(), { wrapper: createWrapper() });
 
     await expect(result.current.mutateAsync('feed-456')).rejects.toThrow('Dismiss failed');
+  });
+});
+
+describe('confirmed acquisition cache behavior', () => {
+  it('keeps every affected row adding until confirmation without changing counts, retains uncertain results for retry', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const page = { items: [{ id: 'feed-1', status: 'pending' }, { id: 'feed-2', status: 'pending' }], stats: { pending: 2, addedToday: 0 }, total: 2 };
+    for (const limit of [20, 50]) client.setQueryData(['feed', limit], { pages: [page], pageParams: [0] });
+    let complete!: (value: Awaited<ReturnType<typeof api.post>>) => void;
+    vi.mocked(api.post).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const { result } = renderHook(() => useApproveFeedItem(), { wrapper });
+    const pending = result.current.mutateAsync('feed-1');
+    await waitFor(() => expect(complete).toBeTypeOf('function'));
+    for (const limit of [20, 50]) {
+      const cache = client.getQueryData<{ pages: typeof page[] }>(['feed', limit])!;
+      expect(cache.pages[0].items.map(item => item.status)).toEqual(['adding', 'pending']);
+      expect(cache.pages[0].stats).toEqual({ pending: 2, addedToday: 0 });
+    }
+    complete({ data: { artistName: 'Artist', outcome: { artistMbid: 'a', state: 'uncertain', message: 'Retry checks membership' } }, error: null, status: 200 });
+    await pending;
+    expect(client.getQueryData<{ pages: typeof page[] }>(['feed', 20])!.pages[0].items[0].status).toBe('failed');
+    client.clear();
   });
 });

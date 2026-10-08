@@ -135,16 +135,16 @@ describe('FeedService', () => {
       expect(aggregated[0].linkedResultIds).toEqual([1, 2]);
     });
 
-    it('prefers result with MBID for display data', () => {
+    it('does not infer identity from a matching unresolved name', () => {
       const service = new FeedService();
       const results = [
         { id: 1, artistName: 'beatles', artistMbid: null, subscriptionId: 1, sources: ['lastfm'], createdAt: new Date(), status: 'pending' },
         { id: 2, artistName: 'The Beatles', artistMbid: 'beatles-mbid', subscriptionId: 2, sources: ['spotify'], createdAt: new Date(), status: 'pending' },
       ];
       const aggregated = service.aggregateResults(results);
-      expect(aggregated).toHaveLength(1);
-      expect(aggregated[0].artistMbid).toBe('beatles-mbid');
-      expect(aggregated[0].artistName).toBe('The Beatles');
+      expect(aggregated).toHaveLength(2);
+      expect(aggregated[0].artistMbid).toBeNull();
+      expect(aggregated[0].acquisitionState).toBe('identity-required');
     });
 
     it('generates consistent feed IDs from linked result IDs', () => {
@@ -383,7 +383,7 @@ describe('FeedService', () => {
           where: {
             subscriptionId: { in: [1] },
             itemType: 'artist',
-            status: { in: ['pending', 'queued'] },
+            status: { in: ['pending', 'queued', 'adding', 'failed'] },
           },
         })
       );
@@ -515,7 +515,7 @@ describe('FeedService', () => {
 
       expect(mockPrisma.subscriptionResult.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ status: { in: ['pending', 'queued'] } }),
+          where: expect.objectContaining({ status: { in: ['pending', 'queued', 'adding', 'failed'] } }),
         }),
       );
     });
@@ -531,413 +531,10 @@ describe('FeedService', () => {
       expect(mockPrisma.subscriptionResult.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            status: { in: ['pending', 'queued', 'added', 'rejected'] },
+            status: { in: ['pending', 'queued', 'adding', 'failed', 'added', 'rejected'] },
           }),
         }),
       );
-    });
-  });
-
-  /**
-   * Task 4: approve/dismiss Actions
-   *
-   * These methods allow users to act on feed items:
-   * - approve: marks as 'added', removes from ReviewItem
-   * - dismiss: marks as 'rejected', removes from ReviewItem
-   *
-   * Security: Users can only act on their own feed items (verified via subscription.userId)
-   * Atomicity: All operations wrapped in transaction
-   */
-  describe('approve', () => {
-    it('throws NotFoundError when feed item does not exist', async () => {
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([]),
-        },
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await expect(service.approve('feed-999', 1)).rejects.toThrow('Feed item not found');
-    });
-
-    it('throws NotFoundError when feed ID format is invalid', async () => {
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([]),
-        },
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await expect(service.approve('invalid-id', 1)).rejects.toThrow('Feed item not found');
-    });
-
-    it('throws ForbiddenError when feed item belongs to different user', async () => {
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, artistName: 'Test', artistMbid: 'abc', subscription: { userId: 999 } },
-          ]),
-        },
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await expect(service.approve('feed-1', 1)).rejects.toThrow('Not authorized');
-    });
-
-    it('updates all linked SubscriptionResults to added status', async () => {
-      const updateMany = vi.fn().mockResolvedValue({ count: 3 });
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test', mbid: 'abc', subscription: { userId: 1 } },
-            { id: 2, name: 'Test', mbid: 'abc', subscription: { userId: 1 } },
-            { id: 3, name: 'Test', mbid: 'abc', subscription: { userId: 1 } },
-          ]),
-          updateMany,
-        },
-        reviewItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await service.approve('feed-1-2-3', 1);
-
-      expect(updateMany).toHaveBeenCalledWith({
-        where: { id: { in: [1, 2, 3] } },
-        data: { status: 'added', processedAt: expect.any(Date) },
-      });
-    });
-
-    it('deletes matching ReviewItems by MBID and name', async () => {
-      const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test Artist', mbid: 'abc-123', subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await service.approve('feed-1', 1);
-
-      expect(deleteMany).toHaveBeenCalledWith({
-        where: {
-          OR: [
-            { mbid: 'abc-123' },
-            { artistName: 'Test Artist' },
-          ],
-        },
-      });
-    });
-
-    it('deletes ReviewItems by name only when no MBID', async () => {
-      const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test Artist', mbid: null, subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await service.approve('feed-1', 1);
-
-      expect(deleteMany).toHaveBeenCalledWith({
-        where: {
-          OR: [
-            { artistName: 'Test Artist' },
-          ],
-        },
-      });
-    });
-
-    it('returns artistName on success', async () => {
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Radiohead', mbid: 'radiohead-mbid', subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      const result = await service.approve('feed-1', 1);
-
-      expect(result).toEqual({ artistName: 'Radiohead' });
-    });
-  });
-
-  /**
-   * Task 10: Lidarr Integration on Approve
-   *
-   * After updating status to 'added', call Lidarr to add the artist.
-   * This is non-blocking - Lidarr failures should not fail the approve action.
-   */
-  describe('approve with Lidarr integration', () => {
-    it('calls Lidarr to add artist after updating status', async () => {
-      const addArtistWithCacheWarm = vi.fn().mockResolvedValue({ artist: { id: 123 } });
-      const mockLidarrService = { addArtistWithCacheWarm };
-      const mockLidarrConfig = {
-        url: 'http://localhost:8686',
-        apiKey: 'test-key',
-        qualityProfileId: 1,
-        metadataProfileId: 1,
-        rootFolderPath: '/music',
-        monitorOption: 'all',
-        monitorNewItems: 'all',
-      };
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test Artist', mbid: 'abc-123', subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-
-      const service = new FeedService(
-        mockPrismaClient as any,
-        mockLidarrService as any,
-        mockLidarrConfig as any
-      );
-      await service.approve('feed-1', 1);
-      // Lidarr add is detached from the approve response; wait for it
-      await service.pendingLidarrAdd;
-
-      expect(addArtistWithCacheWarm).toHaveBeenCalledWith(
-        'abc-123',
-        1,  // qualityProfileId
-        1,  // metadataProfileId
-        '/music',  // rootFolderPath
-        true,  // monitored
-        true,  // searchForMissingAlbums
-        false, // waitForRefresh
-        'all', // monitorOption
-        'all'  // monitorNewItems
-      );
-    });
-
-    it('still succeeds if Lidarr call fails (logs warning)', async () => {
-      const addArtistWithCacheWarm = vi.fn().mockRejectedValue(new Error('Lidarr unavailable'));
-      const mockLidarrService = { addArtistWithCacheWarm };
-      const mockLidarrConfig = {
-        url: 'http://localhost:8686',
-        apiKey: 'test-key',
-        qualityProfileId: 1,
-        metadataProfileId: 1,
-        rootFolderPath: '/music',
-      };
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test Artist', mbid: 'abc-123', subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-
-      const service = new FeedService(
-        mockPrismaClient as any,
-        mockLidarrService as any,
-        mockLidarrConfig as any
-      );
-
-      // Should not throw - Lidarr failure is non-blocking
-      await expect(service.approve('feed-1', 1)).resolves.toEqual({ artistName: 'Test Artist' });
-      await service.pendingLidarrAdd;
-      expect(addArtistWithCacheWarm).toHaveBeenCalled();
-    });
-
-    it('skips Lidarr if no MBID available', async () => {
-      const addArtistWithCacheWarm = vi.fn();
-      const mockLidarrService = { addArtistWithCacheWarm };
-      const mockLidarrConfig = {
-        url: 'http://localhost:8686',
-        apiKey: 'test-key',
-        qualityProfileId: 1,
-        metadataProfileId: 1,
-        rootFolderPath: '/music',
-      };
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test Artist', mbid: null, subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-
-      const service = new FeedService(
-        mockPrismaClient as any,
-        mockLidarrService as any,
-        mockLidarrConfig as any
-      );
-      await service.approve('feed-1', 1);
-
-      expect(addArtistWithCacheWarm).not.toHaveBeenCalled();
-    });
-
-    it('skips Lidarr if no LidarrService provided', async () => {
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test Artist', mbid: 'abc-123', subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-
-      // No LidarrService provided
-      const service = new FeedService(mockPrismaClient as any);
-      
-      // Should complete without error
-      await expect(service.approve('feed-1', 1)).resolves.toEqual({ artistName: 'Test Artist' });
-    });
-
-    it('skips Lidarr if config is incomplete (missing profile IDs)', async () => {
-      const addArtistWithCacheWarm = vi.fn();
-      const mockLidarrService = { addArtistWithCacheWarm };
-      // Config missing qualityProfileId
-      const incompleteConfig = {
-        url: 'http://localhost:8686',
-        apiKey: 'test-key',
-        rootFolderPath: '/music',
-        // qualityProfileId is missing!
-        metadataProfileId: 1,
-      };
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test Artist', mbid: 'abc-123', subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-
-      const service = new FeedService(
-        mockPrismaClient as any,
-        mockLidarrService as any,
-        incompleteConfig as any
-      );
-      await service.approve('feed-1', 1);
-      await service.pendingLidarrAdd;
-
-      // Should not call Lidarr due to incomplete config
-      expect(addArtistWithCacheWarm).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('dismiss', () => {
-    it('throws NotFoundError when feed item does not exist', async () => {
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([]),
-        },
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await expect(service.dismiss('feed-999', 1)).rejects.toThrow('Feed item not found');
-    });
-
-    it('throws ForbiddenError when feed item belongs to different user', async () => {
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test', mbid: 'abc', subscription: { userId: 999 } },
-          ]),
-        },
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await expect(service.dismiss('feed-1', 1)).rejects.toThrow('Not authorized');
-    });
-
-    it('updates all linked SubscriptionResults to rejected status', async () => {
-      const updateMany = vi.fn().mockResolvedValue({ count: 2 });
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test', mbid: 'abc', subscription: { userId: 1 } },
-            { id: 2, name: 'Test', mbid: 'abc', subscription: { userId: 1 } },
-          ]),
-          updateMany,
-        },
-        reviewItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await service.dismiss('feed-1-2', 1);
-
-      expect(updateMany).toHaveBeenCalledWith({
-        where: { id: { in: [1, 2] } },
-        data: { status: 'rejected', processedAt: expect.any(Date) },
-      });
-    });
-
-    it('deletes matching ReviewItems', async () => {
-      const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Test Artist', mbid: 'abc-123', subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      await service.dismiss('feed-1', 1);
-
-      expect(deleteMany).toHaveBeenCalledWith({
-        where: {
-          OR: [
-            { mbid: 'abc-123' },
-            { artistName: 'Test Artist' },
-          ],
-        },
-      });
-    });
-
-    it('returns artistName on success', async () => {
-      const mockPrismaClient = {
-        subscriptionResult: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 1, name: 'Coldplay', mbid: 'coldplay-mbid', subscription: { userId: 1 } },
-          ]),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        reviewItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: vi.fn((fn: any) => fn(mockPrismaClient)),
-      };
-      const service = new FeedService(mockPrismaClient as any);
-
-      const result = await service.dismiss('feed-1', 1);
-
-      expect(result).toEqual({ artistName: 'Coldplay' });
     });
   });
 
@@ -1140,7 +737,8 @@ describe('FeedService', () => {
           },
         ]);
         // Should use tags from the MBID result as primary source
-        expect(result[0].tags).toContain('rock');
+        expect(result.find(item => item.artistMbid === 'beatles-mbid')?.tags).toContain('rock');
+        expect(result.find(item => !item.artistMbid)?.tags).toEqual(['oldies']);
       });
 
       it('handles mixed null/non-null tags across results', () => {

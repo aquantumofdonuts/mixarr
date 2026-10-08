@@ -10,9 +10,9 @@ const recordedAt = '2026-10-07T12:00:00.000Z';
 const artwork = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="#DEE1E4"/><circle cx="50" cy="50" r="30" fill="#494F55"/><circle cx="50" cy="50" r="6" fill="#DEE1E4"/></svg>')}`;
 
 export const catalogFeed: FeedItem[] = [
-  { id: '1,2', artistName: 'Common Name', artistMbid: ARTIST_IDS[0], imageUrl: artwork, score: 2, subscriptionCount: 2, sourceCount: 2, sources: ['lastfm', 'listenbrainz'], createdAt: recordedAt, tags: ['jazz'], listeners: 13000, subscriptionName: 'Weekly discoveries', status: 'pending' },
-  { id: '3', artistName: 'Common Name', artistMbid: ARTIST_IDS[1], imageUrl: null, score: 1, subscriptionCount: 1, sourceCount: 1, sources: ['lastfm'], createdAt: recordedAt, tags: null, listeners: null, subscriptionName: 'Second source', status: 'pending' },
-  { id: '4', artistName: 'Unidentified Ensemble with a Very Long Name and Collaborator Credits', artistMbid: null, imageUrl: null, score: 1, subscriptionCount: 1, sourceCount: 1, sources: ['spotify'], createdAt: recordedAt, tags: null, listeners: null, subscriptionName: null, status: 'pending' },
+  { id: 'feed-1-2', artistName: 'Common Name', artistMbid: ARTIST_IDS[0], imageUrl: artwork, score: 2, subscriptionCount: 2, sourceCount: 2, sources: ['lastfm', 'listenbrainz'], createdAt: recordedAt, tags: ['jazz'], listeners: 13000, subscriptionName: 'Weekly discoveries', status: 'pending' },
+  { id: 'feed-3', artistName: 'Common Name', artistMbid: ARTIST_IDS[1], imageUrl: null, score: 1, subscriptionCount: 1, sourceCount: 1, sources: ['lastfm'], createdAt: recordedAt, tags: null, listeners: null, subscriptionName: 'Second source', status: 'pending' },
+  { id: 'feed-4', artistName: 'Unidentified Ensemble with a Very Long Name and Collaborator Credits', artistMbid: null, imageUrl: null, score: 1, subscriptionCount: 1, sourceCount: 1, sources: ['spotify'], createdAt: recordedAt, tags: null, listeners: null, subscriptionName: null, status: 'pending' },
 ];
 
 // ponytail: generate the full dataset; the mock applies the API's actual page limit.
@@ -97,8 +97,17 @@ export const test = base.extend<CatalogFixtures>({
           const id = decodeURIComponent(path.split('/')[3]);
           const index = items.findIndex(item => item.id === id);
           if (index < 0) return reply({ error: 'Not found' }, 404);
-          if (catalogScenario === 'add-failed' && path.endsWith('/approve')) return reply({ error: 'Lidarr fixture unavailable' }, 503);
-          const [item] = items.splice(index, 1);
+          const item = items[index];
+          if (path.endsWith('/approve')) {
+            if (!item.artistMbid) return reply({ error: 'Choose an artist identity', code: 'IDENTITY_REQUIRED' }, 422);
+            if (catalogScenario === 'add-failed') {
+              items[index] = { ...item, acquisitionState: 'uncertain' };
+              return reply({ success: false, artistName: item.artistName, outcome: { artistMbid: item.artistMbid, state: 'uncertain', message: 'Retry to check membership' } });
+            }
+            items.splice(index, 1);
+            return reply({ success: true, artistName: item.artistName, outcome: { artistMbid: item.artistMbid, state: 'added', message: 'Artist added to Lidarr' } });
+          }
+          items.splice(index, 1);
           return reply({ success: true, artistName: item.artistName });
         }
       }

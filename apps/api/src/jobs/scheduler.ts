@@ -260,7 +260,12 @@ export function startDataRetentionJob(): void {
 
         // Delete old subscription results
         const deletedResults = await prisma.subscriptionResult.deleteMany({
-          where: { createdAt: { lt: thirtyDaysAgo } },
+          where: {
+            createdAt: { lt: thirtyDaysAgo },
+            status: { not: 'adding' },
+            // Recent decision revisions remain available throughout the Undo window.
+            OR: [{ processedAt: null }, { processedAt: { lt: new Date(Date.now() - 120_000) } }],
+          },
         });
 
         // Delete old subscription runs (keep last 30 days)
