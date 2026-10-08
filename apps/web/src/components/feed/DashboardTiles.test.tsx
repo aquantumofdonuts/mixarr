@@ -32,7 +32,8 @@ describe('catalog summary', () => {
     expect(screen.getByText('Active subscriptions').closest('a')).toBeNull();
     expect(screen.getByText('Active connections').closest('a')).toBeNull();
     expect(screen.getByRole('link', { name: 'Open all review records' })).toHaveAttribute('href', '/queue');
-    expect(screen.getByRole('link', { name: 'Open all subscriptions' })).toHaveAttribute('href', '/subscriptions');
+    expect(screen.getByRole('link', { name: 'Open your subscriptions' })).toHaveAttribute('href', '/subscriptions');
+    expect(screen.queryByRole('link', { name: 'Open all subscriptions' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Manage connections' })).toHaveAttribute('href', '/connections');
     expect(screen.queryByText(/Global|Total artists/)).not.toBeInTheDocument();
   });

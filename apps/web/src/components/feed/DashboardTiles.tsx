@@ -31,9 +31,9 @@ export function DashboardTiles() {
     {!admin && <nav aria-label="Your record lists" className="border-t border-border px-3 py-2 text-xs">
       <Link href="/subscriptions" className="text-primary underline">Open your subscriptions</Link>
     </nav>}
-    {admin && <nav aria-label="Administrative record lists" className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border px-3 py-2 text-xs">
+    {admin && <nav aria-label="Catalog lists" className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border px-3 py-2 text-xs">
       <Link href="/queue" className="text-primary underline">Open all review records</Link>
-      <Link href="/subscriptions" className="text-primary underline">Open all subscriptions</Link>
+      <Link href="/subscriptions" className="text-primary underline">Open your subscriptions</Link>
       <Link href="/connections" className="text-primary underline">Manage connections</Link>
     </nav>}
     {error && <div role="status" className="flex items-center gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground"><p>Summary unavailable.</p><Button variant="outline" size="sm" onClick={() => void refetch()}>Retry summary</Button></div>}
