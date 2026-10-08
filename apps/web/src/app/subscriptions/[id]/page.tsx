@@ -122,6 +122,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
     const artistName = result.itemType === 'album' ? result.artistName || 'Unidentified artist' : result.name;
     const identity = canonicalArtistMbid(result.mbid);
     const actionable = ['pending', 'queued', 'failed'].includes(result.status);
+    const checking = result.status === 'adding';
     return <article key={result.id} className="flex min-w-0 flex-wrap items-center gap-3 border-b py-3" aria-label={`Result ${result.id}`}>
       <ArtistLink mbid={identity} onOpen={context.remember} aria-label={`Inspect artist ${artistName}`} className="block h-12 w-12 shrink-0 overflow-hidden rounded bg-muted">{result.imageUrl && <img src={result.imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />}</ArtistLink>
       <div className="min-w-0 flex-1 basis-40">
@@ -134,9 +135,9 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={result.status === 'failed' ? 'destructive' : 'secondary'}>{result.status === 'added' ? 'Record marked added' : result.status}</Badge>
-        {actionable && <>
-          <Button size="sm" variant="outline" disabled={pending.has(result.id) || results.isPlaceholderData} aria-label={`${identity ? result.status === 'failed' ? 'Retry add artist' : 'Add artist' : 'Identify and add artist'} ${artistName}`} onClick={() => void (identity ? actOnResult(result, 'approve') : identify(result))}>{pending.has(result.id) ? 'Working…' : identity ? result.status === 'failed' ? 'Retry' : 'Add artist' : 'Identify artist'}</Button>
-          <Button size="sm" variant="outline" disabled={pending.has(result.id) || results.isPlaceholderData} aria-label={`Reject result ${result.name}`} onClick={() => void actOnResult(result, 'reject')}>Reject</Button>
+        {(actionable || checking) && <>
+          <Button size="sm" variant="outline" disabled={pending.has(result.id) || results.isPlaceholderData} aria-label={`${checking ? 'Check acquisition' : identity ? result.status === 'failed' ? 'Retry add artist' : 'Add artist' : 'Identify and add artist'} ${artistName}`} onClick={() => void (checking || identity ? actOnResult(result, 'approve') : identify(result))}>{pending.has(result.id) ? 'Working…' : checking ? 'Check acquisition' : identity ? result.status === 'failed' ? 'Retry' : 'Add artist' : 'Identify artist'}</Button>
+          {actionable && <Button size="sm" variant="outline" disabled={pending.has(result.id) || results.isPlaceholderData} aria-label={`Reject result ${result.name}`} onClick={() => void actOnResult(result, 'reject')}>Reject</Button>}
         </>}
       </div>
     </article>;
@@ -148,7 +149,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
     if (runDetails.isError) return <ResultState kind="error" message="Run results could not be loaded" action={<Button onClick={() => void runDetails.refetch()}>Retry run results</Button>} />;
     if (!runDetails.data) return <Skeleton className="h-16 w-full" />;
     const matches = runDetails.data.results.filter(result => !status || result.status === status);
-    return <div className="px-3 pb-3">{filter()}{matches.length ? matches.map(renderResult) : <ResultState kind="no-records" message={status ? `No ${status} results found in this run` : 'This run has no results'} />}</div>;
+    return <div className="px-3 pb-3"><div className="flex flex-wrap items-center gap-3">{filter()}<Button variant="outline" disabled={runDetails.isFetching} onClick={() => { setMessages({}); void Promise.all([runDetails.refetch(), runs.refetch()]); }}>Refresh run results</Button></div>{matches.length ? matches.map(renderResult) : <ResultState kind="no-records" message={status ? `No ${status} results found in this run` : 'This run has no results'} />}</div>;
   }
   if (subscription.isError) return <ResultState kind="error" message="Subscription could not be loaded" action={<Button onClick={() => void subscription.refetch()}>Retry subscription</Button>} />;
   if (!subscription.data) return <Skeleton className="h-24 w-full" />;
@@ -173,7 +174,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
         </>}
       </TabPanel>
       <TabPanel value="results">
-        {filter()}
+        <div className="flex flex-wrap items-center gap-3">{filter()}<Button variant="outline" disabled={results.isFetching} onClick={() => { setMessages({}); void results.refetch(); }}>Refresh results</Button></div>
         {results.isError && <ResultState kind="error" message="Subscription results could not be loaded" action={<Button onClick={() => void results.refetch()}>Retry results</Button>} />}
         {!results.data ? !results.isError && <Skeleton className="mt-3 h-16" /> : <>
           <p role="status" className="my-3 text-sm text-muted-foreground">{results.isPlaceholderData ? `Showing page ${actualPage} while loading page ${page + 1}` : `Page ${actualPage} of ${pages} · ${results.data.total} ${status || 'total'} result records`}{results.isFetching && !results.isPlaceholderData ? ' · Updating…' : ''}</p>

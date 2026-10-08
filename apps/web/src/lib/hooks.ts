@@ -1000,6 +1000,7 @@ export function useApproveResult(subscriptionId: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationKey: ['subscriptions', subscriptionId, 'approve'],
+    retry: false,
     onMutate: () => ({ actorId: currentActor(queryClient) }),
     mutationFn: async (input: number | { resultId: number; mbid?: string }) => {
       const { resultId, mbid } = typeof input === 'number' ? { resultId: input, mbid: undefined } : input;
@@ -1031,6 +1032,7 @@ export function useRejectResult(subscriptionId: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationKey: ['subscriptions', subscriptionId, 'reject'],
+    retry: false,
     onMutate: () => ({ actorId: currentActor(queryClient) }),
     mutationFn: async (resultId: number) => {
       const { error } = await api.post(`/api/subscriptions/${subscriptionId}/results/${resultId}/reject`);

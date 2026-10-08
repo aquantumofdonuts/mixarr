@@ -163,3 +163,14 @@ it('does not update a replacement actor cache after an old acquisition resolves'
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(qc.getQueryData<SubscriptionResultsPage>(queryKeys.subscriptionResults(7, '', 0))?.results[0].status).toBe('pending');
 });
+
+it('does not automatically repeat an acquisition when the global mutation retry is enabled', async () => {
+  vi.clearAllMocks();
+  const qc = new QueryClient({ defaultOptions: { mutations: { retry: 1, retryDelay: 0 }, queries: { retry: false } } });
+  vi.mocked(api.post).mockResolvedValue({ data: null, error: 'Acquisition is in progress', code: 'IN_PROGRESS', status: 409 });
+  const { result } = renderHook(() => useApproveResult(7), { wrapper: createWrapper(qc) });
+  act(() => result.current.mutate(1));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(api.post).toHaveBeenCalledTimes(1);
+  expect(result.current.error).toMatchObject({ code: 'IN_PROGRESS', status: 409 });
+});

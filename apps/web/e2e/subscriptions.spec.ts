@@ -4,6 +4,7 @@ test('results deep links retain page and filter through refresh and Back', async
   await page.goto('/subscriptions/11?tab=results&status=pending&page=2');
   await expect(page.getByRole('tab', { name: 'All results' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText('Result Artist 51', { exact: true })).toBeVisible();
+  await page.screenshot({ path: '/tmp/mixarr-catalog-evidence/subscriptions/detail-desktop.png' });
   await page.reload();
   await expect(page.getByText('Result Artist 51', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Previous page' }).click();
@@ -69,6 +70,7 @@ test('mobile subscription inspector keeps run context and restores focus', async
   const trigger = page.getByRole('link', { name: 'Result Artist 2', exact: true });
   await trigger.click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  await page.screenshot({ path: '/tmp/mixarr-catalog-evidence/subscriptions/inspector-mobile.png' });
   expect(new URL(page.url()).searchParams.get('run')).toBe('71');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -129,4 +131,61 @@ test('status refinements replace history while page changes retain Back navigati
   expect(new URL(page.url()).searchParams.has('page')).toBe(false);
   await page.goBack();
   await expect(page).toHaveURL('/subscriptions');
+});
+
+test('adding records can check a fresh claim and reconcile a later confirmation', async ({ catalogPage: page }) => {
+  let completed = false, attempts = 0;
+  await page.route('**/api/subscriptions/11/results?*', route => route.fulfill({ json: {
+    results: [{ id: 201, itemType: 'artist', name: 'Recoverable artist', artistName: null, mbid: ARTIST_IDS[0], status: completed ? 'added' : 'adding', runId: 71, skipReason: null, createdAt: '2026-10-07T12:00:00Z' }],
+    total: 1, limit: 50, offset: 0, statusCounts: completed ? { added: 1 } : { adding: 1 },
+  } }));
+  await page.route('**/api/subscriptions/11/results/201/approve', route => {
+    attempts++;
+    if (attempts === 1) return route.fulfill({ status: 409, json: { error: 'Acquisition is in progress', code: 'IN_PROGRESS' } });
+    completed = true;
+    return route.fulfill({ json: { success: true, outcome: 'already-in-library', message: 'Membership confirmed' } });
+  });
+  await page.goto('/subscriptions/11?tab=results');
+  const row = page.getByRole('article', { name: 'Result 201', exact: true });
+  const check = page.getByRole('button', { name: 'Check acquisition Recoverable artist', exact: true });
+  await expect(row.getByRole('button', { name: /Reject/ })).toHaveCount(0);
+  await check.click();
+  await expect(row.getByText('Acquisition is in progress', { exact: true })).toBeVisible();
+  await expect(row.getByText('Record marked added', { exact: true })).toHaveCount(0);
+  await expect(check).toBeEnabled();
+  await check.click();
+  await expect(page.getByText('Artist already in Lidarr', { exact: true }).first()).toBeVisible();
+  await expect(row.getByText('Record marked added', { exact: true })).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
+test('manual refresh reveals completed acquisition and preserves result context', async ({ catalogPage: page }) => {
+  let completed = false;
+  await page.route('**/api/subscriptions/11/results?*', route => route.fulfill({ json: {
+    results: [{ id: 201, itemType: 'artist', name: 'Refresh artist', artistName: null, mbid: ARTIST_IDS[0], status: completed ? 'added' : 'adding', runId: 71, skipReason: null, createdAt: '2026-10-07T12:00:00Z' }],
+    total: 1, limit: 50, offset: 0, statusCounts: completed ? { added: 1 } : { adding: 1 },
+  } }));
+  await page.goto('/subscriptions/11?tab=results&run=71');
+  await expect(page.getByRole('article', { name: 'Result 201', exact: true }).getByText('adding', { exact: true })).toBeVisible();
+  completed = true;
+  await page.getByRole('button', { name: 'Refresh results', exact: true }).click();
+  await expect(page.getByText('Record marked added', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL('/subscriptions/11?tab=results&run=71');
+  await expect(page.getByText('Artist added to Lidarr', { exact: true })).toHaveCount(0);
+});
+
+test('manual run refresh reveals completion while keeping the expanded run', async ({ catalogPage: page }) => {
+  let completed = false;
+  await page.route('**/api/subscriptions/11/runs/71', route => route.fulfill({ json: {
+    run: { id: 71, status: 'completed', resultsCount: 1, addedCount: completed ? 1 : 0, skippedCount: 0, errorMessage: null, startedAt: '2026-10-07T12:00:00Z', completedAt: '2026-10-07T12:01:00Z' },
+    results: [{ id: 201, itemType: 'artist', name: 'Run refresh artist', artistName: null, mbid: ARTIST_IDS[0], status: completed ? 'added' : 'adding', runId: 71, skipReason: null, createdAt: '2026-10-07T12:00:00Z' }],
+  } }));
+  await page.goto('/subscriptions/11?tab=runs&run=71');
+  const run = page.locator('details[data-run="71"]');
+  await expect(run.getByRole('article', { name: 'Result 201', exact: true }).getByText('adding', { exact: true })).toBeVisible();
+  completed = true;
+  await page.getByRole('button', { name: 'Refresh run results', exact: true }).click();
+  await expect(run.getByText('Record marked added', { exact: true })).toBeVisible();
+  await expect(run).toHaveAttribute('open', '');
+  await expect(page).toHaveURL('/subscriptions/11?tab=runs&run=71');
 });
