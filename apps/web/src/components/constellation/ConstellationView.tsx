@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 import type { ForceGraphProps, NodeObject } from 'react-force-graph-2d';
@@ -26,7 +26,7 @@ import { ConstellationControls } from './ConstellationControls';
 import { PathFinder } from './PathFinder';
 
 /**
- * A single visited focus person in the re-center walk.
+ * A single visited person in the wander trail (each hop expands in place).
  */
 export interface Breadcrumb {
   personId: number;
@@ -65,9 +65,9 @@ const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
 
 export interface ConstellationViewProps {
   /**
-   * The artist the graph is centred on, or `null` for "no graph loaded". The
+   * The artist the graph is seeded from, or `null` for "no graph loaded". The
    * component owns the data layer itself via {@link useConstellation}; clicking a
-   * node re-centers internally (it does not lift the seed back to the parent).
+   * node expands it in place (it does not lift the seed back to the parent).
    */
   seed: ConstellationSeed;
 }
@@ -75,11 +75,13 @@ export interface ConstellationViewProps {
 const EMPTY_STREAM: { nodes: GraphNode[]; edges: GraphEdge[] } = { nodes: [], edges: [] };
 
 /**
- * The LivePlasma-style dense re-centering field. Node color = genre, radius =
- * prominence, gold ring = owned, edge width = tie strength, warm edge glow =
- * confident bridge. Clicking a node re-centers the field on that person and
- * records the hop in a breadcrumb trail; background-expanded nodes stream in via
- * the frontier SSE and are merged into the field.
+ * The dense collaboration field. Node color = genre, radius = prominence, gold
+ * ring = owned, edge width = tie strength, warm edge glow = confident bridge.
+ * Clicking a node expands it IN PLACE — its collaborators are merged into the
+ * field so the walk accumulates ("wander down a path") — and records the hop in
+ * a breadcrumb trail; background-expanded nodes stream in via the frontier SSE
+ * and are merged the same way. The seed (focus) only changes when the parent
+ * remounts the view with a new `seed`.
  */
 export function ConstellationView({ seed }: ConstellationViewProps) {
   // Controls-bar state (Design §5). `roleMask` is the SERVER-SIDE role filter —
@@ -90,19 +92,19 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
   const [hideHotness, setHideHotness] = useState(false);
   const [genreHighlight, setGenreHighlight] = useState<string | null>(null);
 
-  const { nodes, edges, focusId, streamToken, loading, error, recenter } =
+  const { nodes, edges, focusId, streamToken, loading, error, expandMore } =
     useConstellation(seed, { roleMask });
 
   // Nodes/edges pushed by the background-expand SSE stream, merged locally on top
   // of the hook's seed subgraph. Reset whenever the stream token (generation)
-  // changes, since a re-center supersedes any previously streamed frontier.
+  // changes (a role-filter re-seed), since that supersedes any streamed frontier.
   const [streamed, setStreamed] = useState(EMPTY_STREAM);
   const streamKey = streamToken ? `${streamToken.id}:${streamToken.generation}` : null;
   useEffect(() => {
     setStreamed(EMPTY_STREAM);
   }, [streamKey]);
 
-  // The breadcrumb trail of visited focus persons (the re-center walk).
+  // The breadcrumb trail of visited persons (the wander).
   const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
 
   // The person whose acquisition panel is open. Selecting a node opens this (the
@@ -127,27 +129,44 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
   const mergedNodes = useMemo(() => mergeNodes(nodes, streamed.nodes), [nodes, streamed.nodes]);
   const mergedEdges = useMemo(() => mergeEdges(edges, streamed.edges), [edges, streamed.edges]);
 
-  const graphData = useMemo(
-    () => ({
-      nodes: mergedNodes.map<CanvasNode>((n) => ({
-        id: n.personId,
-        name: n.displayName,
-        genre: n.genre,
-        size: n.size,
-        owned: n.owned,
-        isFocus: n.personId === focusId,
-      })),
-      links: mergedEdges.map<CanvasLink>((e) => ({
-        source: e.source,
-        target: e.target,
-        weight: e.weight,
-        bridge: e.bridge,
-        bridgeConfident: e.bridgeConfident,
-        isFocusLink: focusId !== null && (e.source === focusId || e.target === focusId),
-      })),
-    }),
-    [mergedNodes, mergedEdges, focusId],
-  );
+  // Stable node objects: reuse the SAME object per personId across renders so the
+  // force sim preserves each node's position (x/y) as the graph GROWS. Rebuilding
+  // fresh objects every render would reset the whole layout and make each
+  // expansion "jump" — the accumulate-in-place wander depends on this identity.
+  const nodeObjs = useRef<Map<number, CanvasNode>>(new Map());
+  const graphData = useMemo(() => {
+    const map = nodeObjs.current;
+    for (const n of mergedNodes) {
+      const existing = map.get(n.personId);
+      if (existing) {
+        // Update mutable fields in place; keep the object (and its x/y) identity.
+        existing.name = n.displayName;
+        existing.genre = n.genre;
+        existing.size = n.size;
+        existing.owned = n.owned;
+        existing.isFocus = n.personId === focusId;
+      } else {
+        map.set(n.personId, {
+          id: n.personId,
+          name: n.displayName,
+          genre: n.genre,
+          size: n.size,
+          owned: n.owned,
+          isFocus: n.personId === focusId,
+        });
+      }
+    }
+    const graphNodes = mergedNodes.map((n) => map.get(n.personId) as CanvasNode);
+    const links = mergedEdges.map<CanvasLink>((e) => ({
+      source: e.source,
+      target: e.target,
+      weight: e.weight,
+      bridge: e.bridge,
+      bridgeConfident: e.bridgeConfident,
+      isFocusLink: focusId !== null && (e.source === focusId || e.target === focusId),
+    }));
+    return { nodes: graphNodes, links };
+  }, [mergedNodes, mergedEdges, focusId]);
 
   const handleNodeClick = useCallback(
     (node: NodeObject<CanvasNode>) => {
@@ -156,35 +175,34 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       // Selecting a node ALWAYS opens its acquisition panel (the grain fix): the
       // user chooses artist-vs-album there rather than blind-subscribing.
       setSelectedPerson({ personId, displayName: node.name, owned: Boolean(node.owned) });
-      // Clicking the node we're already centred on only opens the panel — no
-      // redundant re-seed, no breadcrumb.
-      if (personId === focusId) return;
       setBreadcrumbs((prev) => {
-        // Collapse a no-op click on the person we're already centred on.
         if (prev.length > 0 && prev[prev.length - 1].personId === personId) return prev;
         return [...prev, { personId, displayName: node.name }];
       });
-      // Re-center: the hook re-seeds and the force lib re-simulates on the new
-      // graphData, animating the field into its new layout.
-      void recenter(personId);
+      // Expand IN PLACE: fetch this node's collaborators and MERGE them into the
+      // current field (the graph grows outward, keeping everything already on
+      // screen), rather than replacing the view. This is the "wander down a path"
+      // model — the throughline stays visible instead of jarringly redrawing.
+      void expandMore(personId);
     },
-    [recenter, focusId],
+    [expandMore],
   );
 
   /**
-   * Recenter the field on a person chosen from the PathFinder chain. Mirrors a
-   * node click's re-center (breadcrumb + re-seed) without opening the panel.
+   * Expand a person chosen from the PathFinder chain into the field. Mirrors a
+   * node click (breadcrumb + in-place expand) without opening the panel.
    */
   const handleSelectPerson = useCallback(
     (personId: number) => {
-      if (!Number.isFinite(personId) || personId === focusId) return;
+      if (!Number.isFinite(personId)) return;
       setBreadcrumbs((prev) => {
         if (prev.length > 0 && prev[prev.length - 1].personId === personId) return prev;
         return [...prev, { personId, displayName: String(personId) }];
       });
-      void recenter(personId);
+      // Expand a path hop into the current field (accumulate), same as a node click.
+      void expandMore(personId);
     },
-    [recenter, focusId],
+    [expandMore],
   );
 
   /** Custom node paint: genre fill, prominence radius, owned ring, label. */
@@ -265,7 +283,7 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
               <button
                 type="button"
                 className="rounded px-1 hover:text-foreground"
-                onClick={() => recenter(crumb.personId)}
+                onClick={() => expandMore(crumb.personId)}
               >
                 {crumb.displayName}
               </button>

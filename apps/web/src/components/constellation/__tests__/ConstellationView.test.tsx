@@ -169,9 +169,10 @@ describe('ConstellationView', () => {
     expect(data.links[0].isFocusLink).toBe(true);
   });
 
-  it('re-centers and pushes a breadcrumb when a node is clicked', () => {
+  it('expands in place (not re-center) and pushes a breadcrumb when a node is clicked', () => {
     const recenter = vi.fn().mockResolvedValue(undefined);
-    mockUseConstellation.mockReturnValue(mockResult({ recenter }));
+    const expandMore = vi.fn().mockResolvedValue(undefined);
+    mockUseConstellation.mockReturnValue(mockResult({ recenter, expandMore }));
     render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
 
     const onNodeClick = graphProps().onNodeClick as ClickHandler;
@@ -179,7 +180,10 @@ describe('ConstellationView', () => {
       onNodeClick({ id: 2, name: 'Person 2' });
     });
 
-    expect(recenter).toHaveBeenCalledWith(2);
+    // The wander model: the clicked node's collaborators are MERGED into the
+    // current field; the view is never replaced via a re-seed.
+    expect(expandMore).toHaveBeenCalledWith(2);
+    expect(recenter).not.toHaveBeenCalled();
     const trail = screen.getByTestId('constellation-breadcrumbs');
     expect(trail).toHaveTextContent('Person 2');
   });
@@ -200,23 +204,19 @@ describe('ConstellationView', () => {
   });
 
   it('opens the PersonPanel even when clicking the current focus node', async () => {
-    const recenter = vi.fn().mockResolvedValue(undefined);
-    mockUseConstellation.mockReturnValue(mockResult({ recenter }));
+    mockUseConstellation.mockReturnValue(mockResult());
     render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
 
     const onNodeClick = graphProps().onNodeClick as ClickHandler;
-    // focusId=1 -> no re-center, but the panel still opens.
     act(() => onNodeClick({ id: 1, name: 'Person 1' }));
 
-    expect(recenter).not.toHaveBeenCalled();
     const panel = await screen.findByTestId('person-panel');
     expect(panel).toHaveTextContent('Person 1');
   });
 
   it('accumulates multiple hops in the breadcrumb trail', () => {
-    const recenter = vi.fn().mockResolvedValue(undefined);
-    // focusId=1, so hop to 2 then 3 (neither is the current center).
-    mockUseConstellation.mockReturnValue(mockResult({ recenter }));
+    const expandMore = vi.fn().mockResolvedValue(undefined);
+    mockUseConstellation.mockReturnValue(mockResult({ expandMore }));
     render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
 
     const onNodeClick = graphProps().onNodeClick as ClickHandler;
@@ -226,25 +226,58 @@ describe('ConstellationView', () => {
     const trail = screen.getByTestId('constellation-breadcrumbs');
     expect(trail).toHaveTextContent('Person 2');
     expect(trail).toHaveTextContent('Person 3');
-    expect(recenter).toHaveBeenCalledTimes(2);
+    expect(expandMore).toHaveBeenCalledTimes(2);
   });
 
-  it('is a no-op when clicking the node that is already the focus', () => {
-    const recenter = vi.fn().mockResolvedValue(undefined);
-    // focusId=1 -> clicking node 1 must not re-seed or push a breadcrumb.
-    mockUseConstellation.mockReturnValue(mockResult({ recenter }));
+  it('expands the focus node in place too and starts the trail from it', () => {
+    const expandMore = vi.fn().mockResolvedValue(undefined);
+    // focusId=1 -> clicking the focus is a regular hop in the wander model: its
+    // neighbourhood is (re)merged and it becomes the first breadcrumb.
+    mockUseConstellation.mockReturnValue(mockResult({ expandMore }));
     render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
 
     const onNodeClick = graphProps().onNodeClick as ClickHandler;
     act(() => onNodeClick({ id: 1, name: 'Person 1' }));
 
-    expect(recenter).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('constellation-breadcrumbs')).not.toBeInTheDocument();
+    expect(expandMore).toHaveBeenCalledWith(1);
+    expect(screen.getByTestId('constellation-breadcrumbs')).toHaveTextContent('Person 1');
+  });
+
+  it('re-expands a breadcrumb hop in place when it is clicked', async () => {
+    const expandMore = vi.fn().mockResolvedValue(undefined);
+    mockUseConstellation.mockReturnValue(mockResult({ expandMore }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 2, name: 'Person 2' }));
+    expandMore.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Person 2' }));
+    expect(expandMore).toHaveBeenCalledWith(2);
+  });
+
+  it('keeps the same canvas node object per person across renders (force layout stability)', () => {
+    mockUseConstellation.mockReturnValue(mockResult({ nodes: [node(1), node(2)] }));
+    const { rerender } = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+    const before = (graphProps().graphData as { nodes: Array<{ id: number }> }).nodes;
+
+    // The hook hands back NEW node arrays (as it does after an expandMore merge);
+    // the view must reuse the existing canvas objects so the simulation keeps
+    // their x/y instead of resetting the layout.
+    mockUseConstellation.mockReturnValue(
+      mockResult({ nodes: [node(1, { size: 99 }), node(2), node(3)] }),
+    );
+    rerender(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+    const after = (graphProps().graphData as { nodes: Array<{ id: number; size: number }> }).nodes;
+
+    expect(after[0]).toBe(before[0]);
+    expect(after[1]).toBe(before[1]);
+    expect(after[0].size).toBe(99); // mutable fields are updated in place
+    expect(after.map((n) => n.id)).toEqual([1, 2, 3]);
   });
 
   it('collapses consecutive clicks on the same node to one breadcrumb', () => {
-    const recenter = vi.fn().mockResolvedValue(undefined);
-    mockUseConstellation.mockReturnValue(mockResult({ recenter }));
+    mockUseConstellation.mockReturnValue(mockResult());
     render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
 
     const onNodeClick = graphProps().onNodeClick as ClickHandler;
@@ -414,9 +447,8 @@ describe('ConstellationView — controls wiring', () => {
     expect(other.fillAlphas[0]).toBe(GENRE_DIMMED_ALPHA);
   });
 
-  it('re-centers on a PathFinder hop selection (onSelectPerson)', async () => {
-    const recenter = vi.fn().mockResolvedValue(undefined);
-    mockUseConstellation.mockReturnValue(mockResult({ recenter, focusId: 1 }));
+  it('renders the PathFinder (its hop selection expands in place like a click)', async () => {
+    mockUseConstellation.mockReturnValue(mockResult({ focusId: 1 }));
     render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
 
     // The PathFinder is rendered inside the view.
