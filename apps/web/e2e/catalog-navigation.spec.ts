@@ -10,6 +10,8 @@ for (const role of ['admin', 'user'] as const) {
         await page.route('**/api/auth/me', route => route.fulfill({ json: { user: { ...CATALOG_USER, role, displayName: 'A very long catalog username that must remain usable on narrow screens' }, setupRequired: false } }));
         await page.goto('/search');
         const menu = page.getByRole('button', { name: 'Open menu' });
+        const evidence = `${process.env.CATALOG_EVIDENCE_DIR || '/tmp/mixarr-catalog-evidence'}/navigation`;
+        await mkdir(evidence, { recursive: true });
         if (width < 1024) {
           await menu.click();
           const drawer = page.getByRole('dialog', { name: 'Mixarr navigation' });
@@ -18,6 +20,7 @@ for (const role of ['admin', 'user'] as const) {
           await expect(drawer.getByRole('link', { name: 'Connections', exact: true })).toHaveCount(role === 'admin' ? 1 : 0);
           await expect(drawer.getByRole('link', { name: 'Search', exact: true })).toHaveAttribute('aria-current', 'page');
           expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+          await page.screenshot({ path: `${evidence}/${role}-${width}-drawer.png`, animations: 'disabled' });
           await page.keyboard.press('Shift+Tab');
           expect(await drawer.evaluate(el => el.contains(document.activeElement))).toBe(true);
           await page.keyboard.press('Escape');
@@ -40,8 +43,6 @@ for (const role of ['admin', 'user'] as const) {
           await page.getByRole('button', { name: 'Collapse sidebar' }).click();
           await expect(page.getByRole('link', { name: 'Search', exact: true })).toBeVisible();
         }
-        const evidence = `${process.env.CATALOG_EVIDENCE_DIR || '/tmp/mixarr-catalog-evidence'}/navigation`;
-        await mkdir(evidence, { recursive: true });
         await page.screenshot({ path: `${evidence}/${role}-${width}.png`, animations: 'disabled' });
       });
     }
