@@ -30,6 +30,12 @@ interface AuthContextValue {
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
+export function safeReturnTo(value: string | null): string {
+  if (!value?.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) return '/';
+  const target = new URL(value, 'https://mixarr.invalid');
+  return target.origin === 'https://mixarr.invalid' ? `${target.pathname}${target.search}${target.hash}` : '/';
+}
+
 export function useAuth() {
   const context = React.useContext(AuthContext);
   if (!context) {
