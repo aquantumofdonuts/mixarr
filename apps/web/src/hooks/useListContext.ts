@@ -14,7 +14,7 @@ const MAX_CONTEXTS = 20, MAX_SELECTION = 500;
 function save(key: string, url: string, snapshot: Snapshot) {
   if (url.length > 2048 || [...new URL(url, 'https://mixarr.invalid').searchParams.keys()].some(name => /token|password|secret|credential|^code$|^key$/i.test(name))) return;
   snapshots.delete(key);
-  snapshots.set(key, snapshot);
+  snapshots.set(key, { top: snapshot.top, selected: snapshot.selected.filter(id => id.length <= 200).slice(0, MAX_SELECTION) });
   if (snapshots.size > MAX_CONTEXTS) snapshots.delete(snapshots.keys().next().value!);
 }
 
@@ -35,9 +35,9 @@ export function useListContext({ ready }: { ready: boolean }) {
   const setSelected = useCallback((value: SetStateAction<Set<string>>) => {
     // Resolve functional updates against the current selection, including same-tick calls.
     const next = typeof value === 'function' ? value(selectionRef.current) : value;
-    const bounded = new Set([...next].filter(id => id.length <= 200).slice(0, MAX_SELECTION));
-    selectionRef.current = bounded;
-    setSelection(bounded);
+    const selection = new Set(next);
+    selectionRef.current = selection;
+    setSelection(selection);
   }, []);
 
   const remember = useCallback((trigger: HTMLElement | null) => {
@@ -54,6 +54,11 @@ export function useListContext({ ready }: { ready: boolean }) {
   }, [parentUrl, router]);
 
   useLayoutEffect(() => {
+    if (!scrollElement || inspectorOpen) return;
+    return () => save(key, parentUrl, { top: pendingTop.current ?? scrollElement.scrollTop, selected: [...selectionRef.current] });
+  }, [key, parentUrl, scrollElement, inspectorOpen]);
+
+  useLayoutEffect(() => {
     if (scopeRef.current !== key) {
       scopeRef.current = key;
       triggerRef.current = null;
@@ -63,7 +68,7 @@ export function useListContext({ ready }: { ready: boolean }) {
       pendingTop.current = snapshots.get(key)?.top ?? null;
     }
     wasOpen.current = inspectorOpen;
-    if (inspectorOpen || !ready || !scrollElement || pendingTop.current === null) return;
+    if (inspectorOpen || !scrollElement || pendingTop.current === null) return;
 
     let frame = 0, lastApplied: number | null = null;
     const observer = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(restore); });
@@ -79,7 +84,7 @@ export function useListContext({ ready }: { ready: boolean }) {
     }
     function restore() {
       const top = pendingTop.current;
-      if (top === null) return;
+      if (top === null || !ready) return;
       const max = Math.max(0, scrollElement!.scrollHeight - scrollElement!.clientHeight);
       lastApplied = Math.min(top, max);
       scrollElement!.scrollTop = lastApplied;

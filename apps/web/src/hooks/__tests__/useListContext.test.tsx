@@ -75,15 +75,43 @@ describe('list inspector context', () => {
     next.unmount(); flushFrame(); expect(pane.scrollTop).toBe(0);
     expect(disconnect).toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
   });
-  it('bounds selections and retains same-tick functional updates', () => {
-    const { result } = renderHook(() => useListContext({ ready: true }), { wrapper });
+  it('bounds stored snapshots without dropping live selections and retains same-tick functional updates', () => {
+    const { result, unmount } = renderHook(() => useListContext({ ready: true }), { wrapper });
     act(() => {
       result.current.setSelected(previous => new Set([...previous, 'one']));
       result.current.setSelected(previous => new Set([...previous, 'two']));
     });
     expect(result.current.selected).toEqual(new Set(['one', 'two']));
     act(() => result.current.setSelected(new Set(Array.from({ length: 600 }, (_, i) => `mbid:${i}`))));
-    expect(result.current.selected.size).toBe(500);
+    expect(result.current.selected.size).toBe(600);
+    act(() => result.current.remember(trigger)); unmount();
+    const next = renderHook(() => useListContext({ ready: true }), { wrapper });
+    expect(next.result.current.selected.size).toBe(500);
+  });
+  it('honors user scrolling while data is not ready', () => {
+    const { result, rerender } = renderHook(({ ready }) => useListContext({ ready }), { wrapper, initialProps: { ready: true } });
+    pane.scrollTop = 600; act(() => result.current.remember(trigger));
+    params.set('artist', 'one'); rerender({ ready: true });
+    params.delete('artist'); pane.scrollTop = 0; rerender({ ready: false });
+    pane.scrollTop = 25; pane.dispatchEvent(new Event('scroll'));
+    rerender({ ready: true }); flushFrame(); expect(pane.scrollTop).toBe(25);
+  });
+  it('saves context on ordinary page navigation without opening an inspector', () => {
+    const first = renderHook(() => useListContext({ ready: true }), { wrapper });
+    pane.scrollTop = 400;
+    act(() => first.result.current.setSelected(new Set(['stable-one'])));
+    first.unmount(); pane.scrollTop = 0;
+    const next = renderHook(() => useListContext({ ready: true }), { wrapper }); flushFrame();
+    expect(pane.scrollTop).toBe(400); expect(next.result.current.selected).toEqual(new Set(['stable-one']));
+  });
+  it.each([false, true])('preserves the saved target when leaving before restoration finishes (partial layout: %s)', partialLayout => {
+    const first = renderHook(() => useListContext({ ready: true }), { wrapper });
+    pane.scrollTop = 400; first.unmount(); pane.scrollTop = 0;
+    height = partialLayout ? 300 : 1200;
+    const loading = renderHook(() => useListContext({ ready: partialLayout }), { wrapper }); flushFrame();
+    expect(pane.scrollTop).toBe(partialLayout ? 100 : 0);
+    loading.unmount(); pane.scrollTop = 0; height = 1200;
+    renderHook(() => useListContext({ ready: true }), { wrapper }); flushFrame(); expect(pane.scrollTop).toBe(400);
   });
   it('keeps tab snapshots isolated by user and excludes token-bearing URLs', () => {
     params.set('token', 'private');
