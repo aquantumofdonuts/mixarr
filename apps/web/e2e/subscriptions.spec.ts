@@ -82,7 +82,7 @@ test('an older run outside the initial history remains directly reachable', asyn
   } }));
   await page.goto('/subscriptions/11?tab=runs&run=69');
   await expect(page.locator('details[data-run="69"]')).toHaveAttribute('open', '');
-  await expect(page.getByRole('link', { name: 'Older source artist' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Older source artist', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Link to run 69' })).toBeVisible();
 });
 
@@ -100,4 +100,33 @@ test('an out-of-range page recovers to the final page in its filter', async ({ c
   await expect(page).toHaveURL(/page=2/);
   await expect(page.getByText('Result Artist 51', { exact: true })).toBeVisible();
   await expect(page.getByText('No pending results found', { exact: true })).toHaveCount(0);
+});
+
+test('result artwork opens the inspector by pointer and keyboard and restores focus', async ({ catalogPage: page }) => {
+  await page.goto('/subscriptions/11?tab=results');
+  const artwork = page.getByRole('link', { name: 'Inspect artist Result Artist 2', exact: true });
+  await artwork.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(artwork).toBeFocused();
+  await artwork.press('Enter');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(artwork).toBeFocused();
+  expect(new URL(page.url()).searchParams.get('tab')).toBe('results');
+});
+
+test('status refinements replace history while page changes retain Back navigation', async ({ catalogPage: page }) => {
+  await page.goto('/subscriptions');
+  await page.getByRole('link', { name: 'View results', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'All results' })).toHaveAttribute('aria-selected', 'true');
+  await page.getByLabel('Result status').selectOption('pending');
+  await expect(page).toHaveURL(/status=pending/);
+  await page.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect(page.getByText('Result Artist 51', { exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/status=pending/);
+  expect(new URL(page.url()).searchParams.has('page')).toBe(false);
+  await page.goBack();
+  await expect(page).toHaveURL('/subscriptions');
 });

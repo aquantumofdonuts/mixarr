@@ -64,8 +64,9 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
     return () => { mounted.current = false; lookup.current?.abort(); };
   }, []);
   useEffect(() => { lookup.current?.abort(); setPicker(null); }, [scope]);
-  function navigate(patch: Record<string, string | null>) {
-    router.push(`${pathname}${updateQuery(new URLSearchParams(params.toString()), patch)}`, { scroll: false });
+  function navigate(patch: Record<string, string | null>, replace = false) {
+    const method = replace ? router.replace : router.push;
+    method(`${pathname}${updateQuery(new URLSearchParams(params.toString()), patch)}`, { scroll: false });
   }
   function markPending(id: number, value: boolean) {
     if (value) pendingRef.current.add(id); else pendingRef.current.delete(id);
@@ -122,7 +123,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
     const identity = canonicalArtistMbid(result.mbid);
     const actionable = ['pending', 'queued', 'failed'].includes(result.status);
     return <article key={result.id} className="flex min-w-0 flex-wrap items-center gap-3 border-b py-3" aria-label={`Result ${result.id}`}>
-      <div className="h-12 w-12 shrink-0 overflow-hidden rounded bg-muted" aria-hidden="true">{result.imageUrl && <img src={result.imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />}</div>
+      <ArtistLink mbid={identity} onOpen={context.remember} aria-label={`Inspect artist ${artistName}`} className="block h-12 w-12 shrink-0 overflow-hidden rounded bg-muted">{result.imageUrl && <img src={result.imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />}</ArtistLink>
       <div className="min-w-0 flex-1 basis-40">
         <ArtistLink mbid={identity} onOpen={context.remember} className="break-words font-semibold">{artistName}</ArtistLink>
         {result.itemType === 'album' && <p className="break-words text-sm text-muted-foreground">Album: {result.name}</p>}
@@ -141,7 +142,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
     </article>;
   }
   function filter() {
-    return <label className="flex items-center gap-2 text-sm">Result status<select aria-label="Result status" value={status} onChange={event => navigate({ status: event.target.value || null, page: null })} className="min-h-11 rounded border bg-background px-2"><option value="">All statuses</option>{statuses.map(value => <option key={value} value={value}>{value}</option>)}</select></label>;
+    return <label className="flex items-center gap-2 text-sm">Result status<select aria-label="Result status" value={status} onChange={event => navigate({ status: event.target.value || null, page: null }, true)} className="min-h-11 rounded border bg-background px-2"><option value="">All statuses</option>{statuses.map(value => <option key={value} value={value}>{value}</option>)}</select></label>;
   }
   function runContent() {
     if (runDetails.isError) return <ResultState kind="error" message="Run results could not be loaded" action={<Button onClick={() => void runDetails.refetch()}>Retry run results</Button>} />;
