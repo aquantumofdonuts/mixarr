@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ConfirmDialog, EmptyState, Skeleton } from '@/components/ui';
@@ -51,11 +51,28 @@ const channelTypeLabels: Record<string, string> = {
   email: 'Email',
 };
 
+function isChannel(value: unknown): value is NotificationChannel {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const channel = value as NotificationChannel;
+  return Number.isSafeInteger(channel.id) && channel.id > 0 &&
+    typeof channel.type === 'string' && Object.hasOwn(channelTypeLabels, channel.type) && typeof channel.name === 'string' &&
+    typeof channel.isActive === 'boolean' && Array.isArray(channel.events) &&
+    channel.events.every(event => typeof event === 'string') && !!channel.config &&
+    typeof channel.config === 'object' && !Array.isArray(channel.config) &&
+    ['webhookUrl', 'username', 'url', 'method'].every(key => channel.config[key] == null || typeof channel.config[key] === 'string');
+}
+
 export default function NotificationsSettingsPage() {
   const { addToast } = useToast();
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [events, setEvents] = useState<NotificationEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [channelsReady, setChannelsReady] = useState(false);
+  const [eventsReady, setEventsReady] = useState(false);
+  const [channelsError, setChannelsError] = useState<string | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const channelRead = useRef(0);
+  const eventRead = useRef(0);
   const [showModal, setShowModal] = useState(false);
   const [editingChannel, setEditingChannel] = useState<NotificationChannel | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
@@ -88,30 +105,35 @@ export default function NotificationsSettingsPage() {
     draftVersion.current++; setShowModal(false); setError(null); setErrorField(null);
   };
 
-  useEffect(() => {
-    active.current = true;
-    fetchChannels();
-    fetchEvents();
-    return () => { active.current = false; };
-  }, []);
-
-  const fetchChannels = async () => {
+  const fetchChannels = useCallback(async () => {
+    const generation = ++channelRead.current;
     setLoading(true);
     const { data, error } = await api.get<NotificationChannel[]>('/api/notifications/channels');
-    if (!active.current) return;
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to load channels', message: error });
+    if (!active.current || generation !== channelRead.current) return;
+    if (error || !Array.isArray(data) || !data.every(isChannel)) {
+      setChannelsError(`Failed to load channels: ${error || 'invalid response.'}`);
     } else {
-      setChannels(data || []);
+      setChannels(data); setChannelsReady(true); setChannelsError(null);
     }
     setLoading(false);
-  };
+  }, []);
 
-  const fetchEvents = async () => {
-    const { data } = await api.get<string[]>('/api/notifications/events');
-    if (!active.current) return;
-    if (data) setEvents(formatEvents(data));
-  };
+  const fetchEvents = useCallback(async () => {
+    const generation = ++eventRead.current;
+    const { data, error } = await api.get<string[]>('/api/notifications/events');
+    if (!active.current || generation !== eventRead.current) return;
+    if (error || !Array.isArray(data) || !data.every(event => typeof event === 'string')) {
+      setEventsError(`Failed to load events: ${error || 'invalid response.'}`);
+    } else {
+      setEvents(formatEvents(data)); setEventsReady(true); setEventsError(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    active.current = true;
+    void fetchChannels(); void fetchEvents();
+    return () => { active.current = false; channelRead.current++; eventRead.current++; };
+  }, [fetchChannels, fetchEvents]);
 
   const openAddModal = () => {
     draftVersion.current++; setError(null); setErrorField(null);
@@ -150,7 +172,7 @@ export default function NotificationsSettingsPage() {
   };
 
   const handleSave = async () => {
-    if (saving) return;
+    if (saving || !eventsReady) return;
     setError(null); setErrorField(null);
     const invalid = (message: string, id: string) => { setError(message); setErrorField(id); document.getElementById(id)?.focus(); };
     // Build config based on type
@@ -233,9 +255,8 @@ export default function NotificationsSettingsPage() {
   const handleTest = async (id: number) => {
     setTestingId(id);
     const { error } = await api.post(`/api/notifications/channels/${id}/test`);
-    setTestingId(null);
-    
     if (!active.current) return;
+    setTestingId(null);
     if (error) {
       addToast({ type: 'error', title: 'Test failed', message: error });
     } else {
@@ -277,13 +298,15 @@ export default function NotificationsSettingsPage() {
         title="Notifications"
         description="Configure notification channels for Mixarr events"
       >
-        <Button onClick={openAddModal}>
+        <Button onClick={openAddModal} disabled={!channelsReady || !eventsReady}>
           <Plus className="w-4 h-4 mr-2" />
           Add Channel
         </Button>
       </PageHeader>
 
       <div className="p-6 space-y-6">
+        {channelsError && <div><p role="alert">{channelsError}</p><Button variant="outline" onClick={fetchChannels}>Retry loading channels</Button></div>}
+        {eventsError && <div><p role="alert">{eventsError}</p><Button variant="outline" onClick={fetchEvents}>Retry loading events</Button></div>}
         {loading ? (
           <div className="space-y-4">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -296,12 +319,12 @@ export default function NotificationsSettingsPage() {
               </div>
             ))}
           </div>
-        ) : channels.length === 0 ? (
+        ) : !channelsReady ? null : channels.length === 0 ? (
           <EmptyState
             icon={Bell}
             title="No Notification Channels"
             description="Add a notification channel to receive alerts about subscriptions, artist additions, and more."
-            action={{ label: 'Add Your First Channel', onClick: openAddModal }}
+            action={eventsReady ? { label: 'Add Your First Channel', onClick: openAddModal } : undefined}
           />
         ) : (
           <div className="grid gap-4">
@@ -502,7 +525,7 @@ export default function NotificationsSettingsPage() {
             <Button variant="outline" onClick={closeModal}>
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving || !eventsReady}>
               {saving ? 'Saving…' : editingChannel ? 'Save channel changes' : 'Create Channel'}
             </Button>
           </ModalFooter>

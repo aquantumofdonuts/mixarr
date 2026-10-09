@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,11 +20,11 @@ import Zap from 'lucide-react/dist/esm/icons/zap';
 type SSOProviderType = 'ldap' | 'saml' | 'google' | 'plex' | 'oidc';
 
 interface SSOProvider {
-  id: string;
+  id: number;
   type: SSOProviderType;
   name: string;
   isEnabled: boolean;
-  config: Record<string, string>;
+  config: Record<string, unknown>;
 }
 
 interface ProviderConfig {
@@ -106,10 +106,20 @@ const providerConfigs: ProviderConfig[] = [
   },
 ];
 
+function isProvider(value: unknown): value is SSOProvider {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const provider = value as Record<string, unknown>;
+  const definition = providerConfigs.find(item => item.type === provider.type);
+  if (!definition || typeof provider.id !== 'number' || !Number.isSafeInteger(provider.id) || provider.id < 1 || typeof provider.name !== 'string' || typeof provider.isEnabled !== 'boolean' || !provider.config || typeof provider.config !== 'object' || Array.isArray(provider.config)) return false;
+  const config = provider.config as Record<string, unknown>;
+  return definition.fields.every(field => config[field.key] == null || typeof config[field.key] === 'string'
+    || (definition.type === 'google' && field.key === 'allowedDomains' && Array.isArray(config[field.key]) && (config[field.key] as unknown[]).every(domain => typeof domain === 'string')));
+}
+
 export function SSOSettings() {
   const [providers, setProviders] = useState<SSOProvider[]>([]);
   const [expandedProvider, setExpandedProvider] = useState<SSOProviderType | null>(null);
-  const [formData, setFormData] = useState<Record<SSOProviderType, Record<string, string>>>({
+  const [formData, setFormData] = useState<Record<SSOProviderType, Record<string, unknown>>>({
     ldap: {},
     saml: {},
     google: {},
@@ -132,24 +142,28 @@ export function SSOSettings() {
   const active = useRef(false);
   const dirtyProvider = (type: SSOProviderType) => JSON.stringify(formData[type]) !== JSON.stringify(baseline[type]) || !!enabled[type] !== !!enabledBaseline[type];
   useUnsavedChanges(providerConfigs.some(config => dirtyProvider(config.type)));
+  const readGeneration = useRef(0);
+  const fetchProviders = useCallback(async () => {
+    const generation = ++readGeneration.current;
+    setIsLoading(true);
+    const [result, baseUrlResult] = await Promise.all([api.get<{ providers: SSOProvider[] }>('/api/sso/providers'), api.get<{ baseUrl: string }>('/api/settings/base-url')]);
+    if (!active.current || generation !== readGeneration.current) return;
+    const list = result.data?.providers;
+    if (result.error || !Array.isArray(list) || !list.every(isProvider) || new Set(list.map(provider => provider.type)).size !== list.length) {
+      setLoadError(result.error || 'Failed to load SSO providers: invalid response.'); setIsLoading(false); return;
+    }
+    const initial = { ldap: {}, saml: {}, google: {}, plex: {}, oidc: {} } as Record<SSOProviderType, Record<string, unknown>>;
+    const initialEnabled: Partial<Record<SSOProviderType, boolean>> = {};
+    list.forEach(provider => { initial[provider.type] = { ...provider.config }; initialEnabled[provider.type] = provider.isEnabled; });
+    setLoaded(true); setProviders(list); setFormData(initial); setBaseline(initial); setEnabled(initialEnabled); setEnabledBaseline(initialEnabled); setLoadError(null);
+    if (typeof baseUrlResult.data?.baseUrl === 'string') setBaseUrl(baseUrlResult.data.baseUrl);
+    setIsLoading(false);
+  }, []);
   useEffect(() => {
     active.current = true;
-    let current = true;
-    void Promise.all([api.get<{ providers: SSOProvider[] }>('/api/sso/providers'), api.get<{ baseUrl: string }>('/api/settings/base-url')]).then(([result, baseUrlResult]) => {
-      if (!current) return;
-      setLoadError(result.error);
-      if (result.data) {
-        setLoaded(true); setProviders(result.data.providers);
-        const initial = { ldap: {}, saml: {}, google: {}, plex: {}, oidc: {} } as typeof formData;
-        const initialEnabled: typeof enabled = {};
-        result.data.providers.forEach(provider => { initial[provider.type] = { ...provider.config }; initialEnabled[provider.type] = provider.isEnabled; });
-        setFormData(initial); setBaseline(initial); setEnabled(initialEnabled); setEnabledBaseline(initialEnabled);
-      }
-      if (baseUrlResult.data) setBaseUrl(baseUrlResult.data.baseUrl);
-      setIsLoading(false);
-    });
-    return () => { current = false; active.current = false; };
-  }, []);
+    void fetchProviders();
+    return () => { active.current = false; readGeneration.current++; };
+  }, [fetchProviders]);
 
   const getProvider = (type: SSOProviderType): SSOProvider | undefined => {
     return providers.find((p) => p.type === type);
@@ -168,14 +182,18 @@ export function SSOSettings() {
     }
     const submitted = { ...formData[type] };
     const submittedEnabled = !!enabled[type];
+    const persistedConfig = { ...submitted };
+    if (type === 'google' && typeof submitted.allowedDomains === 'string' && submitted.allowedDomains !== getProvider(type)?.config.allowedDomains) {
+      persistedConfig.allowedDomains = submitted.allowedDomains.split(',').map(domain => domain.trim()).filter(Boolean);
+    }
     setSavingProviders(current => ({ ...current, [type]: true })); setErrors(current => ({ ...current, [type]: '' }));
-    const { data, error } = await api.put<{ provider?: SSOProvider }>(`/api/sso/providers/${type}`, { name: config.name, config: submitted, isEnabled: submittedEnabled });
+    const { data, error } = await api.put<{ provider?: SSOProvider }>(`/api/sso/providers/${type}`, { name: config.name, config: persistedConfig, isEnabled: submittedEnabled });
     if (!active.current) return;
-    if (error) setErrors(current => ({ ...current, [type]: error }));
+    if (error || !isProvider(data?.provider) || data.provider.type !== type) setErrors(current => ({ ...current, [type]: error || `Invalid save response; retry or reload to confirm ${config.name} settings.` }));
     else {
       setBaseline(current => ({ ...current, [type]: submitted }));
       setEnabledBaseline(current => ({ ...current, [type]: submittedEnabled }));
-      setProviders(current => [...current.filter(provider => provider.type !== type), data?.provider || { id: type, type, name: config.name, config: submitted, isEnabled: submittedEnabled }]);
+      setProviders(current => [...current.filter(provider => provider.type !== type), data.provider!]);
       addToast({ type: 'success', title: `${config.name} settings saved` });
     }
     setSavingProviders(current => ({ ...current, [type]: false }));
@@ -259,7 +277,7 @@ export function SSOSettings() {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
+        {loadError && <div className="space-y-2"><p role="alert" className="text-sm text-destructive">{loadError}</p><Button variant="outline" onClick={() => void fetchProviders()}>Retry loading SSO providers</Button></div>}
         <fieldset disabled={!loaded} className="space-y-4">
         {providerConfigs.map((config) => {
           const provider = getProvider(config.type);
@@ -277,7 +295,7 @@ export function SSOSettings() {
               </label>
               {field.type === 'textarea' ? (
                 <textarea id={`sso-${config.type}-${field.key}`} aria-required={field.required}
-                  value={formData[config.type][field.key] || ''}
+                  value={String(formData[config.type][field.key] ?? '')}
                   onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
                   placeholder={field.placeholder}
                   className="w-full min-h-[100px] px-3 py-2 text-sm rounded-md border border-input bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
@@ -286,7 +304,7 @@ export function SSOSettings() {
                 <div className="relative">
                   <Input id={`sso-${config.type}-${field.key}`} aria-required={field.required}
                     type={showPasswords[`${config.type}-${field.key}`] ? 'text' : 'password'}
-                    value={formData[config.type][field.key] || ''}
+                    value={String(formData[config.type][field.key] ?? '')}
                     onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
                     placeholder={field.placeholder || '••••••••'}
                     className="pr-10"
@@ -306,7 +324,7 @@ export function SSOSettings() {
               ) : (
                 <Input id={`sso-${config.type}-${field.key}`} aria-required={field.required}
                   type="text"
-                  value={formData[config.type][field.key] || ''}
+                  value={String(formData[config.type][field.key] ?? '')}
                   onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
                   placeholder={field.placeholder}
                 />
@@ -355,7 +373,7 @@ export function SSOSettings() {
               {/* Accordion Content */}
               {isExpanded && (
                 <div className="border-t p-4 space-y-4">
-                  <p role={errors[config.type] ? "alert" : "status"} className="text-sm text-muted-foreground">{errors[config.type] || (savingProviders[config.type] ? "Saving provider settings…" : dirtyProvider(config.type) ? "Unsaved provider settings changes" : "Provider settings saved")}</p>
+                  <p role={errors[config.type] ? "alert" : "status"} className="text-sm text-muted-foreground">{errors[config.type] || (savingProviders[config.type] ? "Saving provider settings…" : dirtyProvider(config.type) ? "Unsaved provider settings changes" : !loaded ? "Provider settings unavailable" : isSaved ? "Provider settings saved" : "No saved provider configuration")}</p>
                   {mainFields.map(renderField)}
 
                   {advancedFields.length > 0 && (

@@ -7,7 +7,7 @@ async function settingsApi(page: Page) {
   const personal = { defaultResultHandling: 'preview', maxConcurrentJobs: 4, notifyOnComplete: true, notifyOnError: true };
   const global = { baseUrl: 'https://mixarr.example' };
   const ai = { openaiEnabled: true, openaiConfigured: true, openaiApiKey: 'fixture-secret', openaiBaseUrl: '', openaiModel: 'old-model', anthropicEnabled: false, anthropicConfigured: false };
-  const providers = [{ id: 'google', type: 'google', name: 'Google', isEnabled: false, config: { clientId: 'fixture.apps.googleusercontent.com', clientSecret: '********' } }, { id: 'oidc', type: 'oidc', name: 'OpenID Connect', isEnabled: false, config: { issuerUrl: 'https://issuer.example', clientId: 'fixture-client', clientSecret: '********' } }];
+  const providers = [{ id: 1, type: 'google', name: 'Google', isEnabled: false, config: { clientId: 'fixture.apps.googleusercontent.com', clientSecret: '********' } }, { id: 2, type: 'oidc', name: 'OpenID Connect', isEnabled: false, config: { issuerUrl: 'https://issuer.example', clientId: 'fixture-client', clientSecret: '********' } }];
   await page.route(/\/api\/(settings(?:\/global|\/base-url)?|ai\/settings|sso\/providers(?:\/[^/]+)?|notifications\/(?:channels|events))$/, async route => {
     const req = route.request(), path = new URL(req.url()).pathname;
     if (req.method() === 'GET') {
@@ -19,7 +19,7 @@ async function settingsApi(page: Page) {
     if (path === '/api/settings') Object.assign(personal, body.settings);
     if (path === '/api/settings/global') Object.assign(global, body.settings);
     if (path === '/api/ai/settings') Object.assign(ai, body);
-    if (path.startsWith('/api/sso/providers/')) return route.fulfill({ json: { provider: { id: path.split('/').at(-1), type: path.split('/').at(-1), ...body } } });
+    if (path.startsWith('/api/sso/providers/')) return route.fulfill({ json: { provider: { id: path.endsWith('/google') ? 1 : 2, type: path.split('/').at(-1), ...body } } });
     return route.fulfill({ json: { success: true } });
   });
   return { writes, fail: (value: boolean) => { failPersonal = value; } };
@@ -133,3 +133,29 @@ for (const kind of ['missing', 'malformed'] as const) {
     expect(api.writes).toEqual([]);
   });
 }
+
+test('SSO missing and malformed reads fail visibly; retrying a valid empty list establishes a new provider draft', async ({ catalogPage: page }) => {
+  await settingsApi(page); let response: 'missing' | 'malformed' | 'empty' = 'missing';
+  await page.route('**/api/sso/providers', route => response === 'missing' ? route.fulfill({ status: 204 }) : route.fulfill({ json: response === 'malformed' ? {} : { providers: [] } }));
+  await page.goto('/settings');
+  await expect(page.getByRole('alert').filter({ hasText: 'Failed to load SSO providers: invalid response.' })).toBeVisible();
+  await page.getByRole('heading', { name: 'Google', exact: true }).click(); await expect(page.getByText('Provider settings saved', { exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: 'Save Google settings', exact: true })).toBeDisabled();
+  response = 'malformed'; await page.getByRole('button', { name: 'Retry loading SSO providers' }).click(); await expect(page.getByRole('alert').filter({ hasText: 'Failed to load SSO providers: invalid response.' })).toBeVisible();
+  response = 'empty'; await page.getByRole('button', { name: 'Retry loading SSO providers' }).click(); await expect(page.getByText('No saved provider configuration', { exact: true })).toBeVisible(); await expect(page.getByRole('textbox', { name: 'Client ID', exact: true })).toHaveValue('');
+});
+
+test('a malformed SSO save retains the draft and allows an explicit retry', async ({ catalogPage: page }) => {
+  const api = await settingsApi(page); let malformed = true;
+  await page.route('**/api/sso/providers/google', route => route.request().method() === 'PUT' && malformed ? route.fulfill({ json: {} }) : route.fallback());
+  await page.goto('/settings'); await page.getByRole('button', { name: 'Configure Google', exact: true }).click(); await page.getByRole('textbox', { name: 'Client ID', exact: true }).fill('draft.apps.googleusercontent.com'); await page.getByRole('button', { name: 'Save Google settings', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Invalid save response; retry or reload to confirm Google settings.' })).toBeVisible(); await expect(page.getByRole('textbox', { name: 'Client ID', exact: true })).toHaveValue('draft.apps.googleusercontent.com'); await expect(page.getByRole('button', { name: 'Save Google settings', exact: true })).toBeEnabled();
+  malformed = false; await page.getByRole('button', { name: 'Save Google settings', exact: true }).click(); await expect(page.getByRole('region', { name: 'Google settings', exact: true }).getByText('Provider settings saved', { exact: true })).toBeVisible(); expect(api.writes).toHaveLength(1);
+});
+
+test('notification missing channels and malformed events require explicit valid reads before opening an editor', async ({ catalogPage: page }) => {
+  await settingsApi(page); let validChannels = false, validEvents = false;
+  await page.route('**/api/notifications/channels', route => validChannels ? route.fallback() : route.fulfill({ status: 204 }));
+  await page.route('**/api/notifications/events', route => validEvents ? route.fallback() : route.fulfill({ json: {} }));
+  await page.goto('/settings/notifications'); await expect(page.getByRole('alert').filter({ hasText: 'Failed to load channels: invalid response.' })).toBeVisible(); await expect(page.getByRole('alert').filter({ hasText: 'Failed to load events: invalid response.' })).toBeVisible(); await expect(page.getByText('No Notification Channels', { exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: 'Add Channel', exact: true })).toBeDisabled();
+  validChannels = true; validEvents = true; await page.getByRole('button', { name: 'Retry loading channels' }).click(); await page.getByRole('button', { name: 'Retry loading events' }).click(); await expect(page.getByRole('button', { name: 'Add Channel', exact: true })).toBeEnabled(); await page.getByRole('button', { name: 'Add Channel', exact: true }).click(); await expect(page.getByText('Channel draft unchanged', { exact: true })).toBeVisible();
+});
