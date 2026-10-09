@@ -46,6 +46,19 @@ test('discovery preserves canonical seeds through reload and separates library s
   await chooseSeed(page, 'Seed Beta');
   await expect.poll(() => bodies.at(-1)?.artistNames).toEqual(['Seed Alpha', 'Seed Beta']);
   expect(new URL(page.url()).searchParams.getAll('seed')).toEqual(seedIds);
+  await page.getByRole('button', { name: 'Remove seed Seed Alpha', exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.getAll('seed')).toEqual([seedIds[1]]);
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).searchParams.getAll('seed')).toEqual(seedIds);
+  await expect(page.getByRole('list', { name: 'Selected seeds', exact: true }).getByText('Seed Alpha', { exact: true })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Use Seed Beta as seed', exact: true })).toBeChecked();
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).searchParams.getAll('seed')).toEqual([seedIds[0]]);
+  await expect(input).toHaveValue('Beta');
+  await expect(page.getByRole('checkbox', { name: 'Use Seed Beta as seed', exact: true })).not.toBeChecked();
+  await page.goBack();
+  await expect(input).toHaveValue('');
+  await expect(page.getByRole('checkbox', { name: 'Use Seed Alpha as seed', exact: true })).toBeChecked();
 });
 
 test('a superseded seed response cannot replace recommendations for the current seeds', async ({ catalogPage: page }) => {
@@ -142,4 +155,41 @@ test('discovery distinguishes unresolved seeds, provider failure, no matches and
   await expect(page.getByRole('link', { name: 'Common Name', exact: true })).toHaveCount(2);
   await expect(page.getByText('Similar to: Seed Beta · 1 match', { exact: true })).toHaveCount(2);
   expect(requests).toEqual([['Seed Alpha'], ['Seed Alpha'], ['Seed Alpha', 'Seed Beta']]);
+});
+
+test('replacement recommendations preserve prior rows and selection through failure and retry', async ({ catalogPage: page }) => {
+  await library(page);
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const requests: string[][] = [];
+  let failed = false;
+  await page.route('**/api/discover/similar', async route => {
+    const names = route.request().postDataJSON().artistNames as string[]; requests.push(names);
+    if (names.length === 1) return route.fulfill({ json: { recommendations, seedArtists: names, total: 2, failedSeedArtists: [] } });
+    if (!failed) {
+      failed = true;
+      await pending;
+      return route.fulfill({ status: 503, json: { error: 'Fixture Last.fm unavailable' } });
+    }
+    return route.fulfill({ json: { recommendations: recommendations.map(rec => ({ ...rec, matchedFrom: names, matchCount: 2 })), seedArtists: names, total: 2, failedSeedArtists: [] } });
+  });
+  await page.goto('/discover');
+  await chooseSeed(page, 'Seed Alpha');
+  const row = page.locator('article').filter({ has: page.locator(`a[href*="artist=${ARTIST_IDS[0]}"]`) });
+  await row.getByRole('checkbox', { name: 'Select Common Name', exact: true }).check();
+  await chooseSeed(page, 'Seed Beta');
+  await expect.poll(() => requests.length).toBe(2);
+  await expect(page.getByRole('link', { name: 'Common Name', exact: true })).toHaveCount(2);
+  await expect(page.getByText(/previous recommendations/i)).toBeVisible();
+  await expect(row.getByRole('checkbox', { name: 'Select Common Name', exact: true })).toBeChecked();
+  await expect(row.getByRole('button', { name: 'Add artist Common Name', exact: true })).toBeDisabled();
+  release();
+  await expect(page.getByRole('button', { name: 'Retry recommendations', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Common Name', exact: true })).toHaveCount(2);
+  await expect(page.getByText(/previous recommendations/i)).toBeVisible();
+  await page.getByRole('button', { name: 'Retry recommendations', exact: true }).click();
+  await expect(page.getByText('Similar to: Seed Alpha, Seed Beta · 2 matches', { exact: true })).toHaveCount(2);
+  await expect(row.getByRole('checkbox', { name: 'Select Common Name', exact: true })).toBeChecked();
+  await expect(row.getByRole('button', { name: 'Add artist Common Name', exact: true })).toBeEnabled();
+  expect(requests).toEqual([['Seed Alpha'], ['Seed Alpha', 'Seed Beta'], ['Seed Alpha', 'Seed Beta']]);
 });
