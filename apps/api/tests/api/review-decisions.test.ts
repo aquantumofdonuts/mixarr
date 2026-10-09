@@ -188,7 +188,7 @@ describe('review decisions through the real router and signed Undo helper', () =
   it('does not report a confirmed approval as failure when notification delivery fails', async () => {
     mocks.notify.mockRejectedValue(new Error('notification unavailable'));
     const response = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
-    expect(response.status).toBe(200); expect(response.body.added).toBe(true);
+    expect(response.status).toBe(200); expect(response.body.added).toBe(1);
     expect(rows[0].status).toBe('approved');
   });
   it('does not blindly reject a newer decision after bulk provider failure', async () => {

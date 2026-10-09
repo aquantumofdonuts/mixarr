@@ -28,6 +28,15 @@ describe('LidarrService.addArtistWithCacheWarm', () => {
     mockWarmer.warmArtist.mockReset();
   });
 
+  it('reports already-in-library only after an exact existing artist lookup', async () => {
+    const mbid = 'df494a19-4657-4a77-92b6-80325c63510f';
+    const artist = { id: 1, artistName: 'Existing Artist', foreignArtistId: mbid };
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [artist] });
+    const result = await lidarr.addArtistWithCacheWarm(mbid, 1, 1, '/music');
+    expect(result).toMatchObject({ artist, alreadyInLibrary: true, cacheWarmed: false });
+    expect(mockWarmer.warmArtist).not.toHaveBeenCalled(); expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('warms cache before adding artist', async () => {
     mockWarmer.warmArtist.mockResolvedValue({
       success: true,

@@ -12,6 +12,7 @@ import {
   importIdParamSchema,
   connectionIdParamSchema,
   reviewQueueQuerySchema,
+  decodeReviewCursor,
   updateReviewItemSchema,
   bulkReviewSchema,
   previewQuerySchema,
@@ -201,27 +202,40 @@ importsRouter.delete('/:id', validateParams(importIdParamSchema), async (req, re
 importsRouter.get('/review/queue', validateQuery(reviewQueueQuerySchema), async (req, res) => {
   try {
     const limit = req.query.limit as unknown as number;
-    const status = req.query.status as string;
+    const status = req.query.status as ReviewStatus;
     const itemType = req.query.itemType as string | undefined;
+    const q = req.query.q as string;
     const isAdmin = req.user!.role === 'admin';
-
-    const where = {
-      ...(isAdmin ? {} : { userId: req.user!.id }),
-      status: status as ReviewStatus,
+    const cursor = req.query.cursor ? decodeReviewCursor(req.query.cursor as string) : null;
+    if (cursor && (cursor.actor !== req.user!.id || cursor.admin !== isAdmin || cursor.status !== status ||
+      cursor.itemType !== (itemType ?? null) || cursor.q !== q)) {
+      res.status(400).json({ error: 'Review cursor belongs to another queue scope', code: 'INVALID_CURSOR' });
+      return;
+    }
+    // Prisma binds LIKE values; escape its wildcard syntax so catalog searches are literal.
+    const search = q.replace(/[\\%_]/g, value => `\\${value}`);
+    const where: Prisma.ReviewItemWhereInput = {
+      ...(isAdmin ? {} : { userId: req.user!.id }), status,
       ...(itemType ? { itemType } : {}),
+      ...(q ? { OR: [{ artistName: { contains: search } }, { albumName: { contains: search } }] } : {}),
     };
-
-    const [items, total] = await Promise.all([
+    const [page, total] = await Promise.all([
       prisma.reviewItem.findMany({
-        where,
-        include: {
-          user: { select: { username: true, displayName: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
+        where: cursor ? { AND: [where, { OR: [
+          { createdAt: { lt: new Date(cursor.createdAt) } },
+          { createdAt: new Date(cursor.createdAt), id: { lt: cursor.id } },
+        ] }] } : where,
+        include: { user: { select: { username: true, displayName: true } } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + 1,
       }),
       prisma.reviewItem.count({ where }),
     ]);
+    const items = page.slice(0, limit);
+    const last = items.at(-1);
+    const nextCursor = page.length > limit && last ? Buffer.from(JSON.stringify({
+      v: 1, id: last.id, createdAt: last.createdAt.toISOString(), actor: req.user!.id, admin: isAdmin,
+      status, itemType: itemType ?? null, q,
+    })).toString('base64url') : null;
 
     // Fetch artist images from Deezer
     const artistNames = items.map(item => item.artistName);
@@ -233,7 +247,7 @@ importsRouter.get('/review/queue', validateQuery(reviewQueueQuerySchema), async 
       imageUrl: imageMap.get(item.artistName),
     }));
 
-    res.json({ items: itemsWithImages, total });
+    res.json({ items: itemsWithImages, total, nextCursor });
   } catch (error) {
     log.error('Failed to fetch review queue', {
       error: error instanceof Error ? error.message : String(error),
@@ -268,307 +282,119 @@ importsRouter.post('/review/restore', validateBody(restoreDecisionSchema), async
   }
 });
 
-// Update review item status
+type ReviewOutcome = { id: number; state: 'added' | 'already-in-library' | 'failed' | 'uncertain' | 'identity-required'; message: string };
+function reviewSummary(outcomes: ReviewOutcome[]) {
+  const addedIds = outcomes.filter(o => o.state === 'added' || o.state === 'already-in-library').map(o => o.id);
+  const failedIds = outcomes.filter(o => o.state !== 'added' && o.state !== 'already-in-library').map(o => o.id);
+  return { outcomes, added: outcomes.filter(o => o.state === 'added').length,
+    alreadyInLibrary: outcomes.filter(o => o.state === 'already-in-library').length,
+    failed: failedIds.length, addedIds, failedIds, success: failedIds.length === 0 };
+}
+function reviewFailure(id: number, error: unknown): ReviewOutcome {
+  if (error instanceof DecisionError && error.code === 'IDENTITY_REQUIRED') {
+    return { id, state: 'identity-required', message: error.message };
+  }
+  const status = (error as { status?: unknown } | null)?.status;
+  const definite = error instanceof DecisionError ? error.code !== 'DECISION_CONFLICT' :
+    typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
+  return { id, state: definite ? 'failed' : 'uncertain', message: definite
+    ? 'Lidarr did not accept this review item. It remains available for retry.'
+    : 'Lidarr confirmation is unavailable. Check the library before retrying this review item.' };
+}
+
+async function approveReview(item: ReviewItem, lidarr: LidarrService, cache: LidarrCache,
+  options: Awaited<ReturnType<typeof effectiveAddOptions>>, selectedMbid?: string): Promise<ReviewOutcome> {
+  const mbid = (item.mbid || selectedMbid)?.toLowerCase();
+  if (!mbid || !z.string().uuid().safeParse(mbid).success) throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a MusicBrainz artist before adding');
+  if (item.mbid && selectedMbid && item.mbid.toLowerCase() !== selectedMbid.toLowerCase()) throw new DecisionError(409, 'IDENTITY_CONFLICT', 'Review already has an artist identity');
+  if (item.itemType === 'album' && !z.string().uuid().safeParse(item.albumMbid).success) throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a valid album identity before adding');
+  if (item.itemType !== 'album' && await cache.exists({ mbid })) {
+    await updateReviewDecision(item, { status: 'approved', mbid });
+    return { id: item.id, state: 'already-in-library', message: 'Artist is already in the library.' };
+  }
+  let alreadyInLibrary = false;
+  if (item.itemType === 'album') {
+    await lidarr.addAlbumWithCacheWarm(mbid, item.albumMbid!, options.qualityProfileId,
+      options.metadataProfileId, options.rootFolderPath, undefined, options.searchOnAdd);
+  } else {
+    const result = await lidarr.addArtistWithCacheWarm(mbid, options.qualityProfileId, options.metadataProfileId,
+      options.rootFolderPath, true, options.searchOnAdd, false, options.monitorOption, options.monitorNewItems);
+    alreadyInLibrary = result?.alreadyInLibrary === true;
+  }
+  await updateReviewDecision(item, { status: 'approved', mbid });
+  // An ancillary log failure cannot undo a confirmed provider response and persisted decision.
+  await addLogEntry('info', 'review', alreadyInLibrary ? `Artist "${item.artistName}" is already in Lidarr` : `Added ${item.itemType} "${item.albumName || item.artistName}" to Lidarr`,
+    { reviewId: item.id, artistName: item.artistName, mbid }).catch(() => log.warn('Review log failed', { reviewId: item.id }));
+  return { id: item.id, state: alreadyInLibrary ? 'already-in-library' : 'added',
+    message: alreadyInLibrary ? 'Artist is already in the library.' : item.itemType === 'album' ? 'Album added to the library.' : 'Artist added to the library.' };
+}
+
+// Ownership is enforced for every mutation, including administrator decisions.
 importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBody(updateReviewItemSchema), async (req, res) => {
+  const id = Number(req.params.id);
   try {
-    const id = Number(req.params.id);
-    const { status } = req.body;
-
-    const item = await prisma.reviewItem.findFirst({
-      where: { id, userId: req.user!.id },
-    });
-
-    if (!item) {
-      res.status(404).json({ error: 'Review item not found' });
-      return;
+    const item = await prisma.reviewItem.findFirst({ where: { id, userId: req.user!.id } });
+    if (!item || item.userId !== req.user!.id) { res.status(404).json({ error: 'Review item not found' }); return; }
+    if (item.status !== 'pending') throw new DecisionError(409, 'DECISION_CONFLICT', 'Review item already processed');
+    if (req.body.status === 'rejected') {
+      res.json({ success: true, ...await rejectReviews(prisma, [id], req.user!.id) }); return;
     }
-
-    // Review mutation and Undo both require the actor to own the record.
-    if (item.userId !== req.user!.id) {
-      res.status(404).json({ error: 'Review item not found' });
-      return;
+    const connection = await prisma.connection.findFirst({ where: { OR: [
+      { userId: req.user!.id, type: 'lidarr', isActive: true }, { userId: null, type: 'lidarr', isActive: true },
+    ] }, orderBy: { userId: 'desc' } });
+    if (!connection) throw new DecisionError(400, 'CONNECTION_REQUIRED', 'No active Lidarr connection');
+    const config = normalizeLidarrConfig(connection.config as unknown as LidarrConnectionConfig);
+    const lidarr = new LidarrService(config);
+    const options = await effectiveAddOptions(lidarr, config, req.body);
+    const outcome = await approveReview(item, lidarr, new LidarrCache(lidarr), options, req.body.mbid);
+    if (outcome.state === 'added') {
+      await notificationService.send(req.user!.id, 'artist.added', { artistName: item.artistName })
+        .catch(() => log.warn('Review notification failed', { userId: req.user!.id }));
     }
-
-    if (item.status !== 'pending') {
-      throw new DecisionError(409, 'DECISION_CONFLICT', 'Review item already processed');
-    }
-    if (status === 'rejected') {
-      res.json({ success: true, ...await rejectReviews(prisma, [id], req.user!.id) });
-      return;
-    }
-
-    // For approved, add to Lidarr
-    const lidarrConn = await prisma.connection.findFirst({
-      where: {
-        OR: [
-          { userId: item.userId, type: 'lidarr', isActive: true },
-          { userId: null, type: 'lidarr', isActive: true },
-        ],
-      },
-      orderBy: { userId: 'desc' },
-    });
-
-    if (!lidarrConn) {
-      res.status(400).json({ error: 'No active Lidarr connection' });
-      return;
-    }
-
-    const rawConfig = lidarrConn.config as unknown as LidarrConnectionConfig;
-    // Normalize config to ensure profile IDs are numbers (handles string values from DB)
-    const lidarrConfig = normalizeLidarrConfig(rawConfig);
-    const lidarr = new LidarrService(lidarrConfig);
-    const foreignArtistId = item.mbid || req.body.mbid;
-    if (!foreignArtistId || !z.string().uuid().safeParse(foreignArtistId).success) throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a MusicBrainz artist before adding');
-    if (item.mbid && req.body.mbid && item.mbid.toLowerCase() !== req.body.mbid.toLowerCase()) throw new DecisionError(409, 'IDENTITY_CONFLICT', 'Review already has an artist identity');
-    if (item.itemType === 'album' && !z.string().uuid().safeParse(item.albumMbid).success) throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a valid album identity before adding');
-    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
-    const cache = new LidarrCache(lidarr);
-    if (item.itemType !== 'album' && await cache.exists({ mbid: foreignArtistId })) {
-      await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
-      res.json({ success: true, alreadyInLibrary: true });
-      return;
-    }
-
-    // Add to Lidarr - check if this is an album or artist approval
-    const isAlbumApproval = item.itemType === 'album' && item.albumMbid;
-    
-    if (isAlbumApproval) {
-      // Album approval - warm cache, add specific album (and artist if needed)
-      await lidarr.addAlbumWithCacheWarm(
-        foreignArtistId,
-        item.albumMbid!,
-        options.qualityProfileId,
-        options.metadataProfileId,
-        options.rootFolderPath, undefined, options.searchOnAdd
-      );
-      
-      await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
-
-      await addLogEntry('info', 'review', `Added album "${item.albumName}" by "${item.artistName}" to Lidarr`, {
-        artistName: item.artistName,
-        albumName: item.albumName,
-        mbid: foreignArtistId,
-        albumMbid: item.albumMbid,
-      });
-
-      // Send notification
-      await notificationService.send(req.user!.id, 'artist.added', {
-        artistName: `${item.albumName} by ${item.artistName}`,
-      }).catch(() => log.warn('Review notification failed', { userId: req.user!.id }));
-
-      res.json({ success: true, added: true, itemType: 'album' });
-    } else {
-      // Artist approval (default behavior) - warm SkyHook cache for reliable lookup
-      // Use monitorOption from connection config (defaults to 'all' if not set)
-      await lidarr.addArtistWithCacheWarm(
-        foreignArtistId,
-        options.qualityProfileId,
-        options.metadataProfileId,
-        options.rootFolderPath,
-        true,  // monitored
-        options.searchOnAdd,
-        false, // waitForRefresh (deprecated)
-        options.monitorOption,
-        options.monitorNewItems
-      );
-
-      await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
-
-      await addLogEntry('info', 'review', `Added artist "${item.artistName}" to Lidarr`, {
-        artistName: item.artistName,
-        mbid: foreignArtistId,
-      });
-
-      // Send notification
-      await notificationService.send(req.user!.id, 'artist.added', {
-        artistName: item.artistName,
-      }).catch(() => log.warn('Review notification failed', { userId: req.user!.id }));
-
-      res.json({ success: true, added: true, itemType: 'artist' });
-    }
+    res.json({ ...reviewSummary([outcome]), itemType: item.itemType });
   } catch (error) {
+    const summary = reviewSummary([reviewFailure(id, error)]);
     if (error instanceof DecisionError) {
-      res.status(error.status).json({ error: error.message, code: error.code });
-      return;
+      res.status(error.status).json({ error: error.message, code: error.code, ...summary, details: summary }); return;
     }
-    const errorMsg = error instanceof Error ? error.message : 'Failed to update review item';
-    log.error('PUT /review/:id error:', error);
-    await addLogEntry('error', 'review', `Failed to add artist to Lidarr: ${errorMsg}`, {
-      error: errorMsg,
-    });
-
-    // Send failure notification
-    await notificationService.send(req.user!.id, 'artist.failed', {
-      artistName: 'Unknown',
-      error: errorMsg,
-    }).catch(() => log.warn('Review notification failed', { userId: req.user!.id }));
-
-    res.status(500).json({ error: errorMsg });
+    log.error('Review acquisition was not confirmed', { reviewId: id });
+    res.json(summary);
   }
 });
 
-// Bulk update review items
 importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, res) => {
   try {
-    const { ids, status } = req.body;
-
-    if (status === 'rejected') {
-      res.json({ success: true, added: 0, failed: 0, ...await rejectReviews(prisma, ids, req.user!.id) });
-      return;
+    const ids = [...new Set<number>(req.body.ids)];
+    if (req.body.status === 'rejected') {
+      res.json({ success: true, added: 0, alreadyInLibrary: 0, failed: 0, ...await rejectReviews(prisma, ids, req.user!.id) }); return;
     }
-
-    // For approved items, add to Lidarr
-    const items = await prisma.reviewItem.findMany({
-      where: {
-        id: { in: ids },
-        userId: req.user!.id,
-      },
-    });
-
-    if (items.length !== new Set<number>(ids).size || items.some(item => item.status !== 'pending')) {
+    const items = await prisma.reviewItem.findMany({ where: { id: { in: ids }, userId: req.user!.id } });
+    if (items.length !== ids.length || items.some(item => item.status !== 'pending' || item.userId !== req.user!.id)) {
       throw new DecisionError(409, 'DECISION_CONFLICT', 'A selected review is unavailable or already processed');
     }
-
-    // Get Lidarr connection (user's own or global)
-    const lidarrConn = await prisma.connection.findFirst({
-      where: {
-        OR: [
-          { userId: req.user!.id, type: 'lidarr', isActive: true },
-          { userId: null, type: 'lidarr', isActive: true },
-        ],
-      },
-      orderBy: { userId: 'desc' },
-    });
-
-    if (!lidarrConn) {
-      res.status(400).json({ error: 'No active Lidarr connection' });
-      return;
-    }
-
-    const rawConfig = lidarrConn.config as unknown as LidarrConnectionConfig;
-    // Normalize config to ensure profile IDs are numbers (handles string values from DB)
-    const lidarrConfig = normalizeLidarrConfig(rawConfig);
-    const lidarr = new LidarrService(lidarrConfig);
+    const connection = await prisma.connection.findFirst({ where: { OR: [
+      { userId: req.user!.id, type: 'lidarr', isActive: true }, { userId: null, type: 'lidarr', isActive: true },
+    ] }, orderBy: { userId: 'desc' } });
+    if (!connection) throw new DecisionError(400, 'CONNECTION_REQUIRED', 'No active Lidarr connection');
+    const config = normalizeLidarrConfig(connection.config as unknown as LidarrConnectionConfig);
+    const lidarr = new LidarrService(config);
     const cache = new LidarrCache(lidarr);
     await cache.refresh();
-    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
-
-    const addedIds: number[] = [];
-    const failedIds: number[] = [];
-    let added = 0;
-    let failed = 0;
-    const failedItems: Array<{ name: string; error: string }> = [];
-
-    log.debug(`Processing ${items.length} review items for approval`);
-
-    for (const item of items) {
-      try {
-        const isAlbum = item.itemType === 'album';
-        log.debug(`Processing review item: ${item.artistName}${isAlbum ? ` - ${item.albumName}` : ''} (mbid: ${item.mbid || 'none'}, type: ${item.itemType || 'artist'})`);
-        
-        // For artists: Skip if already in library
-        if (!isAlbum && item.mbid && await cache.exists({ mbid: item.mbid })) {
-          log.debug(`Artist ${item.artistName} already in library, marking approved`);
-          await updateReviewDecision(item, { status: 'approved' });
-          addedIds.push(item.id);
-          added++;
-          await addLogEntry('info', 'review', `Artist "${item.artistName}" already in library`, {
-            artistName: item.artistName,
-            mbid: item.mbid,
-          });
-          continue;
-        }
-
-        const foreignArtistId = item.mbid;
-        if (!foreignArtistId || !z.string().uuid().safeParse(foreignArtistId).success) {
-          failedItems.push({ name: item.artistName, error: 'Choose a MusicBrainz artist before adding' });
-          failedIds.push(item.id);
-          failed++;
-          continue;
-        }
-
-        if (isAlbum) {
-          // For album items: add artist as unmonitored and monitor specific album
-          log.debug(`Adding album "${item.albumName}" by ${item.artistName} (${foreignArtistId}) to Lidarr...`);
-          
-          const albumMbid = item.albumMbid;
-          if (!albumMbid || !z.string().uuid().safeParse(albumMbid).success) {
-            failedItems.push({ name: `${item.artistName} - ${item.albumName}`, error: 'Choose a valid album identity before adding' });
-            failedIds.push(item.id); failed++;
-            continue;
-          }
-
-          await lidarr.addAlbumWithCacheWarm(
-            foreignArtistId,
-            albumMbid,
-            options.qualityProfileId,
-            options.metadataProfileId,
-            options.rootFolderPath, undefined, options.searchOnAdd
-          );
-          log.info(`Successfully added album "${item.albumName}" by ${item.artistName} to Lidarr`);
-          
-          await addLogEntry('info', 'review', `Added album "${item.albumName}" by "${item.artistName}" to Lidarr`, {
-            artistName: item.artistName,
-            albumName: item.albumName,
-            mbid: foreignArtistId,
-            albumMbid: albumMbid,
-          });
-        } else {
-          // For artist items: warm SkyHook cache for reliable metadata lookup
-          // Use monitorOption from connection config (defaults to 'all' if not set)
-          log.debug(`Adding ${item.artistName} (${foreignArtistId}) to Lidarr...`);
-          await lidarr.addArtistWithCacheWarm(
-            foreignArtistId,
-            options.qualityProfileId,
-            options.metadataProfileId,
-            options.rootFolderPath,
-            true,  // monitored
-            options.searchOnAdd,
-            false, // waitForRefresh (deprecated)
-            options.monitorOption,
-            options.monitorNewItems
-          );
-          log.info(`Successfully added ${item.artistName} to Lidarr`);
-          
-          // Log each successful add
-          await addLogEntry('info', 'review', `Added artist "${item.artistName}" to Lidarr`, {
-            artistName: item.artistName,
-            mbid: foreignArtistId,
-          });
-        }
-
-        await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
-        added++;
-        addedIds.push(item.id);
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        log.error(`Failed to add ${item.artistName}:`, errorMsg);
-        failedItems.push({ name: item.artistName, error: errorMsg });
-        failedIds.push(item.id);
-        failed++;
-      }
+    const options = await effectiveAddOptions(lidarr, config, req.body);
+    const outcomes: ReviewOutcome[] = [];
+    for (const id of ids) {
+      const item = items.find(item => item.id === id)!;
+      try { outcomes.push(await approveReview(item, lidarr, cache, options)); }
+      catch (error) { outcomes.push(reviewFailure(id, error)); }
     }
-
-    // Log bulk operation summary
-    if (added > 0 || failed > 0) {
-      await addLogEntry('info', 'review', `Bulk review: ${added} added, ${failed} failed`, {
-        added,
-        failed,
-        failedItems,
-      });
-    }
-
-    res.json({ success: failed === 0, added, failed, failedItems, addedIds, failedIds });
+    res.json(reviewSummary(outcomes));
   } catch (error) {
+    const summary = reviewSummary([...new Set<number>(req.body.ids)].map(id => reviewFailure(id, error)));
     if (error instanceof DecisionError) {
-      res.status(error.status).json({ error: error.message, code: error.code });
-      return;
+      res.status(error.status).json({ error: error.message, code: error.code, ...summary, details: summary }); return;
     }
-    log.error('Failed to process review items', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    res.status(500).json({ error: 'Failed to process review items' });
+    log.error('Bulk review acquisition was not confirmed', { userId: req.user!.id });
+    res.json(summary);
   }
 });
 

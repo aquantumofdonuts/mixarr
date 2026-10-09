@@ -496,12 +496,12 @@ export class LidarrService {
     monitorOption: string = 'all',
     monitorNewItems: string = 'all',
     signal?: AbortSignal
-  ): Promise<{ artist: LidarrArtist; refreshCommand?: LidarrCommand; cacheWarmed?: boolean; wasAlreadyCached?: boolean }> {
+  ): Promise<{ artist: LidarrArtist; refreshCommand?: LidarrCommand; cacheWarmed?: boolean; wasAlreadyCached?: boolean; alreadyInLibrary?: boolean }> {
     // Check if artist exists - only need to warm cache if adding new artist
     const existingArtist = await this.getArtistByMbid(foreignArtistId, signal);
     signal?.throwIfAborted();
     if (existingArtist) {
-      return { artist: existingArtist, cacheWarmed: false };
+      return { artist: existingArtist, cacheWarmed: false, alreadyInLibrary: true };
     }
     
     let cacheWarmed = false;

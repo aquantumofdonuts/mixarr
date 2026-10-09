@@ -35,7 +35,7 @@ export const queryKeys = {
   hasLidarr: ['connections', 'hasLidarr'] as const,
   
   // Queue / Review
-  reviewQueue: (status: string, itemType?: string) => ['review', 'queue', status, itemType] as const,
+  reviewQueue: (status: string, itemType?: string, params: { q?: string; cursor?: string | null; limit?: number } = {}, actorId?: number, role?: string) => ['review', 'queue', actorId, role, status, itemType, params.q ?? '', params.cursor ?? null, params.limit ?? 50] as const,
   
   // Jobs
   jobs: ['jobs'] as const,
@@ -487,11 +487,12 @@ export function useUpdateSubscription() {
 
 // Review Queue Hooks
 
-interface ReviewItem {
+export interface ReviewItem {
   id: number;
   userId: number;
   artistName: string;
   albumName: string | null;
+  albumMbid?: string | null;
   releaseYear: number | null;
   spotifyId: string | null;
   mbid: string | null;
@@ -503,16 +504,31 @@ interface ReviewItem {
   user?: { username: string; displayName: string };
 }
 
-export function useReviewQueue(status: 'pending' | 'approved' | 'rejected', itemType?: 'artist' | 'album') {
+export interface ReviewAcquisitionOutcome { id: number; state: 'added' | 'already-in-library' | 'failed' | 'uncertain' | 'identity-required'; message: string }
+export interface ReviewAcquisitionResponse extends Partial<UndoDecisionResponse> {
+  success?: boolean; outcomes?: ReviewAcquisitionOutcome[]; added?: number; alreadyInLibrary?: number; failed?: number;
+  addedIds?: number[]; failedIds?: number[];
+}
+export class ReviewAcquisitionError extends Error {
+  constructor(message: string, public outcomes: ReviewAcquisitionOutcome[] = []) { super(message); }
+}
+
+export function useReviewQueue(status: 'pending' | 'approved' | 'rejected', itemType?: 'artist' | 'album',
+  scope: { q?: string; cursor?: string | null; limit?: number } = {}) {
+  const { user } = useAuth();
+  const q = scope.q?.trim() ?? '';
+  const limit = scope.limit ?? 50;
   return useQuery({
-    queryKey: queryKeys.reviewQueue(status, itemType),
+    queryKey: queryKeys.reviewQueue(status, itemType, { ...scope, q, limit }, user?.id, user?.role),
+    enabled: !!user,
     queryFn: async ({ signal }) => {
-      // 500 is the API's max page size; total lets the UI show truncation
-      const params = new URLSearchParams({ status, limit: '500' });
-      if (itemType) params.append('itemType', itemType);
-      const { data, error } = await api.get<{ items: ReviewItem[]; total: number }>(`/api/imports/review/queue?${params.toString()}`, { signal });
-      if (error) throw new Error(error);
-      return { items: data!.items, total: data!.total ?? data!.items.length };
+      const params = new URLSearchParams({ status, limit: String(limit) });
+      if (itemType) params.set('itemType', itemType);
+      if (q) params.set('q', q);
+      if (scope.cursor) params.set('cursor', scope.cursor);
+      const { data, error } = await api.get<{ items: ReviewItem[]; total: number; nextCursor: string | null }>(`/api/imports/review/queue?${params}`, { signal });
+      if (error || !data) throw new Error(error || 'Review queue unavailable');
+      return data;
     },
     staleTime: 30 * 1000,
   });
@@ -525,12 +541,12 @@ export function useUpdateReviewItem() {
     retry: false,
     onMutate: () => ({ actorId: currentActor(queryClient) }),
     mutationFn: async ({ id, status, options }: { id: number; status: 'approved' | 'rejected'; options?: ArtistAddOptions }) => {
-      const { data, error } = await api.put<Partial<UndoDecisionResponse> & { success?: boolean }>(`/api/imports/review/${id}`, { status, ...options });
+      const { data, error, details } = await api.put<ReviewAcquisitionResponse>(`/api/imports/review/${id}`, { status, ...options });
+      if (status === 'approved' && (error || data?.success !== true)) throw new ReviewAcquisitionError(error || data?.outcomes?.[0]?.message || 'Review acquisition was not confirmed', data?.outcomes ?? (details as ReviewAcquisitionResponse | undefined)?.outcomes);
       if (error) throw new Error(error);
-      if (status === 'approved' && data?.success !== true) throw new Error('Review acquisition was not confirmed');
       return data;
     },
-    onSuccess: (_data, _input, context) => {
+    onSettled: (_data, _error, _input, context) => {
       if (context?.actorId !== currentActor(queryClient)) return;
       queryClient.invalidateQueries({ queryKey: ['review'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
@@ -545,11 +561,12 @@ export function useBulkUpdateReview() {
     retry: false,
     onMutate: () => ({ actorId: currentActor(queryClient) }),
     mutationFn: async ({ ids, status, options }: { ids: number[]; status: 'approved' | 'rejected'; options?: ArtistAddOptions }) => {
-      const { data, error } = await api.post<Partial<UndoDecisionResponse> & { success?: boolean; addedIds?: number[]; failedIds?: number[]; failed?: number }>('/api/imports/review/bulk', { ids, status, ...options });
+      const { data, error, details } = await api.post<ReviewAcquisitionResponse>('/api/imports/review/bulk', { ids, status, ...options });
+      if (error && status === 'approved') throw new ReviewAcquisitionError(error, (details as ReviewAcquisitionResponse | undefined)?.outcomes);
       if (error) throw new Error(error);
       return data;
     },
-    onSuccess: (_data, _input, context) => {
+    onSettled: (_data, _error, _input, context) => {
       if (context?.actorId !== currentActor(queryClient)) return;
       queryClient.invalidateQueries({ queryKey: ['review'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
