@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useAuth, safeReturnTo } from '@/lib/auth';
 import { api } from '@/lib/api';
@@ -14,6 +14,7 @@ import MonitorPlay from 'lucide-react/dist/esm/icons/monitor-play';
 import KeyRound from 'lucide-react/dist/esm/icons/key-round';
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
 import LogIn from 'lucide-react/dist/esm/icons/log-in';
+import { PageHeader } from '@/components/layout/page-header';
 import { APP_VERSION } from '@/lib/constants';
 
 function LoginPageContent() {
@@ -63,30 +64,14 @@ function LoginPageContent() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4 relative overflow-hidden">
-      {/* Warm radial gradient background */}
-      <div className="absolute inset-0 bg-gradient-radial from-primary/5 via-transparent to-transparent" aria-hidden="true" />
-      {/* Subtle concentric ring pattern */}
-      <div
-        className="absolute inset-0 opacity-[0.03]"
-        style={{
-          backgroundImage: 'repeating-radial-gradient(circle at 50% 50%, transparent 0, transparent 40px, currentColor 40px, currentColor 41px)',
-        }}
-        aria-hidden="true"
-      />
-      <Card className="relative w-full max-w-md border-t-2 border-t-primary">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xl">
-            M
-          </div>
-          <CardTitle className="text-2xl">Welcome back</CardTitle>
-          <CardDescription>
-            Sign in to Mixarr
-          </CardDescription>
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <PageHeader title="Sign in to Mixarr" />
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4" action="/login" method="POST">
             {error && (
-              <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+              <div role="alert" className="rounded-button bg-status-error-surface p-3 text-sm text-status-error">
                 {error}
               </div>
             )}
@@ -125,6 +110,8 @@ function LoginPageContent() {
                 />
                 <button
                   type="button"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
@@ -166,7 +153,7 @@ function LoginPageContent() {
                       </svg>
                     )}
                     {provider.type === 'plex' && (
-                      <MonitorPlay className="w-5 h-5 mr-2 text-orange-500" />
+                      <MonitorPlay className="w-5 h-5 mr-2 text-foreground" />
                     )}
                     {provider.type === 'ldap' && (
                       <KeyRound className="w-5 h-5 mr-2" />
@@ -185,7 +172,7 @@ function LoginPageContent() {
           )}
         </CardContent>
         <div className="pb-4 text-center">
-          <span className="text-xs text-muted-foreground">v{APP_VERSION}</span>
+          <span className="font-mono text-xs text-muted-foreground">v{APP_VERSION}</span>
         </div>
       </Card>
     </div>

@@ -390,20 +390,20 @@ export function SSOSettings() {
 
                   {/* Google OAuth Callback URL Info */}
                   {config.type === 'google' && (
-                    <div className="rounded-container bg-amber-50 dark:bg-amber-950/50 p-3 text-sm">
-                      <p className="font-medium text-amber-900 dark:text-amber-100">OAuth Redirect URI</p>
-                      <p className="mt-1 text-amber-800 dark:text-amber-200">
+                    <div className="rounded-button border bg-muted p-3 text-sm">
+                      <p className="font-medium">OAuth Redirect URI</p>
+                      <p className="mt-1 text-muted-foreground">
                         Add this redirect URI in your{' '}
                         <a
                           href="https://console.cloud.google.com/apis/credentials"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="underline hover:no-underline"
+                          className="text-link underline hover:no-underline"
                         >
                           Google Cloud Console
                         </a>:
                       </p>
-                      <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
+                      <code className="mt-2 block rounded-button bg-background px-2 py-1 font-mono text-xs break-all">
                         {baseUrl ? `${baseUrl}/api/auth/sso/google/callback` : 'Configure Base URL in Global Settings first'}
                       </code>
                     </div>
@@ -411,12 +411,12 @@ export function SSOSettings() {
 
                   {/* SAML Callback URL Info */}
                   {config.type === 'saml' && (
-                    <div className="rounded-container bg-amber-50 dark:bg-amber-950/50 p-3 text-sm">
-                      <p className="font-medium text-amber-900 dark:text-amber-100">SAML Assertion Consumer Service URL</p>
-                      <p className="mt-1 text-amber-800 dark:text-amber-200">
+                    <div className="rounded-button border bg-muted p-3 text-sm">
+                      <p className="font-medium">SAML Assertion Consumer Service URL</p>
+                      <p className="mt-1 text-muted-foreground">
                         Configure this ACS URL in your Identity Provider:
                       </p>
-                      <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
+                      <code className="mt-2 block rounded-button bg-background px-2 py-1 font-mono text-xs break-all">
                         {baseUrl ? `${baseUrl}/api/auth/sso/saml/callback` : 'Configure Base URL in Global Settings first'}
                       </code>
                     </div>
@@ -424,12 +424,12 @@ export function SSOSettings() {
 
                   {/* OIDC Callback URL Info */}
                   {config.type === 'oidc' && (
-                    <div className="rounded-container bg-amber-50 dark:bg-amber-950/50 p-3 text-sm">
-                      <p className="font-medium text-amber-900 dark:text-amber-100">OIDC Redirect URI</p>
-                      <p className="mt-1 text-amber-800 dark:text-amber-200">
+                    <div className="rounded-button border bg-muted p-3 text-sm">
+                      <p className="font-medium">OIDC Redirect URI</p>
+                      <p className="mt-1 text-muted-foreground">
                         Register this redirect URI with your OpenID Connect provider:
                       </p>
-                      <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
+                      <code className="mt-2 block rounded-button bg-background px-2 py-1 font-mono text-xs break-all">
                         {baseUrl ? `${baseUrl}/api/auth/sso/oidc/callback` : 'Configure Base URL in Global Settings first'}
                       </code>
                     </div>

@@ -52,7 +52,6 @@ export function ExternalLinks({
       name: 'Spotify',
       url: `https://open.spotify.com/artist/${spotifyId}`,
       icon: SpotifyIcon,
-      color: 'text-green-500 hover:text-green-400',
     });
   }
   
@@ -62,7 +61,6 @@ export function ExternalLinks({
       name: 'Last.fm',
       url: lastfmUrl || `https://www.last.fm/music/${encodeURIComponent(artistName)}`,
       icon: LastfmIcon,
-      color: 'text-red-500 hover:text-red-400',
     });
   }
   
@@ -71,7 +69,6 @@ export function ExternalLinks({
       name: 'MusicBrainz',
       url: `https://musicbrainz.org/artist/${mbid}`,
       icon: MusicBrainzIcon,
-      color: 'text-orange-500 hover:text-orange-400',
     });
   }
   
@@ -88,8 +85,7 @@ export function ExternalLinks({
           title={`Open on ${link.name}`}
           className={cn(
             padding,
-            "rounded hover:bg-muted transition-colors",
-            link.color
+            "rounded-button text-link hover:bg-muted transition-colors"
           )}
           onClick={(e) => e.stopPropagation()}
         >

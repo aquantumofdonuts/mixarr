@@ -9,11 +9,8 @@ import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
-import AtSign from 'lucide-react/dist/esm/icons/at-sign';
 import KeyRound from 'lucide-react/dist/esm/icons/key-round';
 import LogOut from 'lucide-react/dist/esm/icons/log-out';
-import Shield from 'lucide-react/dist/esm/icons/shield';
-import User from 'lucide-react/dist/esm/icons/user';
 
 export default function MyProfilePage() {
   const { user, logout } = useAuth();
@@ -87,10 +84,9 @@ export default function MyProfilePage() {
       />
 
       {/* Profile Info Card */}
-      <Card className="mb-6">
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <User className="h-5 w-5" />
             Profile Information
           </CardTitle>
           <CardDescription>Your account details</CardDescription>
@@ -99,9 +95,9 @@ export default function MyProfilePage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <p className="text-sm text-muted-foreground flex items-center gap-1">
-                <AtSign className="h-3 w-3" /> Username
+                Username
               </p>
-              <p className="font-medium">{user?.username}</p>
+              <p className="font-mono">{user?.username}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Display Name</p>
@@ -109,7 +105,7 @@ export default function MyProfilePage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground flex items-center gap-1">
-                <Shield className="h-3 w-3" /> Role
+                Role
               </p>
               <p className="font-medium capitalize">{user?.role}</p>
             </div>
@@ -123,10 +119,9 @@ export default function MyProfilePage() {
       </Card>
 
       {/* Security Card */}
-      <Card className="mb-6">
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <KeyRound className="h-5 w-5" />
             Security
           </CardTitle>
           <CardDescription>Manage your password and security settings</CardDescription>
@@ -143,13 +138,12 @@ export default function MyProfilePage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <LogOut className="h-5 w-5" />
             Session
           </CardTitle>
           <CardDescription>Manage your current session</CardDescription>
         </CardHeader>
         <CardContent>
-          <Button variant="destructive" onClick={logout}>
+          <Button variant="outline" onClick={logout}>
             <LogOut className="h-4 w-4 mr-2" />
             Sign Out
           </Button>
@@ -164,24 +158,24 @@ export default function MyProfilePage() {
       >
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Current Password</label>
             <Input
+              label="Current Password"
               type="password"
               value={passwordForm.current}
               onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
             />
           </div>
           <div>
-            <label className="text-sm font-medium">New Password</label>
             <Input
+              label="New Password"
               type="password"
               value={passwordForm.new}
               onChange={(e) => setPasswordForm({ ...passwordForm, new: e.target.value })}
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Confirm New Password</label>
             <Input
+              label="Confirm New Password"
               type="password"
               value={passwordForm.confirm}
               onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
@@ -204,16 +198,16 @@ export default function MyProfilePage() {
       >
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Display Name</label>
             <Input
+              label="Display Name"
               value={profileForm.displayName}
               onChange={(e) => setProfileForm({ ...profileForm, displayName: e.target.value })}
               placeholder="Your display name"
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Email (optional)</label>
             <Input
+              label="Email (optional)"
               type="email"
               value={profileForm.email}
               onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
