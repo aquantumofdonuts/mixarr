@@ -12,14 +12,14 @@
 
 ## 🔴 OPEN SECURITY FINDINGS (from the 2026-07-04 adversarial review)
 
-The 2026-10-07 snapshot identified six merge-blocking items from [plans/2026-07-04-adversarial-code-review.md](plans/2026-07-04-adversarial-code-review.md). Item 5 is now repaired and verified on the local `feat/music-catalog-ux` branch; it has not been integrated or released. The other findings remain open:
+The 2026-10-07 snapshot identified six merge-blocking items from [plans/2026-07-04-adversarial-code-review.md](plans/2026-07-04-adversarial-code-review.md). Item 5 and the user-facing ownership portion of item 6 are repaired and verified on the local `feat/music-catalog-ux` branch; they have not been integrated or released. The remaining findings stay open:
 
 1. SAML accepts unsigned assertions and an empty IdP certificate — `apps/api/src/auth/strategies/saml.ts`
 2. Plex `restrictToServerId` is declared but never enforced — `apps/api/src/auth/strategies/plex.ts`
 3. No session regeneration on login (session fixation) — `apps/api/src/auth/passport.ts` and every `logIn` path
 4. Connection config is an open record (`z.record(z.unknown())`), bypassing per-type schemas; SSRF surface on test endpoints — `apps/api/src/schemas/connection.ts`, `apps/api/src/routes/connections.ts`
 5. **Resolved locally:** Result rejection reads by result ID, subscription ID, and owner, then conditionally writes with that ownership scope and the expected status/revision — `apps/api/src/routes/subscriptions.ts`. T07 implemented the fix; T15 reverified foreign owners (including admins), foreign result bindings, active claims, and competing decisions in `tests/api/subscription-decisions.test.ts`. Approval uses the same ownership boundary.
-6. slskd routes have no user scoping and the webhook sits behind session auth — `apps/api/src/routes/slskd.ts`
+6. **Partially resolved locally:** T25 scopes user-facing slskd search/download operations to owned connections (administrators retain access), rejects foreign tracking mutations before effects, and retries through the record's exact active connection. Independent spec/quality reviews passed actual router/auth tests with mocked external boundaries. The webhook still sits behind session auth and uses unscoped configuration/record matching; those findings remain open — `apps/api/src/routes/slskd.ts`.
 
 Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from that review have shipped.
 
@@ -34,7 +34,7 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ## UI/UX catalog redesign (in progress)
 
-**Status:** T01–T24 and T31 implemented and independently reviewed on local branch `feat/music-catalog-ux`. Settings save scopes/dirty navigation, the admin Constellation preferences and read-only UTC budget usage, and configured-service rows with independent authorization/session-test/server-timestamp state are wired. Fresh root verification passed 741 web tests, 2506 API tests (23 skipped), 114 production Chromium checks, typechecks, shared build, uncached lint and production web build. Existing lint/build/start warnings remain. The owner-approved hard 300-node contract remains binding for pending T32; automatic index refresh remains explicitly unavailable despite its saved preference. Active tenth checkpoint: T25 → T26 → T32, beginning with downloads and its planned ownership repair; that repair is not yet verified. Human visual acceptance, whole-plan completion audit and full review remain pending; see the execution checkpoint for evidence and limitations.
+**Status:** T01–T25 and T31 implemented and independently reviewed on local branch `feat/music-catalog-ux`. Settings save scopes/dirty navigation, the admin Constellation preferences and read-only UTC budget usage, and configured-service rows with independent authorization/session-test/server-timestamp state are wired. Ninth-checkpoint root verification passed 741 web tests, 2506 API tests (23 skipped), 114 production Chromium checks, typechecks, shared build, uncached lint and production web build. Existing lint/build/start warnings remain. The owner-approved hard 300-node contract remains binding for pending T32; automatic index refresh remains explicitly unavailable despite its saved preference. Active tenth checkpoint: T25 → T26 → T32. T25 passed independent spec/quality gates, including both isolated API suites (34 tests), 17 hook tests and ten Chromium cases; T26 implementation is active. Whole-checkpoint root verification remains due after T26/T32. Human visual acceptance, whole-plan completion audit and full review remain pending; see the execution checkpoint for evidence and limitations.
 **Scope:** R01–R28/I01: the 25 UI/UX review recommendations, a distinctive music-catalog identity with the user-confirmed compact artwork-thumbnail feed, and the three October 8 Constellation follow-ups.
 
 - [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
