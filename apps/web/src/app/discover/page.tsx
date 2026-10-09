@@ -71,7 +71,10 @@ export default function DiscoverPage() {
     if (actor === null || storedSeeds.actor !== actor) return;
     // Keep bounded previously chosen identities so Back can restore an off-page seed.
     const saved = Object.fromEntries([...Object.entries(storedSeeds.names).filter(([id]) => !seedIds.includes(id)), ...seedIds.filter(id => seedNames[id]).map(id => [id, seedNames[id]])].slice(-MAX_SAVED_SEEDS));
-    try { sessionStorage.setItem(`mixarr:discovery-seeds:${actor}`, JSON.stringify(saved)); }
+    const encoded = JSON.stringify(saved);
+    // Direct-link resolutions must remain available after library filters replace the page.
+    setStoredSeeds(previous => previous !== storedSeeds || JSON.stringify(previous.names) === encoded ? previous : { actor, names: saved });
+    try { sessionStorage.setItem(`mixarr:discovery-seeds:${actor}`, encoded); }
     catch { /* ponytail: session storage is optional; canonical seeds stay in the URL. */ }
   }, [actor, storedSeeds, seedIds, seedNames]);
 

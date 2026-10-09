@@ -214,6 +214,26 @@ describe('discovery flow', () => {
     expect(stored.invalid).toBeUndefined();
     expect(stored['00000000-0000-4000-8000-000000000109']).toBeUndefined();
   });
+  it('keeps a directly linked seed resolved when library filters exclude it and after reload', async () => {
+    navigation.query = `seed=${ids[0]}`;
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (url, options) => String(url).startsWith('/api/discover/library?') && new URL(String(url), 'https://mixarr.invalid').searchParams.get('search') === 'Beta' ? json({ artists: [{ id: 2, name: 'Seed Beta', foreignArtistId: ids[1] }], pagination: { page: 1, total: 1, totalPages: 1 } }) : original(url, options));
+    const mounted = mount();
+    await screen.findAllByRole('link', { name: 'Same name' });
+    expect(JSON.parse(sessionStorage.getItem('mixarr:discovery-seeds:7')!)[ids[0]]).toBe('Seed Alpha');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search library seeds' }), { target: { value: 'Beta' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search library' }));
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Use Seed Alpha as seed' })).toBeNull());
+    expect(screen.getByRole('button', { name: 'Remove seed Seed Alpha' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Find similar artists' })).toBeEnabled();
+    expect(screen.queryByText(/Unresolved seed ID:/)).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem('mixarr:discovery-seeds:7')!)[ids[0]]).toBe('Seed Alpha');
+    mounted.unmount(); mount();
+    await screen.findAllByRole('link', { name: 'Same name' });
+    expect(screen.getByRole('button', { name: 'Remove seed Seed Alpha' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Find similar artists' })).toBeEnabled();
+    expect(similarCalls().map(call => JSON.parse(String(call[1]?.body)).artistNames)).toEqual([['Seed Alpha'], ['Seed Alpha']]);
+  });
   it('never carries previous recommendation rows across actors', async () => {
     navigation.query = `seed=${ids[0]}`;
     const mounted = mount();
