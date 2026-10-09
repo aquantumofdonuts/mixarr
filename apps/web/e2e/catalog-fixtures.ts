@@ -18,7 +18,7 @@ export const catalogFeed: FeedItem[] = [
 // ponytail: generate the full dataset; the mock applies the API's actual page limit.
 export const catalogQueue = Array.from({ length: 520 }, (_, index) => ({
   id: index + 1, userId: CATALOG_USER.id, artistName: `Queue Artist ${String(index + 1).padStart(3, '0')}`,
-  albumName: null, releaseYear: null, spotifyId: null, mbid: index % 3 ? ARTIST_IDS[index % 2] : null,
+  albumName: null as string | null, releaseYear: null, spotifyId: null, mbid: index % 3 ? ARTIST_IDS[index % 2] : null,
   source: 'Weekly discoveries', status: 'pending', itemType: 'artist', createdAt: recordedAt, imageUrl: null,
 }));
 
@@ -38,7 +38,7 @@ export const test = base.extend<CatalogFixtures>({
     let authenticated = catalogAuthenticated;
     const user = { ...CATALOG_USER, role: catalogRole };
     const items = catalogScenario === 'empty' ? [] : [...catalogFeed];
-    const queue = catalogScenario === 'empty' ? [] : [...catalogQueue];
+    const queue = catalogScenario === 'empty' ? [] : catalogQueue.map(item => ({ ...item }));
     const added = new Set<string>();
     const dismissed = new Map<string, FeedItem>();
     const subscriptionResults = Array.from({ length: 53 }, (_, index) => ({
@@ -117,8 +117,27 @@ export const test = base.extend<CatalogFixtures>({
           case '/api/connections/has-lidarr': return reply({ hasLidarr: true });
           case '/api/connections': return reply({ connections: catalogScenario === 'empty' ? [] : [{ id: 1, userId: user.id, type: 'lidarr', name: 'Catalog Lidarr', isActive: true, lastTest: null, createdAt: recordedAt }] });
           case '/api/imports/review/queue': {
-            const matches = queue.filter(item => item.status === (url.searchParams.get('status') || 'pending') && (!url.searchParams.has('itemType') || item.itemType === url.searchParams.get('itemType')));
-            return reply({ items: matches.slice(0, Number(url.searchParams.get('limit') || 50)), total: matches.length });
+            const status = url.searchParams.get('status') || 'pending';
+            const itemType = url.searchParams.get('itemType');
+            const q = (url.searchParams.get('q') || '').trim();
+            const limit = Number(url.searchParams.get('limit') || 50);
+            const scope = { actor: user.id, admin: user.role === 'admin', status, itemType, q };
+            if (!Number.isInteger(limit) || limit < 1 || limit > 100 || q.length > 120) return reply({ error: 'Invalid queue query' }, 400);
+            const matches = queue.filter(item => (scope.admin || item.userId === user.id) && item.status === status && (!itemType || item.itemType === itemType) && (!q || item.artistName.toLowerCase().includes(q.toLowerCase()) || item.albumName?.toLowerCase().includes(q.toLowerCase())))
+              .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id);
+            let cursor: { id: number; createdAt: string } | null = null;
+            if (url.searchParams.has('cursor')) {
+              try {
+                const value = JSON.parse(Buffer.from(url.searchParams.get('cursor')!, 'base64url').toString('utf8'));
+                if (value.v !== 1 || !Number.isSafeInteger(value.id) || value.id <= 0 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.createdAt) || Object.entries(scope).some(([key, expected]) => value[key] !== expected)) throw new Error('Invalid cursor');
+                cursor = value;
+              } catch { return reply({ error: 'Invalid review cursor', code: 'INVALID_CURSOR' }, 400); }
+            }
+            const rows = matches.filter(item => !cursor || item.createdAt < cursor.createdAt || (item.createdAt === cursor.createdAt && item.id < cursor.id));
+            const items = rows.slice(0, limit);
+            const last = items.at(-1);
+            const nextCursor = rows.length > limit && last ? Buffer.from(JSON.stringify({ v: 1, id: last.id, createdAt: last.createdAt, ...scope })).toString('base64url') : null;
+            return reply({ items, total: matches.length, nextCursor });
           }
           case '/api/slskd/downloads': return reply(catalogScenario === 'empty' ? [] : [{ id: 1, connectionId: 1, username: 'fixture-peer', artistName: 'Common Name', filename: 'record.flac', fileSize: 1024, status: 'failed', error: 'Fixture transfer interrupted', createdAt: recordedAt, updatedAt: recordedAt }]);
           case '/api/settings':

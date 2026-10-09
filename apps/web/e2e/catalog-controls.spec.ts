@@ -34,7 +34,7 @@ test('catalog navigation uses native destinations', async ({ catalogPage: page }
   await expect(page.getByRole('heading', { name: 'Search', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Review Queue', exact: true }).click();
   await expect(page).toHaveURL(/\/queue$/);
-  await expect(page.getByText('Queue Artist 001', { exact: true })).toBeVisible();
+  await expect(page.getByText('Queue Artist 520', { exact: true })).toBeVisible();
 });
 
 test('dashboard record labels distinguish owner counts from broader administrative lists', async ({ catalogPage: page }) => {
@@ -45,7 +45,7 @@ test('dashboard record labels distinguish owner counts from broader administrati
   await expect(summary.getByRole('link', { name: /Results marked added/ })).toHaveCount(0);
   await summary.getByRole('link', { name: 'Open all review records', exact: true }).click();
   await expect(page).toHaveURL(/\/queue$/);
-  await expect(page.getByText('Queue Artist 001', { exact: true })).toBeVisible();
+  await expect(page.getByText('Queue Artist 520', { exact: true })).toBeVisible();
 });
 
 

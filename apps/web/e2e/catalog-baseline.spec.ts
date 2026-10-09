@@ -19,7 +19,7 @@ for (const [path, heading] of routes) {
       await expect(page.getByRole('heading', { name: heading, exact: true, level: 1 })).toBeVisible();
       await waitForTheme(page, theme === 'system' ? 'dark' : theme);
       if (path === '/') await expect(page.getByText('Common Name', { exact: true })).toHaveCount(2);
-      if (path === '/queue') await expect(page.getByText('Queue Artist 001', { exact: true })).toBeVisible();
+      if (path === '/queue') await expect(page.getByText('Queue Artist 520', { exact: true })).toBeVisible();
       await page.screenshot({ path: `${evidence}/${heading.toLowerCase().replaceAll(' ', '-')}-${theme}.png`, fullPage: false });
     }
   });
