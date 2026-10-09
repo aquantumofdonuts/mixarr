@@ -38,6 +38,8 @@ vi.mock('../../src/middleware/auth.js', () => ({
   }),
 }));
 
+const { mockGetLabelArtists } = vi.hoisted(() => ({ mockGetLabelArtists: vi.fn() }));
+
 // Mock MusicBrainz service - returns results
 const mockMusicBrainzArtists = [
   { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Pink Floyd', country: 'GB', type: 'Group', disambiguation: 'English rock band' },
@@ -46,6 +48,7 @@ const mockMusicBrainzArtists = [
 
 vi.mock('../../src/services/musicbrainz.js', () => ({
   MusicBrainzService: class MusicBrainzService {
+    getLabelArtists = mockGetLabelArtists;
     async searchArtist() {
       return mockMusicBrainzArtists;
     }
@@ -142,6 +145,7 @@ import { searchRouter } from '../../src/routes/search.js';
 import prisma from '../../src/lib/db.js';
 import { LidarrService } from '../../src/services/lidarr.js';
 import { multiSourceSearch, resolveMbid } from '../../src/services/multi-search.js';
+import { getArtistImages } from '../../src/services/artist-images.js';
 
 const app = express();
 app.use(express.json());
@@ -364,4 +368,62 @@ describe('Search API - No Lidarr Mode', () => {
     vi.mocked(prisma.connection.findFirst).mockResolvedValue(null);
   });
 
+});
+
+
+describe('Label release traversal through the search route', () => {
+  const labelId = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+  const artistId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const release = { 'artist-credit': [{ artist: { id: artistId, name: 'Repeated artist', 'sort-name': 'Artist, Repeated' } }] };
+  beforeEach(() => {
+    mockGetLabelArtists.mockReset();
+    vi.mocked(getArtistImages).mockReset().mockResolvedValue(new Map());
+  });
+  it('advances by raw releases and reports the provider total, including repeated artists', async () => {
+    mockGetLabelArtists.mockResolvedValueOnce({ releases: [release, release], count: 5 });
+    const response = await request(app).get(`/api/search/label/${labelId}/artists?limit=2&offset=0`);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ artists: [{ id: artistId, name: 'Repeated artist', sortName: 'Artist, Repeated', imageUrl: null }], releasesProcessed: 2, totalReleases: 5, nextReleaseOffset: 2 });
+    expect(mockGetLabelArtists).toHaveBeenCalledWith(labelId, 2, 0);
+  });
+  it('advances pages without artist credits and ends at the last raw release', async () => {
+    mockGetLabelArtists.mockResolvedValueOnce({ releases: [{}, {}], count: 5 }).mockResolvedValueOnce({ releases: [release], count: 5 });
+    const empty = await request(app).get(`/api/search/label/${labelId}/artists?limit=2&offset=2`);
+    expect(empty.body).toEqual({ artists: [], releasesProcessed: 2, totalReleases: 5, nextReleaseOffset: 4 });
+    const final = await request(app).get(`/api/search/label/${labelId}/artists?limit=2&offset=4`);
+    expect(final.body.nextReleaseOffset).toBeNull();
+    expect(final.body.releasesProcessed).toBe(1);
+  });
+  it('treats an empty provider page before its total as recoverable, rather than finished', async () => {
+    mockGetLabelArtists.mockResolvedValueOnce({ releases: [], count: 5 });
+    const response = await request(app).get(`/api/search/label/${labelId}/artists?offset=2`);
+    expect(response.status).toBe(502);
+    expect(response.body).not.toHaveProperty('nextReleaseOffset');
+  });
+  it('preserves valid artists when optional images fail', async () => {
+    mockGetLabelArtists.mockResolvedValueOnce({ releases: [release], count: 1 });
+    vi.mocked(getArtistImages).mockRejectedValueOnce(new Error('private provider detail'));
+    const response = await request(app).get(`/api/search/label/${labelId}/artists`);
+    expect(response.status).toBe(200);
+    expect(response.body.artists[0].imageUrl).toBeNull();
+  });
+  it('sanitizes provider failures and allows a retry at the same release offset', async () => {
+    mockGetLabelArtists.mockRejectedValueOnce(new Error('secret upstream address')).mockResolvedValueOnce({ releases: [release], count: 3 });
+    const failed = await request(app).get(`/api/search/label/${labelId}/artists?offset=2`);
+    expect(failed.status).toBe(500);
+    expect(JSON.stringify(failed.body)).not.toContain('secret');
+    const retried = await request(app).get(`/api/search/label/${labelId}/artists?offset=2`);
+    expect(retried.status).toBe(200);
+    expect(mockGetLabelArtists.mock.calls.map(call => call[2])).toEqual([2, 2]);
+  });
+  it.each(['limit=101', 'limit=0', 'limit=1x', 'offset=-1', 'offset=2.5', 'offset=9007199254740992', 'limit=2&limit=3'])('rejects invalid paging %s before calling the provider', async query => {
+    const response = await request(app).get(`/api/search/label/${labelId}/artists?${query}`);
+    expect(response.status).toBe(400);
+    expect(mockGetLabelArtists).not.toHaveBeenCalled();
+  });
+  it('rejects an invalid label identity before calling the provider', async () => {
+    const response = await request(app).get('/api/search/label/not-a-uuid/artists');
+    expect(response.status).toBe(400);
+    expect(mockGetLabelArtists).not.toHaveBeenCalled();
+  });
 });

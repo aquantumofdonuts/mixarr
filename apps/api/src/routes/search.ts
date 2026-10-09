@@ -3,6 +3,7 @@ import { DecisionError } from '../lib/decision.js';
 import { validateBody } from '../middleware/validate.js';
 import { Router } from 'express';
 import { z } from 'zod';
+import type { LabelArtistPage } from '@mixarr/shared-types';
 import { ArtistDetailInputError, ArtistDetailService } from '../services/artist-detail.js';
 import { readBeforeDeadline } from '../lib/acquisition-deadline.js';
 import prisma from '../lib/db.js';
@@ -1248,48 +1249,61 @@ searchRouter.get('/artist/:mbid/releases', async (req, res) => {
   }
 });
 
-// Get label artists
+// Label traversal counts releases, not the artists extracted from each release page.
 searchRouter.get('/label/:mbid/artists', async (req, res) => {
+  const mbid = artistIdentity.safeParse(req.params.mbid);
+  const query = releaseQuery.safeParse(req.query);
+  if (!mbid.success || !query.success) {
+    res.status(400).json({ error: 'Invalid label identity or release paging', code: 'INVALID_INPUT' });
+    return;
+  }
+  const cancellation = new AbortController();
+  const signal = AbortSignal.any([AbortSignal.timeout(20_000), cancellation.signal]);
+  const close = () => { if (!res.writableEnded) cancellation.abort(); };
+  res.on('close', close);
   try {
-    const { mbid } = req.params;
-    const { limit = '100', offset = '0' } = req.query;
-
     const mb = new MusicBrainzService();
-    const result = await mb.getLabelArtists(mbid, parseInt(limit as string), parseInt(offset as string));
-    
-    // Extract unique artists from releases
-    const artistMap = new Map<string, { id: string; name: string; sortName: string }>();
+    const result = await readBeforeDeadline(mb.getLabelArtists(mbid.data, query.data.limit, query.data.offset), signal);
+    if (!Number.isSafeInteger(result.count) || result.count < 0 || (!result.releases.length && query.data.offset < result.count)) {
+      res.status(502).json({ error: 'Label release page unavailable. Retry this page.' });
+      return;
+    }
+    const artistMap = new Map<string, LabelArtistPage['artists'][number]>();
     for (const release of result.releases) {
       for (const credit of release['artist-credit'] || []) {
-        if (credit.artist && !artistMap.has(credit.artist.id)) {
-          artistMap.set(credit.artist.id, {
-            id: credit.artist.id,
+        const identity = artistIdentity.safeParse(credit.artist?.id);
+        if (identity.success && typeof credit.artist?.name === 'string' && credit.artist.name.trim() && !artistMap.has(identity.data)) {
+          artistMap.set(identity.data, {
+            id: identity.data,
             name: credit.artist.name,
-            sortName: credit.artist['sort-name']
+            sortName: typeof credit.artist['sort-name'] === 'string' ? credit.artist['sort-name'] : credit.artist.name,
+            imageUrl: null,
           });
         }
       }
     }
-    
-    const artists = Array.from(artistMap.values());
-    
-    // Fetch images from Deezer
-    const artistNames = artists.map(a => a.name);
-    const imageMap = await getArtistImages(artistNames);
-    
-    const enrichedArtists = artists.map(artist => ({
-      ...artist,
-      imageUrl: imageMap.get(artist.name) || null
-    }));
-    
-    res.json({ 
-      artists: enrichedArtists,
-      count: enrichedArtists.length 
-    });
+    const artists = [...artistMap.values()];
+    // ponytail: artwork is optional. An image outage must not discard a valid release page.
+    try {
+      const imageMap = await readBeforeDeadline(getArtistImages(artists.map(artist => artist.name)), signal);
+      artists.forEach(artist => { artist.imageUrl = imageMap.get(artist.name) || null; });
+    } catch (error) {
+      log.warn('Label artist images unavailable:', error);
+    }
+    const nextOffset = query.data.offset + result.releases.length;
+    const page: LabelArtistPage = {
+      artists,
+      releasesProcessed: result.releases.length,
+      totalReleases: result.count,
+      nextReleaseOffset: nextOffset < result.count ? nextOffset : null,
+    };
+    if (!cancellation.signal.aborted) res.json(page);
   } catch (error) {
-    res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Failed to get label artists' 
-    });
+    if (cancellation.signal.aborted) return;
+    log.error('Label release lookup failed:', error);
+    res.status(signal.aborted ? 504 : 500).json({ error: 'Label artists unavailable. Retry this page.' });
+  } finally {
+    res.off('close', close);
   }
 });
 
