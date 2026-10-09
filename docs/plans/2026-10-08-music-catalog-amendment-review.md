@@ -1,6 +1,6 @@
 # Constellation amendment preflight
 
-**State:** PASS — owner hard-cap decision recorded and final independent amendment re-review cleared October 9, 2026. Routine dispositions below are accepted for implementation, not implemented or runtime verified. T22 completed with independent spec/quality PASS and fresh web/production verification; T23/plan batch F may now proceed under the binding contract below.
+**State:** PASS — owner hard-cap decision recorded and final independent amendment re-review cleared October 9, 2026. T31 dispositions below are now implemented with independent spec/quality PASS at `6c8471e` and focused/root checks recorded in the execution checkpoint. T32 dispositions, including the hard cap, remain pending. Fixture and isolated API tests do not establish live Redis/provider/deployment acceptance.
 
 **Scope:** R26–R28/T31–T32 in the authoritative main-checkout design and plan, read against feature baseline `8ee27b0`. The main checkout's original uncommitted specification edits remain untouched. This separate execution addendum records review findings and dispositions; it does not replace the full design or claim completion.
 
@@ -39,3 +39,5 @@ At the T22 checkpoint, no owner answer had arrived. T23 and T31 were not started
 October 9 continuation: the owner explicitly selected the hard cap. Final amendment review must assess the effective contract above together with every routine disposition before T23 begins. The previous unanswered checkpoint is historical, not an active request.
 
 Final independent contract re-review: **PASS**, October 9, 2026 (`/root/constellation_contract_final_review`). The reviewer verified the owner priority, mandatory identity preservation, deterministic two-pass pruning and surviving object references, plus every routine disposition against current source. No additional blocking contradictions or required scope corrections remain. This clears T23/plan batch F; it does not claim that T31/T32 are implemented or provider/runtime verified.
+
+T31 execution update: final independent SPEC and Four-Lens QUALITY PASS at `6c8471e`. The seven-field admin section, same-key UTC usage read, actual bounded route/worker consumers, positive requested path normalization, and explicit stored-only refresh preference are wired. Path help preserves and describes interesting mode's existing two-hop allowance; the nominal route option ceiling stays 10. Root verification and review corrections are recorded in the execution checkpoint. This does not complete T32 or the full redesign.
