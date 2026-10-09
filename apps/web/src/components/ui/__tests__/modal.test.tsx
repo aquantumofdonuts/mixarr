@@ -32,6 +32,52 @@ describe('modal lifecycle', () => {
     await user.tab();
     expect(screen.getByLabelText('Artist name')).toHaveFocus();
   });
+  it('includes the native first summary in the Tab trap instead of wrapping it to Close', () => {
+    const { container } = render(<Modal isOpen onClose={vi.fn()} title="Disclosures">
+      <details open><summary>Search</summary><input aria-label="Loaded artist search" /></details>
+      <ModalFooter><button>Add selected</button></ModalFooter>
+    </Modal>);
+    const summary = container.querySelector('summary')!;
+    summary.focus();
+    const forward = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    summary.dispatchEvent(forward);
+    expect(forward.defaultPrevented).toBe(false);
+    expect(summary).toHaveFocus();
+    screen.getByRole('button', { name: 'Close' }).focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(screen.getByRole('button', { name: 'Add selected' })).toHaveFocus();
+  });
+  it('excludes controls in closed details while keeping its first summary available', () => {
+    const { container } = render(<Modal isOpen onClose={vi.fn()} title="Collapsed filter">
+      <details><summary>Search</summary><input aria-label="Hidden search" autoFocus aria-invalid="true" /></details>
+    </Modal>);
+    const summary = container.querySelector('summary')!;
+    expect(summary).toHaveFocus();
+    screen.getByRole('button', { name: 'Close' }).focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(summary).toHaveFocus();
+  });
+  it('does not focus invalid controls inside a closed outer disclosure', () => {
+    const { rerender } = render(<Modal isOpen onClose={vi.fn()} title="Nested filter">
+      <details><summary>Outer filter</summary><details open><summary>Inner filter</summary><input aria-label="Hidden invalid field" /></details></details>
+      <ModalFooter><button>Save changes</button></ModalFooter>
+    </Modal>);
+    screen.getByRole('button', { name: 'Save changes' }).focus();
+    rerender(<Modal isOpen onClose={vi.fn()} title="Nested filter">
+      <details><summary>Outer filter</summary><details open><summary>Inner filter</summary><input aria-label="Hidden invalid field" aria-invalid="true" /></details></details>
+      <ModalFooter><button>Save changes</button></ModalFooter>
+    </Modal>);
+    expect(screen.getByRole('button', { name: 'Save changes' })).toHaveFocus();
+  });
+  it('avoids repeated visibility checks for unmarked controls when validation has not changed', () => {
+    const inputs = Array.from({ length: 101 }, (_, index) => <input key={index} aria-label={`Selection ${index}`} type="checkbox" />);
+    const { rerender } = render(<Modal isOpen onClose={vi.fn()} title="Large selection">{inputs}</Modal>);
+    const styles = vi.spyOn(globalThis, 'getComputedStyle');
+    try {
+      rerender(<Modal isOpen onClose={vi.fn()} title="Large selection"><p>Selection updated</p>{inputs}</Modal>);
+      expect(styles.mock.calls.length).toBe(0);
+    } finally { styles.mockRestore(); }
+  });
   it('calls onClose once even if a child animation ends before the old fallback deadline', () => {
     vi.useFakeTimers();
     const onClose = vi.fn();

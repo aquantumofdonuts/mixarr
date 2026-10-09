@@ -20,11 +20,17 @@ const openDialogs: HTMLDivElement[] = [];
 let originalBodyOverflow = '';
 let originalFocus: HTMLElement | null = null;
 
-function focusableElements(dialog: HTMLElement): HTMLElement[] {
-  return [...dialog.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]')]
+function focusableElements(dialog: HTMLElement, invalidOnly = false): HTMLElement[] {
+  return [...dialog.querySelectorAll<HTMLElement>('button, summary, a[href], input, select, textarea, [tabindex]')]
     .filter(element => {
-      if (element.tabIndex < 0 || element.matches(':disabled, input[type="hidden"]') || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+      // Validation updates only need marked controls, not a visibility walk of every row.
+      if (invalidOnly && element.getAttribute('aria-invalid') !== 'true') return false;
+      const nativeSummary = element.tagName === 'SUMMARY' && element.parentElement?.tagName === 'DETAILS' && element.parentElement.querySelector(':scope > summary') === element;
+      if (element.tagName === 'SUMMARY' && !nativeSummary && !element.hasAttribute('tabindex')) return false;
+      if ((element.tabIndex < 0 && !(nativeSummary && !element.hasAttribute('tabindex'))) || element.matches(':disabled, input[type="hidden"]') || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
       for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+        // Closed disclosures hide their content even when computed display remains block.
+        if (ancestor.matches('details:not([open])') && !ancestor.querySelector(':scope > summary')?.contains(element)) return false;
         const style = getComputedStyle(ancestor);
         if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
         if (ancestor === dialog) break;
@@ -106,7 +112,7 @@ export function Modal({ isOpen, onClose, title, description, children, size = 'm
   const lastInvalidField = React.useRef<HTMLElement | null>(null);
   React.useLayoutEffect(() => {
     if (!isOpen || !modalRef.current) { lastInvalidField.current = null; return; }
-    const firstInvalid = focusableElements(modalRef.current).find(element => element.getAttribute('aria-invalid') === 'true') || null;
+    const firstInvalid = focusableElements(modalRef.current, true)[0] || null;
     if (openDialogs[openDialogs.length - 1] === modalRef.current && firstInvalid && firstInvalid !== lastInvalidField.current) firstInvalid.focus();
     lastInvalidField.current = firstInvalid;
   });
