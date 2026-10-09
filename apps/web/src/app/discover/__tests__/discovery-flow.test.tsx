@@ -8,7 +8,8 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/discover', useSearchPar
   const query = useSyncExternalStore(callback => { navigation.listeners.add(callback); return () => navigation.listeners.delete(callback); }, () => navigation.query);
   return new URLSearchParams(query);
 }, useRouter: () => navigation }));
-vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: 7 } }) }));
+const session = vi.hoisted(() => ({ actor: 7 }));
+vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: session.actor } }) }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 vi.mock('@/components/slskd/SearchModal', () => ({ SlskdSearchModal: () => null }));
 const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
@@ -22,7 +23,7 @@ function mount(client = new QueryClient({ defaultOptions: { queries: { retry: fa
 function similarCalls() { return request.mock.calls.filter(([url]) => String(url) === '/api/discover/similar'); }
 function addCalls() { return request.mock.calls.filter(([url]) => String(url) === '/api/discover/add'); }
 beforeEach(() => {
-  sessionStorage.clear(); navigation.query = ''; navigation.push.mockImplementation(navigate); navigation.replace.mockImplementation(navigate); request.mockReset();
+  session.actor = 7; sessionStorage.clear(); navigation.query = ''; navigation.push.mockImplementation(navigate); navigation.replace.mockImplementation(navigate); request.mockReset();
   request.mockImplementation(async (url, options) => {
     const path = String(url);
     if (path === '/api/connections/has-lidarr') return json({ hasLidarr: true });
@@ -152,6 +153,97 @@ describe('discovery flow', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Use Seed 0 as seed' }));
     await waitFor(() => expect(similarCalls()).toHaveLength(2));
     expect((await screen.findAllByRole('checkbox', { name: 'Select Same name' })).every(input => (input as HTMLInputElement).checked)).toBe(true);
+  });
+  it('pushes discrete seed/search choices and restores canonical seed state on Back', async () => {
+    navigation.query = `seed=${ids[0]}&keep=value`; mount();
+    await screen.findAllByRole('link', { name: 'Same name' });
+    const previous = navigation.query;
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use Seed Beta as seed' }));
+    await waitFor(() => expect(new URLSearchParams(navigation.query).getAll('seed')).toEqual(ids));
+    expect(navigation.push).toHaveBeenCalledWith(expect.stringContaining(`seed=${ids[1]}`), { scroll: false });
+    act(() => navigate(`/discover?${previous}`));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Use Seed Beta as seed' })).not.toBeChecked());
+    expect(screen.getByRole('checkbox', { name: 'Use Seed Alpha as seed' })).toBeChecked();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search library seeds' }), { target: { value: 'committed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search library' }));
+    expect(navigation.push).toHaveBeenCalledWith(expect.stringContaining('q=committed'), { scroll: false });
+  });
+  it('marks previous seed results and disables actions while replacement is pending or failed, then recovers', async () => {
+    navigation.query = `seed=${ids[0]}`;
+    const original = request.getMockImplementation()!;
+    let finish!: (response: Response) => void;
+    request.mockImplementation(async (url, options) => String(url) === '/api/discover/similar' && JSON.parse(String(options?.body)).artistNames.length === 2 ? new Promise(resolve => { finish = resolve; }) : original(url, options));
+    mount(); fireEvent.click(await screen.findByRole('button', { name: 'Select loaded recommendations' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use Seed Beta as seed' }));
+    await waitFor(() => expect(similarCalls()).toHaveLength(2));
+    expect(screen.getByText('Previous recommendations for Seed Alpha. Waiting for the current seed request.')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Same name' })).toHaveLength(2);
+    expect(screen.getAllByRole('checkbox', { name: 'Select Same name' }).every(input => (input as HTMLInputElement).disabled)).toBe(true);
+    expect(screen.getAllByRole('button', { name: 'Add artist Same name' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getByRole('button', { name: 'Add selected artists' })).toBeDisabled();
+    await act(async () => finish(json({ error: 'Provider temporarily unavailable' }, 503)));
+    await screen.findByText('Last.fm recommendations are unavailable. Provider temporarily unavailable');
+    expect(screen.getByText('Previous recommendations for Seed Alpha. Current seed request failed; retry to refresh.')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Same name' })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Add selected artists' })).toBeDisabled();
+    request.mockImplementation(original);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry recommendations' }));
+    await waitFor(() => expect(screen.queryByText(/Previous recommendations for/)).toBeNull());
+    expect(screen.getAllByRole('checkbox', { name: 'Select Same name' }).every(input => (input as HTMLInputElement).checked && !(input as HTMLInputElement).disabled)).toBe(true);
+    expect(addCalls()).toHaveLength(0);
+  });
+  it('retains off-page seed identity metadata when removal is undone through Back', async () => {
+    sessionStorage.setItem('mixarr:discovery-seeds:7', JSON.stringify({ [recIds[0]]: 'Off-page seed' }));
+    navigation.query = `seed=${recIds[0]}`; mount();
+    await screen.findAllByRole('link', { name: 'Same name' });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove seed Off-page seed' }));
+    expect(new URLSearchParams(navigation.query).has('seed')).toBe(false);
+    act(() => navigate(`/discover?seed=${recIds[0]}`));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Find similar artists' })).toBeEnabled());
+    expect(screen.queryByText(/Unresolved seed ID:/)).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem('mixarr:discovery-seeds:7')!)[recIds[0]]).toBe('Off-page seed');
+  });
+  it('bounds stored identity history and prioritizes active canonical seeds over old entries', async () => {
+    const old = Object.fromEntries(Array.from({ length: 110 }, (_, i) => [`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, `Old seed ${i}`]));
+    sessionStorage.setItem('mixarr:discovery-seeds:7', JSON.stringify({ invalid: 'Untrusted', ...old }));
+    navigation.query = `seed=${ids[0]}`; mount();
+    await screen.findAllByRole('link', { name: 'Same name' });
+    const stored = JSON.parse(sessionStorage.getItem('mixarr:discovery-seeds:7')!);
+    expect(Object.keys(stored).length).toBeLessThanOrEqual(100);
+    expect(stored[ids[0]]).toBe('Seed Alpha');
+    expect(stored.invalid).toBeUndefined();
+    expect(stored['00000000-0000-4000-8000-000000000109']).toBeUndefined();
+  });
+  it('never carries previous recommendation rows across actors', async () => {
+    navigation.query = `seed=${ids[0]}`;
+    const mounted = mount();
+    await screen.findAllByRole('link', { name: 'Same name' });
+    const original = request.getMockImplementation()!;
+    let finish!: (response: Response) => void;
+    request.mockImplementation(async (url, options) => String(url) === '/api/discover/similar' ? new Promise(resolve => { finish = resolve; }) : original(url, options));
+    session.actor = 8;
+    mounted.rerender(<QueryClientProvider client={mounted.client}><DiscoverPage /></QueryClientProvider>);
+    await waitFor(() => expect(similarCalls()).toHaveLength(2));
+    expect(screen.queryByRole('link', { name: 'Same name' })).toBeNull();
+    expect(screen.queryByText(/Previous recommendations for/)).toBeNull();
+    await act(async () => finish(json({ recommendations: [], seedArtists: ['Seed Alpha'], total: 0 })));
+    await screen.findByText('No new matches for these seed artists.');
+  });
+  it('ignores a late confirmed acquisition after the seed owner changes', async () => {
+    navigation.query = `seed=${ids[0]}`;
+    const original = request.getMockImplementation()!;
+    let finish!: (response: Response) => void;
+    request.mockImplementation(async (url, options) => String(url) === '/api/discover/add' ? new Promise(resolve => { finish = resolve; }) : original(url, options));
+    mount();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Add artist Same name' }))[0]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    await waitFor(() => expect(addCalls()).toHaveLength(1));
+    act(() => navigate(`/discover?seed=${ids[0]}&seed=${ids[1]}`));
+    await screen.findAllByRole('link', { name: 'Same name' });
+    await act(async () => finish(json({ success: true })));
+    expect(screen.queryByText('In Lidarr')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
   it('opens inspector links without acquisition and scopes library search to committed URLs', async () => {
     navigation.query = `seed=${ids[0]}&page=2&keep=value`; mount();
