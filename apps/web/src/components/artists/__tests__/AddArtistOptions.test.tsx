@@ -40,6 +40,18 @@ describe('shared acquisition action step', () => {
     render(<Harness />); await open(); fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
     expect(screen.getByRole('combobox', { name: 'Root folder' })).toHaveFocus(); expect(mocks.execute).not.toHaveBeenCalled();
   });
+  it('focuses the displayed identity choice before a later invalid root folder', async () => {
+    vi.mocked(api.get).mockImplementation(async path => path === '/api/discover/profiles'
+      ? { data: { ...profiles, defaults: { ...profiles.defaults, rootFolderPath: '/unavailable' } }, error: null, status: 200 } as any
+      : { data: { results: [{ id: mbid, name: 'Artist', disambiguation: 'Explicit candidate' }] }, error: null, status: 200 } as any);
+    render(<Harness identity="" />); await open();
+    const candidate = await screen.findByRole('radio', { name: /Explicit candidate/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    expect(candidate).toHaveFocus(); expect(mocks.execute).not.toHaveBeenCalled();
+    fireEvent.click(candidate);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    expect(screen.getByRole('combobox', { name: 'Root folder' })).toHaveFocus(); expect(mocks.execute).not.toHaveBeenCalled();
+  });
   it('shows targeted album semantics and sends search control without ineffective artist monitoring controls', async () => {
     render(<Harness album />); await open();
     expect(screen.getByText(/Only this album will be monitored/)).toBeInTheDocument();

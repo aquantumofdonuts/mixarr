@@ -96,7 +96,8 @@ export function AddArtistOptions({ action, onClose, onComplete }: { action: Acti
   }, [attempt]);
   const submit = async () => {
     if (working || loading) return;
-    const invalid = !profiles?.rootFolders.some(p => p.path === options.rootFolderPath) ? '[name="rootFolderPath"]'
+    const invalid = !action.request.bulk && !identity && candidates.length > 0 ? '[name="identity"]'
+      : !profiles?.rootFolders.some(p => p.path === options.rootFolderPath) ? '[name="rootFolderPath"]'
       : !profiles.qualityProfiles.some(p => p.id === options.qualityProfileId) ? '[name="qualityProfileId"]'
       : !profiles.metadataProfiles.some(p => p.id === options.metadataProfileId) ? '[name="metadataProfileId"]'
       : !action.request.bulk && !identity ? '[name="identity"]' : null;
