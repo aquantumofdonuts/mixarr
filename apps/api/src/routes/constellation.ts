@@ -627,7 +627,8 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         // huge-degree traversal.
         const parsedMax = parseIntParam(typeof req.query.max === 'string' ? req.query.max : undefined);
         const settings = await SettingsService.getConstellationSettings();
-        const max = Math.min(parsedMax ?? settings.pathMaxDegrees, settings.pathMaxDegrees, MAX_PATH_DEGREES);
+        const requestedMax = parsedMax !== null && parsedMax > 0 ? parsedMax : undefined;
+        const max = Math.min(requestedMax ?? settings.pathMaxDegrees, settings.pathMaxDegrees, MAX_PATH_DEGREES);
 
         const result = await graph.path(from, to, { mode: rawMode, max });
         if (result === null) {

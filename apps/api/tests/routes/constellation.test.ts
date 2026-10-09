@@ -960,7 +960,7 @@ describe('stored constellation exploration bounds', () => {
     expect(deps.graph!.subgraph).toHaveBeenNthCalledWith(1, 42, { userId: 7, roleMask: 3, topN: Math.min(fanoutN, 49), maxNodes: 50 });
     expect(deps.graph!.subgraph).toHaveBeenNthCalledWith(2, 42, { userId: 7, roleMask: 3, topN: Math.min(fanoutN, 49), maxNodes: 50 });
   });
-  it.each([[3, undefined, 3], [3, '2', 2], [3, '9', 3], [20, '19', 10], [4, 'bogus', 4]])('uses configured %s / requested %s path bound %s', async (configured, requested, expected) => {
+  it.each([[3, undefined, 3], [3, '2', 2], [3, '9', 3], [20, '19', 10], [4, 'bogus', 4], [4, '0', 4], [4, '-1', 4], [4, '1.5', 4], [4, '', 4]])('uses configured %s / requested %s path bound %s', async (configured, requested, expected) => {
     vi.mocked(SettingsService.getConstellationSettings).mockResolvedValue({ fanoutN: 8, pathMaxDegrees: configured } as any);
     const deps = makeDeps(); vi.mocked(deps.graph!.path).mockResolvedValue(null);
     await buildConstellationHandlers(deps).path(mockReq({ query: { from: '1', to: '2', max: requested } }), mockRes());
