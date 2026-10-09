@@ -819,6 +819,81 @@ export function useSettings() {
   });
 }
 
+export interface ConstellationSettings {
+  constellationIndexEnabled: boolean;
+  constellationIndexPath: string;
+  orbitEdgeBudget: number;
+  dailyApiBudget: number;
+  fanoutN: number;
+  pathMaxDegrees: number;
+  indexRefresh: 'monthly' | 'off';
+}
+
+const constellationNumbers = ['orbitEdgeBudget', 'dailyApiBudget', 'fanoutN', 'pathMaxDegrees'] as const;
+function isConstellationSettings(value: unknown): value is ConstellationSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const settings = value as Record<string, unknown>;
+  return typeof settings.constellationIndexEnabled === 'boolean'
+    && typeof settings.constellationIndexPath === 'string' && settings.constellationIndexPath.length > 0
+    && constellationNumbers.every(key => typeof settings[key] === 'number' && Number.isInteger(settings[key]) && (settings[key] as number) > 0)
+    && (settings.indexRefresh === 'monthly' || settings.indexRefresh === 'off');
+}
+
+export function useConstellationSettings() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ['settings', 'constellation', user?.id, user?.role],
+    enabled: user?.role === 'admin',
+    retry: false,
+    queryFn: async ({ signal }) => {
+      if (user?.role !== 'admin') throw new Error('Admin access required');
+      const { data, error } = await api.get<{ settings: ConstellationSettings }>('/api/settings/constellation', { signal });
+      if (error || !isConstellationSettings(data?.settings)) throw new Error(error || 'Failed to load constellation settings: invalid response.');
+      return data.settings;
+    },
+  });
+}
+
+export function useUpdateConstellationSettings() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: async ({ changes, signal }: { changes: Partial<ConstellationSettings>; signal: AbortSignal }) => {
+      if (user?.role !== 'admin' || signal.aborted) throw new Error('Admin access required');
+      const { data, error } = await api.put<{ success: boolean; settings: ConstellationSettings }>('/api/settings/constellation', changes, { signal });
+      if (error || data?.success !== true || !isConstellationSettings(data.settings)) throw new Error(error || 'Invalid save response; retry or reload to confirm constellation settings.');
+      return data.settings;
+    },
+    onSuccess: (settings, { signal }) => {
+      const actor = queryClient.getQueryData<{ user?: { id: number; role: string } }>(['auth'])?.user;
+      if (user && !signal.aborted && actor?.id === user.id && actor?.role === 'admin') {
+        queryClient.setQueryData(['settings', 'constellation', user.id, user.role], settings);
+        void queryClient.invalidateQueries({ queryKey: ['settings', 'constellation-usage', user.id, user.role] });
+      }
+    },
+  });
+}
+
+export interface ConstellationUsage { day: string; used: number; limit: number; }
+export function useConstellationUsage() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ['settings', 'constellation-usage', user?.id, user?.role],
+    enabled: user?.role === 'admin',
+    retry: false,
+    queryFn: async ({ signal }) => {
+      if (user?.role !== 'admin') throw new Error('Admin access required');
+      const { data, error } = await api.get<ConstellationUsage>('/api/settings/constellation/usage', { signal });
+      const dayTime = data ? Date.parse(`${data.day}T00:00:00Z`) : NaN;
+      if (error || !data || !Number.isFinite(dayTime) || new Date(dayTime).toISOString().slice(0, 10) !== data.day || !/^\d{4}-\d{2}-\d{2}$/.test(data.day) || !Number.isSafeInteger(data.used) || data.used < 0 || !Number.isInteger(data.limit) || data.limit <= 0) {
+        throw new Error(error || 'Failed to load constellation usage: invalid response.');
+      }
+      return data;
+    },
+  });
+}
+
 export function useAISettings() {
   return useQuery({
     queryKey: queryKeys.aiSettings,

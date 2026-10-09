@@ -18,6 +18,11 @@ vi.mock('../../src/jobs/constellation/queue.js', () => ({
   CONSTELLATION_QUEUE_NAMES: { EXPAND: 'constellation-expand' },
 }));
 
+vi.mock('../../src/services/settings.service.js', () => ({
+  SettingsService: { getConstellationSettings: vi.fn().mockResolvedValue({ fanoutN: 8, pathMaxDegrees: 6 }) },
+}));
+import { SettingsService } from '../../src/services/settings.service.js';
+
 // Silence the logger.
 vi.mock('../../src/lib/logger.js', () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -112,6 +117,7 @@ function makeDeps(overrides: Partial<ConstellationDeps> = {}): ConstellationDeps
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(SettingsService.getConstellationSettings).mockResolvedValue({ fanoutN: 8, pathMaxDegrees: 6 } as any);
 });
 
 // ---- /seed ------------------------------------------------------------------
@@ -170,7 +176,7 @@ describe('GET /seed', () => {
     const res = mockRes();
     await h.seed(req, res);
 
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(42, { userId: 7 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(42, { userId: 7, roleMask: undefined, topN: 8, maxNodes: 50 });
     expect(res.statusCode).toBe(200);
     expect(res.body.subgraph).toEqual(subgraph);
     expect(res.body.streamToken.id).toBeTypeOf('string');
@@ -191,7 +197,7 @@ describe('GET /seed', () => {
     await h.seed(req, res);
 
     expect(deps.identity!.mbidToDiscogs).toHaveBeenCalledWith(mbid);
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(99, { userId: 7 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(99, { userId: 7, roleMask: undefined, topN: 8, maxNodes: 50 });
     expect(res.statusCode).toBe(200);
   });
 
@@ -227,7 +233,7 @@ describe('GET /seed', () => {
     const res = mockRes();
     await h.seed(req, res);
 
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(42, { userId: 7, roleMask: 6 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(42, { userId: 7, roleMask: 6, topN: 8, maxNodes: 50 });
     expect(res.statusCode).toBe(200);
   });
 
@@ -349,7 +355,7 @@ describe('GET /expand/:personId', () => {
     await h.expand(req, res);
 
     expect(deps.expandQueue!.add).toHaveBeenCalledWith('constellation-expand', { artistId: 5 });
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7, roleMask: undefined, topN: 8, maxNodes: 50 });
     expect(res.statusCode).toBe(200);
     expect(res.body.enqueued).toBe(true);
     expect(res.body.subgraph).toBeDefined();
@@ -364,7 +370,7 @@ describe('GET /expand/:personId', () => {
     const res = mockRes();
     await h.expand(req, res);
 
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7, roleMask: 3 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7, roleMask: 3, topN: 8, maxNodes: 50 });
   });
 
   it('coerces expand roleMask=0 to undefined (no filter)', async () => {
@@ -414,7 +420,7 @@ describe('GET /path', () => {
     expect(res.body).toEqual(result);
   });
 
-  it('clamps an excessive max to the degree ceiling (10)', async () => {
+  it('clamps an excessive requested max to the configured ceiling (6)', async () => {
     const deps = makeDeps();
     (deps.graph!.path as any).mockResolvedValue({ nodes: [1, 2], degrees: 1, mode: 'shortest' });
     const h = buildConstellationHandlers(deps);
@@ -423,7 +429,7 @@ describe('GET /path', () => {
     const res = mockRes();
     await h.path(req, res);
 
-    expect(deps.graph!.path).toHaveBeenCalledWith(1, 2, { mode: 'shortest', max: 10 });
+    expect(deps.graph!.path).toHaveBeenCalledWith(1, 2, { mode: 'shortest', max: 6 });
   });
 
   it('404s when no path is found', async () => {
@@ -940,5 +946,24 @@ describe('auth', () => {
 
     const resp = await request(app).get('/api/constellation/owned');
     expect(resp.status).toBe(401);
+  });
+});
+
+
+describe('stored constellation exploration bounds', () => {
+  it.each([3, 500])('applies stored fan-out %s to seed and expand with the 50-person guard', async fanoutN => {
+    vi.mocked(SettingsService.getConstellationSettings).mockResolvedValue({ fanoutN, pathMaxDegrees: 6 } as any);
+    const deps = makeDeps(); vi.mocked(deps.graph!.subgraph).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+    await h.seed(mockReq({ query: { id: '42', roleMask: '3' } }), mockRes());
+    await h.expand(mockReq({ params: { personId: '42' }, query: { roleMask: '3' } }), mockRes());
+    expect(deps.graph!.subgraph).toHaveBeenNthCalledWith(1, 42, { userId: 7, roleMask: 3, topN: Math.min(fanoutN, 49), maxNodes: 50 });
+    expect(deps.graph!.subgraph).toHaveBeenNthCalledWith(2, 42, { userId: 7, roleMask: 3, topN: Math.min(fanoutN, 49), maxNodes: 50 });
+  });
+  it.each([[3, undefined, 3], [3, '2', 2], [3, '9', 3], [20, '19', 10], [4, 'bogus', 4]])('uses configured %s / requested %s path bound %s', async (configured, requested, expected) => {
+    vi.mocked(SettingsService.getConstellationSettings).mockResolvedValue({ fanoutN: 8, pathMaxDegrees: configured } as any);
+    const deps = makeDeps(); vi.mocked(deps.graph!.path).mockResolvedValue(null);
+    await buildConstellationHandlers(deps).path(mockReq({ query: { from: '1', to: '2', max: requested } }), mockRes());
+    expect(deps.graph!.path).toHaveBeenCalledWith(1, 2, { mode: 'shortest', max: expected });
   });
 });

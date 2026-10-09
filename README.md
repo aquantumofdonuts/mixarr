@@ -151,7 +151,7 @@ Collaboration data can come from live APIs or a local index. This is a global to
 | Genre node coloring | Unavailable (neutral nodes) | Available |
 
 *   **Live API (OFF — the default):** queries Discogs/MusicBrainz live. No setup, light footprint. Exploration is slower because it's rate-limited, and **genre-based node coloring is unavailable** on the live path (nodes render neutral). Everything else — collaboration edges, tie-strength weights, bridge scoring, shortest-path, and the "in your library" ring — still works.
-*   **Local index (ON):** builds a **credit-only index** from the Discogs CC0 monthly data dump. Fast, offline exploration plus genre coloring. **Honest cost:** the resulting index is small, but *building* it downloads and stream-parses the **full Discogs releases dump (~10GB compressed, ~100GB+ uncompressed)** — hours of parsing, repeated on each refresh. A real disk-and-time commitment, aimed at power users. Refresh cadence is configurable (monthly) or you can build once and never refresh.
+*   **Local index (ON):** builds a **credit-only index** from the Discogs CC0 monthly data dump. Fast, offline exploration plus genre coloring. **Honest cost:** the resulting index is small, but *building* it downloads and stream-parses the **full Discogs releases dump (~10GB compressed, ~100GB+ uncompressed)** — hours of parsing, repeated on each refresh. A real disk-and-time commitment, aimed at power users. Automatic index refresh is unavailable; saving the refresh preference does not start or stop an import.
 
 ### Integrations it uses
 
@@ -182,11 +182,16 @@ A settled orbit is left alone; it is re-walked once a week (daily 04:00 UTC chec
 
 ### Settings
 
-There is no settings page for the constellation yet. The settings are read and written through the API as an admin:
+Admins configure all seven constellation preferences under **Settings → Constellation**, with a separate Save button and today's charged API reservations (`used / limit`, resetting at `00:00 UTC`). Counts include failed and rejected reservations; lowering the limit does not reduce the recorded count. Fan-out takes effect up to 49 neighbors per node within a 50-person graph, and paths respect the configured bound up to the server ceiling of 10 degrees.
+
+Automatic index refresh is unavailable; saving this preference does not start or stop an import.
+
+For automation, the same admin-only API remains available:
 
 ```
 GET /api/settings/constellation
-PUT /api/settings/constellation   { "constellationIndexEnabled": true, "dailyApiBudget": 2000 }
+PUT /api/settings/constellation   # partial settings update
+GET /api/settings/constellation/usage
 ```
 
 Keys: `constellationIndexEnabled`, `constellationIndexPath`, `orbitEdgeBudget`, `dailyApiBudget`, `fanoutN`, `pathMaxDegrees`, `indexRefresh` (`monthly` or `off`).

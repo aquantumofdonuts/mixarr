@@ -9,6 +9,7 @@ vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: 7, role: 'admin' },
 vi.mock('next/navigation', () => ({ useRouter: () => mocks.router }));
 vi.mock('@tanstack/react-query', () => ({ useQuery: () => ({ data: { version: '2.3.5' } }) }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: mocks.addToast }) }));
+vi.mock('@/components/settings/constellation-settings', () => ({ ConstellationSettings: () => null }));
 vi.mock('@/components/settings/sso-settings', () => ({ SSOSettings: () => null }));
 
 const aiDefaults = { openaiEnabled: false, openaiConfigured: false, anthropicEnabled: false, anthropicConfigured: false, openaiBaseUrl: null, openaiModel: null };

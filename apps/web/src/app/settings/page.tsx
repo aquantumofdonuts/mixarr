@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
 import { Skeleton, Switch } from '@/components/ui';
 import { PageHeader } from '@/components/layout/page-header';
+import { ConstellationSettings } from '@/components/settings/constellation-settings';
 import { AISettings } from '@/components/settings/ai-settings';
 import { SSOSettings } from '@/components/settings/sso-settings';
 import { api } from '@/lib/api';
@@ -399,6 +400,8 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         )}
+
+        {isAdmin && <ConstellationSettings />}
 
         {/* About */}
         <Card>

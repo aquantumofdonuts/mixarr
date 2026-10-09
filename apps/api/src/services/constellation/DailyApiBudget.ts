@@ -9,7 +9,7 @@
  * in the background (the orbit crawl) stop and resume the next day; interactive
  * callers surface the exhaustion instead of silently hammering the API.
  *
- * The counter is injected (any `incr`/`expire` pair, e.g. an ioredis client) so
+ * The counter is injected (`get`/`incr`/`expire`, e.g. an ioredis client) so
  * the arithmetic is unit-testable without Redis.
  */
 
@@ -29,6 +29,7 @@ export function isApiBudgetExhausted(err: unknown): err is ApiBudgetExhaustedErr
 
 /** The subset of a Redis client the budget needs. */
 export interface BudgetCounter {
+  get(key: string): Promise<string | null>;
   incr(key: string): Promise<number>;
   expire(key: string, seconds: number): Promise<unknown>;
 }
@@ -48,6 +49,16 @@ export class DailyApiBudget {
   /** The counter key for `date` (UTC day). */
   keyFor(date: Date = this.now()): string {
     return `${KEY_PREFIX}:${date.toISOString().slice(0, 10)}`;
+  }
+
+  /** Read charged reservations, including rejected takes, without changing TTL. */
+  async used(date: Date = this.now()): Promise<number> {
+    const value = await this.counter.get(this.keyFor(date));
+    if (value === null) return 0;
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+      throw new Error('Invalid constellation budget counter');
+    }
+    return Number(value);
   }
 
   /**

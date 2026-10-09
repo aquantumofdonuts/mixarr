@@ -40,6 +40,7 @@ import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import prisma from '../lib/db.js';
+import { SettingsService } from '../services/settings.service.js';
 import { requireAuth } from '../middleware/auth.js';
 import { parseIntParam } from '../utils/params.js';
 import { createLogger } from '../lib/logger.js';
@@ -62,7 +63,6 @@ import {
 const log = createLogger('Constellation');
 
 const DISCOGS_API_TIMEOUT = 15_000;
-const DEFAULT_MAX_DEGREES = 6;
 /** Hard ceiling on requested path degrees (DoS guard on traversal cost). */
 const MAX_PATH_DEGREES = 10;
 const HEARTBEAT_MS = 25_000;
@@ -492,7 +492,8 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           return;
         }
 
-        const subgraph = await graph.subgraph(focusId, { userId, roleMask });
+        const settings = await SettingsService.getConstellationSettings();
+        const subgraph = await graph.subgraph(focusId, { userId, roleMask, topN: Math.min(settings.fanoutN, 49), maxNodes: 50 });
 
         // User-scoped tokens: a re-center (?token=) may only bump the caller's own
         // token; a token owned by another user is rejected (IDOR/DoS guard).
@@ -595,7 +596,8 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           });
         }
 
-        const subgraph = await graph.subgraph(personId, { userId, roleMask });
+        const settings = await SettingsService.getConstellationSettings();
+        const subgraph = await graph.subgraph(personId, { userId, roleMask, topN: Math.min(settings.fanoutN, 49), maxNodes: 50 });
         res.json({ personId, enqueued, subgraph });
       } catch (error) {
         log.error('expand failed', { error: error instanceof Error ? error.message : String(error) });
@@ -624,7 +626,8 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         // Clamp the degree bound so a caller can't request an expensive
         // huge-degree traversal.
         const parsedMax = parseIntParam(typeof req.query.max === 'string' ? req.query.max : undefined);
-        const max = Math.min(parsedMax ?? DEFAULT_MAX_DEGREES, MAX_PATH_DEGREES);
+        const settings = await SettingsService.getConstellationSettings();
+        const max = Math.min(parsedMax ?? settings.pathMaxDegrees, settings.pathMaxDegrees, MAX_PATH_DEGREES);
 
         const result = await graph.path(from, to, { mode: rawMode, max });
         if (result === null) {

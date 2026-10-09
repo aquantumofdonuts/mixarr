@@ -90,3 +90,34 @@ describe('constellation-expand-worker module import', () => {
     expect(typeof mod.registerConstellationExpandWorker).toBe('function');
   });
 });
+
+const shell = vi.hoisted(() => ({
+  process: null as null | ((job: any) => Promise<unknown>),
+  subgraph: vi.fn(), settings: vi.fn(), close: vi.fn(), expand: vi.fn(),
+  redis: vi.fn(), publish: vi.fn(),
+}));
+vi.mock('bullmq', () => ({ Worker: class {
+  constructor(_name: string, process: (job: any) => Promise<unknown>) { shell.process = process; }
+  on() { return this; }
+} }));
+vi.mock('../../../src/lib/redis.js', () => ({ createRedisConnection: shell.redis }));
+vi.mock('../../../src/jobs/constellation/queue.js', () => ({ CONSTELLATION_QUEUE_NAMES: { EXPAND: 'constellation-expand' } }));
+vi.mock('../../../src/services/constellation/ExpansionService.js', () => ({ ExpansionService: class { expandPerson = shell.expand; } }));
+vi.mock('../../../src/services/constellation/GraphService.js', () => ({ GraphService: class { subgraph = shell.subgraph; } }));
+vi.mock('../../../src/services/settings.service.js', () => ({ SettingsService: { getConstellationSettings: shell.settings } }));
+vi.mock('../../../src/services/constellation/resolveCreditSource.js', () => ({ resolveConfiguredCreditSource: async () => ({ close: shell.close }) }));
+vi.mock('../../../src/routes/constellation.js', () => ({ publishToStream: shell.publish }));
+
+describe('registered expand worker settings wiring', () => {
+  it.each([4, 500])('uses the stored fan-out %s in the actual worker closure and closes its source', async fanoutN => {
+    vi.clearAllMocks();
+    shell.settings.mockResolvedValue({ fanoutN }); shell.subgraph.mockResolvedValue(neighbors());
+    const { registerConstellationExpandWorker } = await import('../../../src/jobs/constellation/constellation-expand-worker.js');
+    await registerConstellationExpandWorker();
+    await shell.process!({ data: { artistId: 42, tokenId: 'token', generation: 2 }, updateProgress: vi.fn() });
+    expect(shell.settings).toHaveBeenCalledTimes(1);
+    expect(shell.subgraph).toHaveBeenCalledWith(42, { topN: Math.min(fanoutN, 49), maxNodes: 50 });
+    expect(shell.publish).toHaveBeenCalledWith('token', 2, { focusId: 42, ...neighbors() });
+    expect(shell.close).toHaveBeenCalledTimes(1);
+  });
+});

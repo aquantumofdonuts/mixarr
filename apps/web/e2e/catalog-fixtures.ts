@@ -140,6 +140,8 @@ export const test = base.extend<CatalogFixtures>({
             return reply({ items, total: matches.length, nextCursor });
           }
           case '/api/slskd/downloads': return reply(catalogScenario === 'empty' ? [] : [{ id: 1, connectionId: 1, username: 'fixture-peer', artistName: 'Common Name', filename: 'record.flac', fileSize: 1024, status: 'failed', error: 'Fixture transfer interrupted', createdAt: recordedAt, updatedAt: recordedAt }]);
+          case '/api/settings/constellation': return reply({ settings: { constellationIndexEnabled: false, constellationIndexPath: '/data/constellation/index.db', orbitEdgeBudget: 250000, dailyApiBudget: 5000, fanoutN: 8, pathMaxDegrees: 6, indexRefresh: 'monthly' } });
+          case '/api/settings/constellation/usage': return reply({ day: '2026-10-09', used: 17, limit: 5000 });
           case '/api/settings':
           case '/api/settings/global': return reply({ settings: {} });
           case '/api/ai/settings': return reply({ settings: { openaiEnabled: false, openaiConfigured: false, anthropicEnabled: false, anthropicConfigured: false } });

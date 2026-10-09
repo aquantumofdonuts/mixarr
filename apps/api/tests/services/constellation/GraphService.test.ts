@@ -85,6 +85,20 @@ beforeEach(() => {
 });
 
 describe('GraphService.subgraph', () => {
+  it('the configured fan-out clamp leaves exactly one focus slot in a 50-person graph', async () => {
+    installStore({
+      edges: [...Array.from({ length: 80 }, (_, i) => edge(1, i + 2, 100 - i)), edge(2, 100, 10)],
+      persons: [...Array.from({ length: 81 }, (_, i) => person(i + 1)), person(100)],
+      genres: [], owned: [],
+    });
+    const result = await new GraphService().subgraph(1, { topN: 49, maxNodes: 50 });
+    expect(result.nodes).toHaveLength(50);
+    expect(result.nodes.some(node => node.personId === 1)).toBe(true);
+    expect(result.nodes.some(node => node.personId === 100)).toBe(false);
+    const ids = new Set(result.nodes.map(node => node.personId));
+    expect(result.edges.every(edge => ids.has(edge.source) && ids.has(edge.target))).toBe(true);
+  });
+
   it('builds focus + ring-1 (top-N) + pruned ring-2, excluding in-graph dupes', async () => {
     const store: Store = {
       // focus 1 -> 2(5), 3(3), 4(1); topN=2 keeps the two heaviest {2,3}.

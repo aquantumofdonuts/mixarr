@@ -51,15 +51,13 @@ vi.mock('../../src/lib/logger.js', () => ({
   }),
 }));
 
-vi.mock('../../src/middleware/auth.js', () => ({
-  requireAuth: (_req: any, _res: any, next: any) => next(),
-  requireAdmin: (_req: any, _res: any, next: any) => next(),
-}));
+vi.mock('../../src/lib/redis.js', () => ({ redis: { get: vi.fn(), incr: vi.fn(), expire: vi.fn() } }));
 
 // Import router after mocks
 import { settingsRouter } from '../../src/routes/settings.js';
 import prisma from '../../src/lib/db.js';
 import { SettingsService } from '../../src/services/settings.service.js';
+import { redis } from '../../src/lib/redis.js';
 
 describe('Settings API', () => {
   let mockPrisma: ReturnType<typeof createMockPrisma>;
@@ -721,5 +719,65 @@ describe('Settings API', () => {
       expect(response.status).toBe(400);
       expect(SettingsService.updateConstellationSettings).not.toHaveBeenCalled();
     });
+  });
+});
+
+
+describe('GET constellation usage with real authorization middleware', () => {
+  function appFor(role?: 'admin' | 'user') {
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.isAuthenticated = () => !!role;
+      req.user = role ? { id: 1, role } : undefined;
+      next();
+    });
+    app.use('/api/settings', settingsRouter);
+    return app;
+  }
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(SettingsService.getConstellationSettings).mockResolvedValue({ dailyApiBudget: 3 } as any);
+    vi.mocked(redis.get).mockResolvedValue(null);
+  });
+  it.each([[undefined, 401], ['user', 403]] as const)('rejects actor %s before reading settings or Redis', async (role, status) => {
+    const response = await request(appFor(role)).get('/api/settings/constellation/usage');
+    expect(response.status).toBe(status);
+    expect(redis.get).not.toHaveBeenCalled();
+    expect(SettingsService.getConstellationSettings).not.toHaveBeenCalled();
+  });
+  it('reports a missing counter as zero without creating it', async () => {
+    const response = await request(appFor('admin')).get('/api/settings/constellation/usage');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ day: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), used: 0, limit: 3 });
+    expect(redis.get).toHaveBeenCalledWith(`constellation:discogs:budget:${response.body.day}`);
+    expect(redis.incr).not.toHaveBeenCalled(); expect(redis.expire).not.toHaveBeenCalled();
+  });
+  it('reports exact reservations above the newly lowered limit', async () => {
+    vi.mocked(redis.get).mockResolvedValue('17');
+    const response = await request(appFor('admin')).get('/api/settings/constellation/usage');
+    expect(response.body.used).toBe(17); expect(response.body.limit).toBe(3);
+    expect(Object.keys(response.body).sort()).toEqual(['day', 'limit', 'used']);
+  });
+  it('captures one UTC day even when the settings read crosses midnight', async () => {
+    const initial = new Date('2026-10-09T23:59:59.999Z');
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(initial);
+    vi.mocked(SettingsService.getConstellationSettings).mockImplementationOnce(async () => {
+      vi.setSystemTime(new Date('2026-10-10T00:00:00Z')); return { dailyApiBudget: 3 } as any;
+    });
+    try {
+      const response = await request(appFor('admin')).get('/api/settings/constellation/usage');
+      expect(response.body).toEqual({ day: '2026-10-09', used: 0, limit: 3 });
+      expect(redis.get).toHaveBeenCalledWith('constellation:discogs:budget:2026-10-09');
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(['garbage', '-1', '1.5', '9007199254740992'])('fails rather than inventing zero for malformed counter %s', async value => {
+    vi.mocked(redis.get).mockResolvedValue(value);
+    const response = await request(appFor('admin')).get('/api/settings/constellation/usage');
+    expect(response.status).toBe(500); expect(response.body.used).toBeUndefined();
+  });
+  it('reports Redis unavailable as an error', async () => {
+    vi.mocked(redis.get).mockRejectedValueOnce(new Error('unavailable'));
+    const response = await request(appFor('admin')).get('/api/settings/constellation/usage');
+    expect(response.status).toBe(500); expect(response.body.used).toBeUndefined();
   });
 });

@@ -89,6 +89,7 @@ export async function registerConstellationExpandWorker(io?: SocketIOServer): Pr
   const { CONSTELLATION_QUEUE_NAMES } = await import('./queue.js');
   const { ExpansionService } = await import('../../services/constellation/ExpansionService.js');
   const { GraphService } = await import('../../services/constellation/GraphService.js');
+  const { SettingsService } = await import('../../services/settings.service.js');
   const { resolveConfiguredCreditSource } = await import(
     '../../services/constellation/resolveCreditSource.js'
   );
@@ -118,7 +119,8 @@ export async function registerConstellationExpandWorker(io?: SocketIOServer): Pr
           expandService: expansionService,
           // Read the freshly-materialized subgraph around the expanded person.
           getNeighbors: async (id) => {
-            const sub = await graph.subgraph(id);
+            const settings = await SettingsService.getConstellationSettings();
+            const sub = await graph.subgraph(id, { topN: Math.min(settings.fanoutN, 49), maxNodes: 50 });
             return { nodes: sub.nodes, edges: sub.edges };
           },
           publish: publishToStream,
