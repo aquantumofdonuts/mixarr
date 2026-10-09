@@ -34,12 +34,13 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ## UI/UX catalog redesign (in progress)
 
-**Status:** T01–T21 implemented and independently reviewed on local branch `feat/music-catalog-ux`. Discovery preserves canonical seeds/history and scoped recommendations. Queue search and stable pagination reach the full database scope; compact rows retain numeric-ID selection, effective add options, actual per-record outcomes, failed-only retries and signed rejection Undo across navigation. T22 library navigation is next. Read-only review of the R26–R28/T31–T32 amendments is required before T23 starts plan batch F. The complete redesign, remaining page adoption, completion audit and final full review remain pending. See the execution checkpoint for fresh verification and its limits.
+**Status:** T01–T22 implemented and independently reviewed on local branch `feat/music-catalog-ux`. Library navigation now preserves validated URL filters/sorting/window state, stable-ID selection and inspector/Back context with accessible native controls. Fresh root verification passed 649 web tests and 84 production Chromium checks. The R26–R28/T31–T32 preflight recorded independently reviewed routine corrections but remains pending the owner's R27 node-cap/protection priority decision; T23 and T31 have not started. The complete redesign, remaining page adoption, completion audit and final full review remain pending. See the execution checkpoint for verification and its limits.
 **Scope:** R01–R28/I01: the 25 UI/UX review recommendations, a distinctive music-catalog identity with the user-confirmed compact artwork-thumbnail feed, and the three October 8 Constellation follow-ups.
 
 - [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
 - [Implementation tasks and verification gates](plans/2026-10-07-music-catalog-ux-plan.md)
 - [Execution checkpoint and resume instructions](plans/2026-10-08-music-catalog-ux-progress.md)
+- [Constellation amendment findings and pending decision](plans/2026-10-08-music-catalog-amendment-review.md)
 
 This initiative includes truthful acquisition feedback, artist/source drilldown, queue pagination, safe reversible decisions, and consistent responsive controls. Existing security findings above remain tracked independently; affected mutations must satisfy their scope checks before being exposed by the new UI.
 
