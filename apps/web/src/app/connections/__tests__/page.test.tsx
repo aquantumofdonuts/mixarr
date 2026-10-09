@@ -28,22 +28,24 @@ describe('connections page', () => {
     expect(screen.getByTestId('type-card-spotify')).toBeInTheDocument();
     expect(screen.getByTestId('type-card-slskd')).toBeInTheDocument();
   });
-  it('retains Fail after the server timestamp refetch; a reload starts with Unknown', async () => {
+  it.each([false, true])('uses the refetched server timestamp with session verdict, then Unknown on reload (passed=%s)', async passed => {
+    const serverTimestamp = '2026-10-09T10:00:00Z';
     let lastTest: string | null = null;
     vi.mocked(api.get).mockImplementation(async () => ({ data: { connections: [source({ lastTest })] }, error: null, status: 200 }));
-    vi.mocked(api.post).mockImplementation(async () => { lastTest = '2026-10-09T12:00:00Z'; return { data: { success: false, message: 'Invalid key' }, error: null, status: 200 }; });
+    vi.mocked(api.post).mockImplementation(async () => { lastTest = serverTimestamp; return { data: { success: passed, message: 'Invalid key' }, error: null, status: 200 }; });
     const view = mount();
     fireEvent.click(await screen.findByRole('button', { name: 'Test' }));
-    await screen.findByText('Fail');
+    await screen.findByText(passed ? 'Pass' : 'Fail');
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole('alert')).toHaveTextContent('Invalid key');
-    expect(screen.queryByText('Pass')).toBeNull();
+    await waitFor(() => expect(document.querySelector('time')).toHaveAttribute('dateTime', serverTimestamp));
+    if (!passed) expect(screen.getByRole('alert')).toHaveTextContent('Invalid key');
+    expect(screen.getByText(passed ? 'Pass' : 'Fail')).toBeInTheDocument();
     view.unmount();
     mount();
     await screen.findByText('Unknown');
     expect(screen.queryByText('Fail')).toBeNull();
     expect(screen.queryByText('Pass')).toBeNull();
-    expect(document.querySelector('time')).toHaveAttribute('dateTime', lastTest);
+    expect(document.querySelector('time')).toHaveAttribute('dateTime', serverTimestamp);
   });
   it.each([null, {}, { connections: [null] }, { connections: 'invalid' }])('keeps malformed GET data in an error state with Retry: %j', async data => {
     vi.mocked(api.get).mockResolvedValue({ data, error: null, status: 200 });

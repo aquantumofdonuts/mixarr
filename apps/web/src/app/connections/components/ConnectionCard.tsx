@@ -38,7 +38,7 @@ export function ConnectionCard({ typeConfig, connections, isAdmin, currentUserId
       const canModify = isAdmin || (conn.userId !== null && conn.userId === currentUserId);
       const result = testStates[conn.id];
       const testing = result?.verdict === 'testing' || testingId === conn.id;
-      const timestamp = result?.testedAt ?? conn.lastTest;
+      const timestamp = conn.lastTest;
       return <article key={conn.id} aria-label={conn.name} className="border-b px-3 py-3 last:border-b-0">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">

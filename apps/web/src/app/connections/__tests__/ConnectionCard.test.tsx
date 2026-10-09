@@ -17,7 +17,7 @@ describe('configured connection rows', () => {
     expect(screen.queryByText('Pass')).not.toBeInTheDocument();
   });
   it('shows a failed result and Retry independently of the saved timestamp and active flag', () => {
-    render(<ConnectionCard {...props} testStates={{ 1: { verdict: 'fail', message: 'Invalid key', testedAt: '2026-10-09T12:00:00Z' } }} />);
+    render(<ConnectionCard {...props} testStates={{ 1: { verdict: 'fail', message: 'Invalid key' } }} />);
     expect(screen.getByText('Fail')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Invalid key');
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

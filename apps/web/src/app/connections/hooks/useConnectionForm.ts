@@ -8,7 +8,6 @@ import { useToast } from '@/components/ui/toast';
 
 export interface ConnectionTestState {
   verdict: 'testing' | 'pass' | 'fail';
-  testedAt?: string;
   message?: string;
 }
 interface SaveConnectionParams {
@@ -100,7 +99,7 @@ export function useConnectionForm(onTestResult?: (id: number, result: Connection
     try {
       await testMutation.mutateAsync({ id, signal: action.signal });
       if (!valid()) return false;
-      const result: ConnectionTestState = { verdict: 'pass', testedAt: new Date().toISOString() };
+      const result: ConnectionTestState = { verdict: 'pass' };
       setTestStates(previous => ({ ...previous, [id]: result }));
       onTestResult?.(id, result);
       addToast({ type: 'success', title: 'Connection test successful' });
@@ -109,7 +108,7 @@ export function useConnectionForm(onTestResult?: (id: number, result: Connection
       if (valid()) {
         const failure = cause instanceof Error ? cause : new Error('Connection test failed');
         setError(failure);
-        const result: ConnectionTestState = { verdict: 'fail', testedAt: new Date().toISOString(), message: failure.message };
+        const result: ConnectionTestState = { verdict: 'fail', message: failure.message };
         setTestStates(previous => ({ ...previous, [id]: result }));
         onTestResult?.(id, result);
         addToast({ type: 'error', title: 'Connection test failed', message: failure.message });

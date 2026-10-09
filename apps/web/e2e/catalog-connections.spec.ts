@@ -4,7 +4,7 @@ import { test, expect, CATALOG_USER } from './catalog-fixtures';
 import { waitForTheme } from './fixtures';
 
 async function connectionsApi(page: Page) {
-  const state = { testCalls: 0, deleteCalls: 0, saveCalls: 0, failDelete: true, failStatus: false, authorized: false, lastTest: null as string | null };
+  const state = { testCalls: 0, testSuccess: false, deleteCalls: 0, saveCalls: 0, failDelete: true, failStatus: false, authorized: false, lastTest: null as string | null };
   let removed = false;
   await page.route(/\/api\/connections(?:\/[0-9]+(?:\/[^?]+)?)?$/, async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
@@ -24,7 +24,7 @@ async function connectionsApi(page: Page) {
     if (request.method() === 'POST' && path === '/api/connections/4/test') {
       state.testCalls++;
       state.lastTest = '2026-10-09T12:00:00Z';
-      return reply({ success: false, message: 'Provider rejected fixture credentials' });
+      return reply({ success: state.testSuccess, message: 'Provider rejected fixture credentials' });
     }
     if (request.method() === 'DELETE' && path === '/api/connections/4') {
       state.deleteCalls++;
@@ -38,6 +38,7 @@ async function connectionsApi(page: Page) {
 }
 
 test('configured services precede the catalog; a failed test remains separate from its timestamp and reload', async ({ catalogPage: page }) => {
+  await page.clock.setFixedTime('2030-01-01T20:00:00Z');
   const api = await connectionsApi(page);
   await page.goto('/connections');
   const row = page.getByRole('article', { name: 'Listening source' });
@@ -49,7 +50,7 @@ test('configured services precede the catalog; a failed test remains separate fr
   await expect(row).toContainText('Session test: Fail');
   await expect(row.getByRole('alert')).toContainText('Provider rejected fixture credentials');
   await expect.poll(() => api.testCalls).toBe(1);
-  await expect(row.locator('time')).toBeVisible();
+  await expect(row.locator('time')).toHaveAttribute('datetime', '2026-10-09T12:00:00Z');
   await page.reload();
   await expect(row).toContainText('Session test: Unknown');
   await expect(row.locator('time')).toHaveAttribute('datetime', '2026-10-09T12:00:00Z');
@@ -58,6 +59,20 @@ test('configured services precede the catalog; a failed test remains separate fr
   await expect(page.getByTestId('type-card-spotify')).toBeVisible();
   await expect(page.getByTestId('type-card-slskd')).toBeVisible();
   expect(await page.getByRole('dialog').locator('[style*="background-color"]').count()).toBe(0);
+});
+
+test('a passing session result uses the refetched server timestamp and reloads with an unknown verdict', async ({ catalogPage: page }) => {
+  await page.clock.setFixedTime('2030-01-01T20:00:00Z');
+  const api = await connectionsApi(page); api.testSuccess = true;
+  await page.goto('/connections');
+  const row = page.getByRole('article', { name: 'Listening source' });
+  await row.getByRole('button', { name: 'Test', exact: true }).click();
+  await expect(row).toContainText('Session test: Pass');
+  await expect(row.locator('time')).toHaveAttribute('datetime', '2026-10-09T12:00:00Z');
+  expect(api.testCalls).toBe(1);
+  await page.reload();
+  await expect(row).toContainText('Session test: Unknown');
+  await expect(row.locator('time')).toHaveAttribute('datetime', '2026-10-09T12:00:00Z');
 });
 
 test('OAuth errors stay unknown with Retry and a forged callback cannot manufacture authorization', async ({ catalogPage: page }) => {
