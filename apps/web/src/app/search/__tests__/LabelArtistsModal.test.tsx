@@ -1,3 +1,4 @@
+vi.mock('@/components/artists/AddArtistOptions', () => ({ useAddArtistOptions: () => ({ dialog: null, runWithOptions: (request: { mbid?: string }, execute: (options: unknown) => Promise<unknown>) => Promise.resolve(execute(request.mbid?.includes('-') && request.mbid.length === 36 ? { mbid: request.mbid } : {})).catch(() => null) }) }));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 

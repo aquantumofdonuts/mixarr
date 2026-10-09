@@ -129,4 +129,27 @@ describe('Feed acquisition claims', () => {
     const s = setup(); await s.service.dismiss('feed-1', 1); expect(s.rows()[0].status).toBe('rejected'); expect(s.reviews).toHaveLength(3);
     await expect(s.service.dismiss('feed-1', 1)).rejects.toMatchObject({ code: 'DECISION_CONFLICT' });
   });
+  it('binds an explicit identity to all owned unresolved records atomically and passes selected options', async () => {
+    const s = setup([{ mbid: null }, { mbid: null }]); const signal = new AbortController().signal;
+    s.lidarr.getQualityProfiles.mockResolvedValue([{ id: 9 }]); s.lidarr.getMetadataProfiles.mockResolvedValue([{ id: 8 }]); s.lidarr.getRootFolders.mockResolvedValue([{ path: '/archive' }]);
+    const response = await s.service.approve('feed-1-2', 1, signal, { mbid, qualityProfileId: 9, metadataProfileId: 8, rootFolderPath: '/archive', monitorOption: 'missing', monitorNewItems: 'new', searchOnAdd: false });
+    expect(response.outcome.state).toBe('added'); expect(s.rows().every(row => row.mbid === mbid && row.status === 'added')).toBe(true);
+    expect(s.lidarr.addArtistWithCacheWarm).toHaveBeenCalledWith(mbid, 9, 8, '/archive', true, false, false, 'missing', 'new', signal);
+    expect(s.lidarr.getQualityProfiles).toHaveBeenCalledWith(signal); expect(s.lidarr.getRootFolders).toHaveBeenCalledWith(signal);
+    expect(s.db.subscriptionResult.updateMany.mock.calls[0][0].where).toMatchObject({ id: 1, status: 'pending', processedAt: null, mbid: null, subscription: { userId: 1 } });
+  });
+  it('rolls back all explicit identity assignments when an aggregate claim loses its revision', async () => {
+    const s = setup([{ mbid: null }, { mbid: null }]);
+    const write = s.db.subscriptionResult.updateMany.getMockImplementation()!;
+    s.db.subscriptionResult.updateMany.mockImplementationOnce(write).mockResolvedValueOnce({ count: 0 });
+    await expect(s.service.approve('feed-1-2', 1, new AbortController().signal, { mbid })).rejects.toMatchObject({ code: 'DECISION_CONFLICT' });
+    expect(s.rows().every(row => row.mbid === null && row.status === 'pending')).toBe(true); expect(s.lidarr.addArtistWithCacheWarm).not.toHaveBeenCalled();
+  });
+  it('does not replace an existing identity or combine unrelated unresolved names', async () => {
+    const s = setup(); await expect(s.service.approve('feed-1', 1, new AbortController().signal, { mbid: '22222222-2222-4222-8222-222222222222' })).rejects.toMatchObject({ code: 'IDENTITY_CONFLICT' });
+    const unknown = setup([{ mbid: null }, { mbid: null, name: 'Other artist' }]);
+    await expect(unknown.service.approve('feed-1-2', 1, new AbortController().signal, { mbid })).rejects.toMatchObject({ code: 'INVALID_AGGREGATE' });
+    expect(s.db.$transaction).not.toHaveBeenCalled(); expect(unknown.db.$transaction).not.toHaveBeenCalled();
+  });
+
 });

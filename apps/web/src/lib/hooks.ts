@@ -1,3 +1,4 @@
+import type { ArtistAddOptions } from '@/components/artists/AddArtistOptions';
 'use client';
 
 import type { AcquisitionOutcome, AcquisitionState, UndoDecisionResponse, ArtistSourceRecord, ArtistDetail } from '@mixarr/shared-types';
@@ -181,18 +182,25 @@ export function useApproveFeedItem() {
       })) } : old);
   };
   return useMutation({
-    mutationFn: async (id: string) => {
+    retry: false,
+    mutationFn: async (input: string | { id: string; options: ArtistAddOptions }) => {
+      const id = typeof input === 'string' ? input : input.id;
       const { data, error, code } = await api.post<{ artistName: string; outcome: AcquisitionOutcome }>(
-        `/api/feed/${id}/approve`, undefined, { timeoutMs: 70_000 });
+        `/api/feed/${id}/approve`, typeof input === 'string' ? undefined : input.options, { timeoutMs: 70_000 });
       if (error) throw Object.assign(new Error(error), { code });
       if (!data?.outcome) throw new Error('Artist confirmation is unavailable. Refresh before retrying.');
       return data;
     },
-    onMutate: async id => {
+    onMutate: async input => {
+      const actorId = currentActor(queryClient);
+      const id = typeof input === 'string' ? input : input.id;
       await queryClient.cancelQueries({ queryKey: queryKeys.feed });
-      updateItem(id, { status: 'adding', acquisitionState: 'adding', acquisitionMessage: undefined });
+      if (actorId === currentActor(queryClient)) updateItem(id, { status: 'adding', acquisitionState: 'adding', acquisitionMessage: undefined });
+      return { actorId };
     },
-    onSuccess: (data, id) => {
+    onSuccess: (data, input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
+      const id = typeof input === 'string' ? input : input.id;
       const confirmed = data.outcome.state === 'added' || data.outcome.state === 'already-in-library';
       if (confirmed) {
         queryClient.setQueriesData<import('@tanstack/react-query').InfiniteData<FeedResponse>>(
@@ -208,7 +216,9 @@ export function useApproveFeedItem() {
         updateItem(id, { status: 'failed', acquisitionState: data.outcome.state, acquisitionMessage: data.outcome.message });
       }
     },
-    onError: (error, id) => {
+    onError: (error, input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
+      const id = typeof input === 'string' ? input : input.id;
       const code = (error as Error & { code?: string }).code;
       updateItem(id, { status: code === 'IN_PROGRESS' ? 'adding' : 'failed', acquisitionState: code === 'IDENTITY_REQUIRED' ? 'identity-required'
         : code === 'CONNECTION_REQUIRED' ? 'connection-required' : code === 'IN_PROGRESS' ? 'adding' : 'uncertain', acquisitionMessage: error.message });
@@ -512,12 +522,16 @@ export function useUpdateReviewItem() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ id, status }: { id: number; status: 'approved' | 'rejected' }) => {
-      const { data, error } = await api.put<Partial<UndoDecisionResponse>>(`/api/imports/review/${id}`, { status });
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
+    mutationFn: async ({ id, status, options }: { id: number; status: 'approved' | 'rejected'; options?: ArtistAddOptions }) => {
+      const { data, error } = await api.put<Partial<UndoDecisionResponse> & { success?: boolean }>(`/api/imports/review/${id}`, { status, ...options });
       if (error) throw new Error(error);
+      if (status === 'approved' && data?.success !== true) throw new Error('Review acquisition was not confirmed');
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, _input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
       queryClient.invalidateQueries({ queryKey: ['review'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
     },
@@ -528,12 +542,15 @@ export function useBulkUpdateReview() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ ids, status }: { ids: number[]; status: 'approved' | 'rejected' }) => {
-      const { data, error } = await api.post<Partial<UndoDecisionResponse>>('/api/imports/review/bulk', { ids, status });
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
+    mutationFn: async ({ ids, status, options }: { ids: number[]; status: 'approved' | 'rejected'; options?: ArtistAddOptions }) => {
+      const { data, error } = await api.post<Partial<UndoDecisionResponse> & { success?: boolean; addedIds?: number[]; failedIds?: number[]; failed?: number }>('/api/imports/review/bulk', { ids, status, ...options });
       if (error) throw new Error(error);
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, _input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
       queryClient.invalidateQueries({ queryKey: ['review'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
     },
@@ -730,6 +747,7 @@ export interface Profiles {
     metadataProfileId?: number;
     rootFolderPath?: string;
     monitorOption?: string;
+    monitorNewItems?: string;
     searchOnAdd?: boolean;
   };
 }
@@ -1002,10 +1020,10 @@ export function useApproveResult(subscriptionId: number) {
     mutationKey: ['subscriptions', subscriptionId, 'approve'],
     retry: false,
     onMutate: () => ({ actorId: currentActor(queryClient) }),
-    mutationFn: async (input: number | { resultId: number; mbid?: string }) => {
-      const { resultId, mbid } = typeof input === 'number' ? { resultId: input, mbid: undefined } : input;
+    mutationFn: async (input: number | { resultId: number; mbid?: string; options?: ArtistAddOptions }) => {
+      const { resultId, mbid, options } = typeof input === 'number' ? { resultId: input, mbid: undefined, options: undefined } : input;
       const { data, error, code, status } = await api.post<{ success: boolean; outcome: string; message: string }>(
-        `/api/subscriptions/${subscriptionId}/results/${resultId}/approve`, mbid ? { mbid } : undefined, { timeoutMs: 65000 });
+        `/api/subscriptions/${subscriptionId}/results/${resultId}/approve`, options ? { ...options, ...(mbid ? { mbid } : {}) } : mbid ? { mbid } : undefined, { timeoutMs: 65000 });
       if (error) throw Object.assign(new Error(error), { code, status });
       if (!data?.success || !['added', 'already-in-library'].includes(data.outcome)) {
         throw Object.assign(new Error('Provider outcome could not be confirmed; retry to check membership'), { code: 'ACQUISITION_UNCERTAIN' });

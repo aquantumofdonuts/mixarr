@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useAddArtistOptions, type ArtistAddOptions } from '@/components/artists/AddArtistOptions';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -40,6 +41,8 @@ export default function QueuePage() {
   const { data: queueData, isLoading } = useReviewQueue(statusFilter, itemTypeFilter);
   const items = queueData?.items ?? [];
   const totalItems = queueData?.total ?? items.length;
+  useEffect(() => { setProcessingId(null); }, [statusFilter, itemTypeFilter]);
+  const optionsAction = useAddArtistOptions(`${statusFilter}:${itemTypeFilter || ''}`);
   const updateMutation = useUpdateReviewItem();
   const bulkUpdateMutation = useBulkUpdateReview();
 
@@ -55,26 +58,45 @@ export default function QueuePage() {
     setSelectedIds(new Set());
   };
 
-  const handleUpdateStatus = async (id: number, status: 'approved' | 'rejected') => {
+  const handleUpdateStatus = async (id: number, status: 'approved' | 'rejected', options?: ArtistAddOptions, isCurrent = () => true) => {
+    if (status === 'approved' && !options) {
+      const item = items.find(row => row.id === id);
+      if (item) await optionsAction.runWithOptions({ name: item.artistName, mbid: item.mbid, album: item.itemType === 'album' }, (choices, current) => handleUpdateStatus(id, status, choices, current));
+      return;
+    }
     setProcessingId(id);
     try {
-      await updateMutation.mutateAsync({ id, status });
+      await updateMutation.mutateAsync({ id, status, options });
+      if (!isCurrent()) return;
       addToast({ type: 'success', title: status === 'approved' ? 'Item approved' : 'Item rejected' });
-    } catch {
-      addToast({ type: 'error', title: 'Failed to update item' });
-    }
-    setProcessingId(null);
+    } catch (error) {
+      if (isCurrent()) addToast({ type: 'error', title: 'Failed to update item' });
+      if (options) throw error;
+    } finally { if (isCurrent()) setProcessingId(null); }
   };
 
-  const handleBulkUpdate = async (status: 'approved' | 'rejected') => {
+  const handleBulkUpdate = async (status: 'approved' | 'rejected', options?: ArtistAddOptions, remaining = new Set(selectedIds), isCurrent = () => true) => {
+    if (status === 'approved' && !options) {
+      if ([...selectedIds].some(id => !items.find(row => row.id === id)?.mbid)) { addToast({ type: 'error', title: 'Identify each selected artist before bulk approval' }); return; }
+      await optionsAction.runWithOptions({ name: `Add ${selectedIds.size} selected review items`, bulk: true, album: [...selectedIds].every(id => items.find(row => row.id === id)?.itemType === 'album'), mixed: [...selectedIds].some(id => items.find(row => row.id === id)?.itemType === 'album') && [...selectedIds].some(id => items.find(row => row.id === id)?.itemType !== 'album') }, (choices, current) => handleBulkUpdate(status, choices, remaining, current));
+      return;
+    }
     if (selectedIds.size === 0) return;
     
     try {
-      await bulkUpdateMutation.mutateAsync({ ids: Array.from(selectedIds), status });
+      const response = await bulkUpdateMutation.mutateAsync({ ids: Array.from(remaining), status, options });
+      if (!isCurrent()) return;
+      if (status === 'approved') {
+        const succeeded = new Set(response?.addedIds || []);
+        succeeded.forEach(id => remaining.delete(id));
+        setSelectedIds(previous => new Set([...previous].filter(id => !succeeded.has(id))));
+        if (response?.success !== true || response.failed) throw new Error(`${response?.failed || 'Some'} review additions failed; options and failed selection are retained`);
+      }
       addToast({ type: 'success', title: `${selectedIds.size} items ${status}` });
       setSelectedIds(new Set());
-    } catch {
-      addToast({ type: 'error', title: 'Failed to update items' });
+    } catch (error) {
+      if (isCurrent()) addToast({ type: 'error', title: 'Failed to update items' });
+      if (options) throw error;
     }
   };
 
@@ -345,6 +367,7 @@ export default function QueuePage() {
       )}
 
       {/* slskd Search Modal */}
+      {optionsAction.dialog}
       {slskdSearchArtist && (
         <SlskdSearchModal
           isOpen={slskdModalOpen}

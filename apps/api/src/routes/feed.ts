@@ -1,3 +1,4 @@
+import { addOptionsSchema } from '../lib/add-options.js';
 /**
  * Feed Routes - Discovery Feed API
  *
@@ -99,6 +100,8 @@ export function feedRouter(feedService?: FeedService): Router {
    */
   router.post('/:id/approve', requireAuth, async (req: Request, res: Response): Promise<void> => {
     try {
+      const body = addOptionsSchema.extend({ mbid: z.string().uuid().optional() }).strict().safeParse(req.body ?? {});
+      if (!body.success) { res.status(400).json({ error: 'Invalid approval options', code: 'INVALID_REQUEST' }); return; }
       const feedId = req.params.id;
       const userId = req.user!.id;
 
@@ -112,7 +115,7 @@ export function feedRouter(feedService?: FeedService): Router {
         ? new FeedService(undefined, lidarrResult.service, lidarrResult.config, cacheService)
         : service;
 
-      const result = await approveService.approve(feedId, userId, signal);
+      const result = await approveService.approve(feedId, userId, signal, body.data);
       res.json({ success: result.outcome.state === 'added' || result.outcome.state === 'already-in-library', ...result });
     } catch (error) {
       if (error instanceof DecisionError) {

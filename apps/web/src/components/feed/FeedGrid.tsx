@@ -1,5 +1,6 @@
 'use client';
 
+import type { ArtistAddOptions } from '@/components/artists/AddArtistOptions';
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { EmptyState, Skeleton, Button } from '@/components/ui';
@@ -9,7 +10,7 @@ import type { FeedItem } from '@/lib/hooks';
 
 export interface FeedGridProps {
   items: FeedItem[];
-  onApprove: (id: string) => void;
+  onApprove: (id: string, options?: ArtistAddOptions) => Promise<void> | void;
   onDismiss: (id: string) => void;
   onLoadMore: () => void;
   hasMore: boolean;

@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { effectiveAddOptions } from '../lib/add-options.js';
 import { Router } from 'express';
 import prisma from '../lib/db.js';
 import { DecisionError, nextRevision } from '../lib/decision.js';
@@ -21,7 +23,6 @@ import { addImportScheduledJob, removeImportScheduledJob } from '../jobs/schedul
 import { SpotifyService } from '../services/spotify.js';
 import { LastfmService } from '../services/lastfm.js';
 import { LidarrService, LidarrCache } from '../services/lidarr.js';
-import { MusicBrainzService } from '../services/musicbrainz.js';
 import { AIService } from '../services/ai.js';
 import { getArtistImages } from '../services/artist-images.js';
 import { addLogEntry } from './logs.js';
@@ -316,46 +317,17 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
     // Normalize config to ensure profile IDs are numbers (handles string values from DB)
     const lidarrConfig = normalizeLidarrConfig(rawConfig);
     const lidarr = new LidarrService(lidarrConfig);
+    const foreignArtistId = item.mbid || req.body.mbid;
+    if (!foreignArtistId || !z.string().uuid().safeParse(foreignArtistId).success) throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a MusicBrainz artist before adding');
+    if (item.mbid && req.body.mbid && item.mbid.toLowerCase() !== req.body.mbid.toLowerCase()) throw new DecisionError(409, 'IDENTITY_CONFLICT', 'Review already has an artist identity');
+    if (item.itemType === 'album' && !z.string().uuid().safeParse(item.albumMbid).success) throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a valid album identity before adding');
+    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
     const cache = new LidarrCache(lidarr);
-    await cache.refresh();
-
-    // Skip if already in library
-    if (await cache.exists({ name: item.artistName, mbid: item.mbid || undefined })) {
-      await updateReviewDecision(item, { status: 'approved' });
-      await addLogEntry('info', 'review', `Artist "${item.artistName}" already in library`, {
-        artistName: item.artistName,
-        mbid: item.mbid,
-      });
-      res.json({ success: true, message: 'Artist already in library', alreadyInLibrary: true });
+    if (item.itemType !== 'album' && await cache.exists({ mbid: foreignArtistId })) {
+      await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
+      res.json({ success: true, alreadyInLibrary: true });
       return;
     }
-
-    // Get MBID if not available
-    let foreignArtistId = item.mbid;
-    if (!foreignArtistId) {
-      const searchResults = await lidarr.searchArtist(item.artistName);
-      if (searchResults.length > 0) {
-        foreignArtistId = searchResults[0].foreignArtistId;
-      } else {
-        const musicbrainz = new MusicBrainzService();
-        foreignArtistId = await musicbrainz.getMbidFromSpotifyArtist(item.artistName);
-      }
-    }
-
-    if (!foreignArtistId) {
-      await addLogEntry('warn', 'review', `Artist "${item.artistName}" not found in Lidarr or MusicBrainz`, {
-        artistName: item.artistName,
-      });
-      res.status(400).json({ error: 'Artist not found in Lidarr or MusicBrainz' });
-      return;
-    }
-
-    // Get Lidarr defaults
-    const [qualityProfiles, metadataProfiles, rootFolders] = await Promise.all([
-      lidarr.getQualityProfiles(),
-      lidarr.getMetadataProfiles(),
-      lidarr.getRootFolders(),
-    ]);
 
     // Add to Lidarr - check if this is an album or artist approval
     const isAlbumApproval = item.itemType === 'album' && item.albumMbid;
@@ -365,9 +337,9 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
       await lidarr.addAlbumWithCacheWarm(
         foreignArtistId,
         item.albumMbid!,
-        qualityProfiles[0].id,
-        metadataProfiles[0].id,
-        rootFolders[0].path
+        options.qualityProfileId,
+        options.metadataProfileId,
+        options.rootFolderPath, undefined, options.searchOnAdd
       );
       
       await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
@@ -390,14 +362,14 @@ importsRouter.put('/review/:id', validateParams(importIdParamSchema), validateBo
       // Use monitorOption from connection config (defaults to 'all' if not set)
       await lidarr.addArtistWithCacheWarm(
         foreignArtistId,
-        qualityProfiles[0].id,
-        metadataProfiles[0].id,
-        rootFolders[0].path,
+        options.qualityProfileId,
+        options.metadataProfileId,
+        options.rootFolderPath,
         true,  // monitored
-        true,  // searchForMissingAlbums
+        options.searchOnAdd,
         false, // waitForRefresh (deprecated)
-        lidarrConfig.monitorOption || 'all',
-        lidarrConfig.monitorNewItems || 'all'
+        options.monitorOption,
+        options.monitorNewItems
       );
 
       await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
@@ -479,20 +451,10 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
     const lidarr = new LidarrService(lidarrConfig);
     const cache = new LidarrCache(lidarr);
     await cache.refresh();
-    const musicbrainz = new MusicBrainzService();
+    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
 
-    // Get Lidarr defaults
-    const [qualityProfiles, metadataProfiles, rootFolders] = await Promise.all([
-      lidarr.getQualityProfiles(),
-      lidarr.getMetadataProfiles(),
-      lidarr.getRootFolders(),
-    ]);
-
-    if (!qualityProfiles.length || !metadataProfiles.length || !rootFolders.length) {
-      res.status(400).json({ error: 'Lidarr missing profiles or root folders' });
-      return;
-    }
-
+    const addedIds: number[] = [];
+    const failedIds: number[] = [];
     let added = 0;
     let failed = 0;
     const failedItems: Array<{ name: string; error: string }> = [];
@@ -505,9 +467,11 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
         log.debug(`Processing review item: ${item.artistName}${isAlbum ? ` - ${item.albumName}` : ''} (mbid: ${item.mbid || 'none'}, type: ${item.itemType || 'artist'})`);
         
         // For artists: Skip if already in library
-        if (!isAlbum && await cache.exists({ name: item.artistName, mbid: item.mbid || undefined })) {
+        if (!isAlbum && item.mbid && await cache.exists({ mbid: item.mbid })) {
           log.debug(`Artist ${item.artistName} already in library, marking approved`);
           await updateReviewDecision(item, { status: 'approved' });
+          addedIds.push(item.id);
+          added++;
           await addLogEntry('info', 'review', `Artist "${item.artistName}" already in library`, {
             artistName: item.artistName,
             mbid: item.mbid,
@@ -515,33 +479,10 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
           continue;
         }
 
-        // Get MBID if not available - try Lidarr search first
-        let foreignArtistId = item.mbid;
-        
-        if (!foreignArtistId) {
-          log.debug(`No MBID for ${item.artistName}, searching Lidarr...`);
-          // Search Lidarr by artist name
-          const searchResults = await lidarr.searchArtist(item.artistName);
-          if (searchResults.length > 0) {
-            foreignArtistId = searchResults[0].foreignArtistId;
-            log.debug(`Found via Lidarr search: ${foreignArtistId}`);
-          } else {
-            // Fall back to MusicBrainz
-            log.debug(`Not found in Lidarr, trying MusicBrainz...`);
-            foreignArtistId = await musicbrainz.getMbidFromSpotifyArtist(item.artistName);
-            if (foreignArtistId) {
-              log.debug(`Found via MusicBrainz: ${foreignArtistId}`);
-            }
-          }
-        }
-
-        if (!foreignArtistId) {
-          log.debug(`No MBID found for ${item.artistName}`);
-          failedItems.push({ name: item.artistName, error: 'Artist not found' });
-          await updateReviewDecision(item, { status: 'rejected' });
-          await addLogEntry('warn', 'review', `Artist "${item.artistName}" not found in Lidarr or MusicBrainz`, {
-            artistName: item.artistName,
-          });
+        const foreignArtistId = item.mbid;
+        if (!foreignArtistId || !z.string().uuid().safeParse(foreignArtistId).success) {
+          failedItems.push({ name: item.artistName, error: 'Choose a MusicBrainz artist before adding' });
+          failedIds.push(item.id);
           failed++;
           continue;
         }
@@ -550,31 +491,19 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
           // For album items: add artist as unmonitored and monitor specific album
           log.debug(`Adding album "${item.albumName}" by ${item.artistName} (${foreignArtistId}) to Lidarr...`);
           
-          // Get album MBID if not available
-          let albumMbid = item.albumMbid;
-          if (!albumMbid && item.albumName) {
-            // Search for the album in Lidarr
-            const albumSearchResults = await lidarr.searchAlbum(`${item.albumName} ${item.artistName}`);
-            if (albumSearchResults.length > 0) {
-              albumMbid = albumSearchResults[0].foreignAlbumId;
-              log.debug(`Found album via Lidarr search: ${albumMbid}`);
-            }
-          }
-          
-          if (!albumMbid) {
-            log.debug(`No album MBID found for "${item.albumName}" by ${item.artistName}`);
-            failedItems.push({ name: `${item.artistName} - ${item.albumName}`, error: 'Album not found' });
-            await updateReviewDecision(item, { status: 'rejected' });
-            failed++;
+          const albumMbid = item.albumMbid;
+          if (!albumMbid || !z.string().uuid().safeParse(albumMbid).success) {
+            failedItems.push({ name: `${item.artistName} - ${item.albumName}`, error: 'Choose a valid album identity before adding' });
+            failedIds.push(item.id); failed++;
             continue;
           }
-          
+
           await lidarr.addAlbumWithCacheWarm(
             foreignArtistId,
             albumMbid,
-            qualityProfiles[0].id,
-            metadataProfiles[0].id,
-            rootFolders[0].path
+            options.qualityProfileId,
+            options.metadataProfileId,
+            options.rootFolderPath, undefined, options.searchOnAdd
           );
           log.info(`Successfully added album "${item.albumName}" by ${item.artistName} to Lidarr`);
           
@@ -590,14 +519,14 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
           log.debug(`Adding ${item.artistName} (${foreignArtistId}) to Lidarr...`);
           await lidarr.addArtistWithCacheWarm(
             foreignArtistId,
-            qualityProfiles[0].id,
-            metadataProfiles[0].id,
-            rootFolders[0].path,
+            options.qualityProfileId,
+            options.metadataProfileId,
+            options.rootFolderPath,
             true,  // monitored
-            true,  // searchForMissingAlbums
+            options.searchOnAdd,
             false, // waitForRefresh (deprecated)
-            lidarrConfig.monitorOption || 'all',
-            lidarrConfig.monitorNewItems || 'all'
+            options.monitorOption,
+            options.monitorNewItems
           );
           log.info(`Successfully added ${item.artistName} to Lidarr`);
           
@@ -610,14 +539,12 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
 
         await updateReviewDecision(item, { status: 'approved', mbid: foreignArtistId });
         added++;
+        addedIds.push(item.id);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         log.error(`Failed to add ${item.artistName}:`, errorMsg);
         failedItems.push({ name: item.artistName, error: errorMsg });
-        if (!(error instanceof DecisionError)) {
-          try { await updateReviewDecision(item, { status: 'rejected' }); }
-          catch (conflict) { if (!(conflict instanceof DecisionError)) throw conflict; }
-        }
+        failedIds.push(item.id);
         failed++;
       }
     }
@@ -631,7 +558,7 @@ importsRouter.post('/review/bulk', validateBody(bulkReviewSchema), async (req, r
       });
     }
 
-    res.json({ success: true, added, failed, failedItems });
+    res.json({ success: failed === 0, added, failed, failedItems, addedIds, failedIds });
   } catch (error) {
     if (error instanceof DecisionError) {
       res.status(error.status).json({ error: error.message, code: error.code });

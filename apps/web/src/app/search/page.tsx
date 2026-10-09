@@ -1,13 +1,11 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ResultState } from '@/components/ui/result-state';
-import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { SlskdSearchModal } from '@/components/slskd/SearchModal';
 import { useListContext } from '@/hooks/useListContext';
-import { api } from '@/lib/api';
 import { useSearch } from './hooks/useSearch';
 import { useArtistAdd } from './hooks/useArtistAdd';
 import type { LabelResult } from './hooks/useSearch';
@@ -17,29 +15,19 @@ import { AlbumSearch } from './components/AlbumSearch';
 import { LabelSearch } from './components/LabelSearch';
 import { YearSearch } from './components/YearSearch';
 import { AISearch } from './components/AISearch';
-import { MbidSelectionModal } from './components/MbidSelectionModal';
 import { LabelArtistsModal } from './components/LabelArtistsModal';
 
 export default function SearchPage() {
   const search = useSearch();
   const artistAdd = useArtistAdd(search.setResults, search.scope);
-  const { addToast } = useToast();
   const artists = ['artist', 'ai'].includes(search.resultType);
   const context = useListContext({ ready: search.hasSearched && !search.isStale, selectionOwner: false, restore: !artists });
-  const scopeRef = useRef({ value: search.scope });
-  if (scopeRef.current.value !== search.scope) scopeRef.current = { value: search.scope };
-  const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [slskdSearchArtist, setSlskdSearchArtist] = useState<{ name: string; image?: string } | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<LabelResult | null>(null);
   const handleAlbumAddArtist = useCallback(async (artistId: string, artistName: string) => {
-    const owner = scopeRef.current;
-    const { data, error } = await api.post<{ success?: boolean }>('/api/search/artists/add', { foreignArtistId: artistId });
-    const success = data?.success === true && !error;
-    const message = error || (success ? undefined : 'Addition was not confirmed. Check Lidarr before retrying.');
-    if (mounted.current && scopeRef.current === owner) addToast({ type: success ? 'success' : 'error', title: success ? 'Artist added' : 'Failed to add artist', message: success ? `${artistName} added to Lidarr` : message });
-    return { success, error: message };
-  }, [addToast]);
+    const result = await artistAdd.handleAddArtist({ foreignArtistId: artistId, artistName });
+    return { success: result === true, error: result === true ? undefined : 'Addition cancelled or unconfirmed' };
+  }, [artistAdd.handleAddArtist]);
   const disabled = search.isSearching || search.isStale;
   const artistProps = { results: search.results, addingArtistId: artistAdd.addingArtistId, pendingIds: artistAdd.pendingIds,
     isBulkAdding: artistAdd.isBulkAdding, disabled, onAddArtist: artistAdd.handleAddArtist, onBatchAdd: artistAdd.handleBatchAdd,
@@ -68,7 +56,8 @@ export default function SearchPage() {
     </div>}
     {!search.committedQuery && <ResultState kind="not-searched" message="Enter an artist, album, label, year or listening prompt, then Search." />}
     {search.committedQuery && !search.isSearching && !search.error && search.hasSearched && search.results.length === 0 && <ResultState kind="no-matches" message="Try another query or search source." />}
-    <MbidSelectionModal candidates={artistAdd.mbidCandidates} artist={artistAdd.selectingArtist} onSelect={artistAdd.handleAddWithMbid} onClose={artistAdd.clearMbidModal} />
+    {artistAdd.optionsDialog}
+
     <LabelArtistsModal label={selectedLabel ? { name: selectedLabel.name, id: selectedLabel.id } : null} onClose={() => setSelectedLabel(null)} />
     {slskdSearchArtist && <SlskdSearchModal isOpen artistName={slskdSearchArtist.name} artistImage={slskdSearchArtist.image} onClose={() => setSlskdSearchArtist(null)} />}
   </>;

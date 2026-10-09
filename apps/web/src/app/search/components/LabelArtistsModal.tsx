@@ -1,5 +1,6 @@
 'use client';
 
+import { useAddArtistOptions, type ArtistAddOptions } from '@/components/artists/AddArtistOptions';
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -47,6 +48,7 @@ export function LabelArtistsModal({ label, onClose }: LabelArtistsModalProps) {
   const [totalArtists, setTotalArtists] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const optionsAction = useAddArtistOptions(label?.id || '');
   const { addToast } = useToast();
 
   // ─── Fetch initial page on open ──────────────────────────────────
@@ -57,6 +59,7 @@ export function LabelArtistsModal({ label, onClose }: LabelArtistsModalProps) {
 
     const fetchInitial = async () => {
       setIsLoading(true);
+      setIsAddingBatch(false);
       setArtists([]);
       setSelectedIds(new Set());
       setSearchQuery('');
@@ -155,7 +158,11 @@ export function LabelArtistsModal({ label, onClose }: LabelArtistsModalProps) {
   };
 
   // ─── Batch add ───────────────────────────────────────────────────
-  const handleBatchAdd = async () => {
+  const handleBatchAdd = async (options?: ArtistAddOptions, remaining = new Set(selectedIds), isCurrent = () => true) => {
+    if (!options) {
+      await optionsAction.runWithOptions({ name: `Add ${selectedIds.size} selected artists`, bulk: true }, (choices, current) => handleBatchAdd(choices, remaining, current));
+      return;
+    }
     if (selectedIds.size === 0) return;
 
     setIsAddingBatch(true);
@@ -163,17 +170,22 @@ export function LabelArtistsModal({ label, onClose }: LabelArtistsModalProps) {
       added: string[];
       skipped: string[];
       failed: { id: string; error: string }[];
-    }>('/api/search/batch', { artistIds: Array.from(selectedIds) });
+    }>('/api/search/batch', { artistIds: Array.from(remaining), ...options });
 
+    if (!isCurrent()) return;
     if (error) {
+      setIsAddingBatch(false);
       addToast({ type: 'error', title: 'Failed to add artists', message: error });
+      throw new Error(error);
     } else if (data) {
       addToast({
         type: 'success',
         title: 'Artists added',
         message: `Added: ${data.added.length}, Skipped: ${data.skipped.length}, Failed: ${data.failed.length}`,
       });
-      setSelectedIds(new Set());
+      [...data.added, ...data.skipped].forEach(id => remaining.delete(id));
+      setSelectedIds(previous => new Set([...previous].filter(id => !data.added.includes(id) && !data.skipped.includes(id))));
+      if (data.failed.length) { setIsAddingBatch(false); throw new Error(`${data.failed.length} artist additions failed`); }
       onClose();
     }
     setIsAddingBatch(false);
@@ -183,7 +195,7 @@ export function LabelArtistsModal({ label, onClose }: LabelArtistsModalProps) {
   if (!label) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <> {optionsAction.dialog}<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <Card className="w-full max-w-2xl max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
@@ -197,7 +209,7 @@ export function LabelArtistsModal({ label, onClose }: LabelArtistsModalProps) {
           </div>
           <div className="flex items-center gap-2">
             {selectedIds.size > 0 && (
-              <Button size="sm" onClick={handleBatchAdd} disabled={isAddingBatch}>
+              <Button size="sm" onClick={() => void handleBatchAdd()} disabled={isAddingBatch}>
                 {isAddingBatch ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : (
@@ -316,6 +328,6 @@ export function LabelArtistsModal({ label, onClose }: LabelArtistsModalProps) {
           )}
         </div>
       </Card>
-    </div>
+    </div></>
   );
 }

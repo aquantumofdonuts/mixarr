@@ -1,5 +1,6 @@
 'use client';
 
+import type { ArtistAddOptions } from '@/components/artists/AddArtistOptions';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/layout/page-header';
@@ -41,23 +42,26 @@ export default function Home() {
     pending.current.delete(id);
     if (live.current) setLoadingIds(new Set(pending.current));
   }
-  async function handleApprove(id: string) {
+  async function handleApprove(id: string, options?: ArtistAddOptions) {
     const item = items.find(row => row.id === id);
     if (!item || !begin(id)) return;
     keep({ ...item, status: 'adding', acquisitionState: 'adding', acquisitionMessage: 'Waiting for Lidarr confirmation…' });
     try {
-      const result = await approveMutation.mutateAsync(id);
+      const result = await approveMutation.mutateAsync(options ? { id, options } : id);
       if (!live.current) return;
       const confirmed = result.outcome.state === 'added' || result.outcome.state === 'already-in-library';
       keep({ ...item, status: confirmed ? 'added' : 'failed', acquisitionState: result.outcome.state, acquisitionMessage: result.outcome.message });
-      addToast({ type: confirmed ? 'success' : 'error', title: result.outcome.state === 'already-in-library' ? 'Already in Lidarr' : confirmed ? 'Added to Lidarr' : 'Addition unconfirmed', message: result.outcome.message });
+      if (confirmed) addToast({ type: 'success', title: result.outcome.state === 'already-in-library' ? 'Already in Lidarr' : confirmed ? 'Added to Lidarr' : 'Addition unconfirmed', message: result.outcome.message });
+      if (!confirmed) throw Object.assign(new Error(result.outcome.message), { outcomeHandled: true });
     } catch (failure) {
       if (!live.current) return;
-      const error = failure as Error & { code?: string };
+      const error = failure as Error & { code?: string; outcomeHandled?: boolean };
       const state = error.code === 'IDENTITY_REQUIRED' ? 'identity-required' : error.code === 'CONNECTION_REQUIRED' ? 'connection-required' : error.code === 'IN_PROGRESS' ? 'adding' : 'uncertain';
-      if (state === 'adding') setRecent(previous => previous.filter(row => row.id !== id));
+      if (error.outcomeHandled) { /* The returned provider outcome is already retained above. */ }
+      else if (state === 'adding') setRecent(previous => previous.filter(row => row.id !== id));
       else keep({ ...item, status: 'failed', acquisitionState: state, acquisitionMessage: error.message });
       addToast({ type: 'error', title: 'Addition unconfirmed', message: error.message });
+      throw failure;
     } finally { finish(id); }
   }
   async function handleDismiss(id: string) {

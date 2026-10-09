@@ -39,15 +39,18 @@ test('identity selection acquires only the chosen original result', async ({ cat
   });
   await page.goto('/subscriptions/11?tab=results');
   await page.getByRole('button', { name: 'Identify and add artist Unknown Common Name' }).click();
-  const picker = page.getByRole('dialog', { name: 'Select Artist' });
-  await expect(picker.getByRole('button', { name: /Canadian ensemble/ })).toBeVisible();
+  const picker = page.getByRole('dialog', { name: 'Add artist options', exact: true });
+  await expect(picker.getByRole('radio', { name: /Canadian ensemble/ })).toBeVisible();
   expect(approvals).toEqual([]);
   await picker.getByRole('button', { name: 'Cancel', exact: true }).click();
   expect(approvals).toEqual([]);
   await page.getByRole('button', { name: 'Identify and add artist Unknown Common Name' }).click();
-  await picker.getByRole('button', { name: /Canadian ensemble/ }).click();
+  await picker.getByRole('radio', { name: /Canadian ensemble/ }).check();
+  await picker.getByRole('button', { name: 'Confirm add', exact: true }).click();
   await expect(page.getByText('Artist added to Lidarr', { exact: true }).first()).toBeVisible();
-  expect(approvals).toEqual([{ path: '/api/subscriptions/11/results/101/approve', body: { mbid: ARTIST_IDS[1] } }]);
+  expect(approvals).toHaveLength(1);
+  expect(approvals[0].path).toBe('/api/subscriptions/11/results/101/approve');
+  expect(approvals[0].body).toMatchObject({ mbid: ARTIST_IDS[1], qualityProfileId: 1, rootFolderPath: '/music', searchOnAdd: true });
 });
 
 test('run error offers retry instead of empty results', async ({ catalogPage: page }) => {
@@ -92,6 +95,7 @@ test('an uncertain acquisition remains retryable without a success claim', async
   await page.route('**/api/subscriptions/11/results/102/approve', route => route.fulfill({ status: 503, json: { error: 'Provider outcome could not be confirmed; retry to reconcile', code: 'ACQUISITION_UNCERTAIN', outcome: 'uncertain' } }));
   await page.goto('/subscriptions/11?tab=results');
   await page.getByRole('button', { name: 'Add artist Result Artist 2', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Add artist options', exact: true }).getByRole('button', { name: 'Confirm add', exact: true }).click();
   await expect(page.getByRole('article', { name: 'Result 102', exact: true }).getByText('Provider outcome could not be confirmed; retry to reconcile')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add artist Result Artist 2', exact: true })).toBeEnabled();
   await expect(page.getByText('Artist added to Lidarr', { exact: true })).toHaveCount(0);

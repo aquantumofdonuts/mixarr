@@ -229,7 +229,7 @@ describe('owned subscription result decisions through the actual router', () => 
     mocks.membership.mockResolvedValue({ id: 10, foreignArtistId: mbid });
     expect((await approve()).status).toBe(200);
     expect(mocks.addArtist).not.toHaveBeenCalled();
-    expect(mocks.addAlbum).toHaveBeenCalledWith(mbid, otherMbid, 1, 2, '/music', expect.any(AbortSignal));
+    expect(mocks.addAlbum).toHaveBeenCalledWith(mbid, otherMbid, 1, 2, '/music', expect.any(AbortSignal), true);
   });
   it('monitors and searches an existing unmonitored album through targeted acquisition', async () => {
     row.itemType = 'album'; row.albumMbid = otherMbid;
@@ -237,7 +237,7 @@ describe('owned subscription result decisions through the actual router', () => 
     mocks.albums.mockResolvedValue([{ foreignAlbumId: otherMbid, monitored: false }]);
     const response = await approve();
     expect(response.status).toBe(200); expect(response.body.outcome).toBe('added');
-    expect(mocks.addAlbum).toHaveBeenCalledWith(mbid, otherMbid, 1, 2, '/music', expect.any(AbortSignal));
+    expect(mocks.addAlbum).toHaveBeenCalledWith(mbid, otherMbid, 1, 2, '/music', expect.any(AbortSignal), true);
     expect(mocks.addArtist).not.toHaveBeenCalled();
   });
   it('reconciles an existing monitored album without repeating targeted acquisition', async () => {
@@ -312,4 +312,25 @@ describe('owned subscription result decisions through the actual router', () => 
     mocks.subscriptionResult.updateMany.mockResolvedValue({ count: 0 });
     expect((await reject()).status).toBe(409); expect(row.status).toBe('pending');
   });
+  it('passes selected options and the existing operation signal to artist acquisition', async () => {
+    mocks.profiles.mockResolvedValue([{ id: 8 }, { id: 9 }]); mocks.folders.mockResolvedValue([{ path: '/archive' }]);
+    const response = await approve({ qualityProfileId: 9, metadataProfileId: 8, rootFolderPath: '/archive', monitorOption: 'future', monitorNewItems: 'none', searchOnAdd: false });
+    expect(response.status).toBe(200);
+    expect(mocks.addArtist).toHaveBeenCalledWith(mbid, 9, 8, '/archive', true, false, false, 'future', 'none', expect.any(AbortSignal));
+    const signal = mocks.addArtist.mock.calls[0][9];
+    expect(mocks.profiles.mock.calls.every(call => call[0] === signal)).toBe(true); expect(mocks.folders).toHaveBeenCalledWith(signal);
+  });
+  it('passes false search on add to targeted album acquisition while preserving artist identity', async () => {
+    row.itemType = 'album'; row.albumMbid = otherMbid;
+    const response = await approve({ searchOnAdd: false });
+    expect(response.status).toBe(200);
+    expect(mocks.addAlbum).toHaveBeenCalledWith(mbid, otherMbid, 1, 2, '/music', expect.any(AbortSignal), false);
+    expect(mocks.addArtist).not.toHaveBeenCalled();
+  });
+  it('does not acquire after an unavailable explicit profile choice', async () => {
+    mocks.profiles.mockResolvedValue([{ id: 1 }]);
+    const response = await approve({ qualityProfileId: 99 });
+    expect(response.body.success).toBe(false); expect(mocks.addArtist).not.toHaveBeenCalled(); expect(row.status).toBe('failed');
+  });
+
 });

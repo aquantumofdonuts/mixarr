@@ -29,6 +29,7 @@ test('a single same-name add preserves the other selected identity and inspector
   await rows[0].getByRole('checkbox', { name: 'Select Common Name', exact: true }).check();
   await rows[1].getByRole('checkbox', { name: 'Select Common Name', exact: true }).check();
   await rows[0].getByRole('button', { name: 'Add artist Common Name', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Add artist options', exact: true }).getByRole('button', { name: 'Confirm add', exact: true }).click();
   await expect(rows[0].getByText('In Lidarr', { exact: true })).toBeVisible();
   await expect(rows[1].getByRole('checkbox', { name: 'Select Common Name', exact: true })).toBeChecked();
   expect(added).toEqual([ARTIST_IDS[0]]);

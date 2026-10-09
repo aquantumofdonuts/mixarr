@@ -16,8 +16,9 @@ let finishAdd: (value: any) => void;
 function Consumer() {
   const { user: actor, login, logout } = useAuth();
   const { addToast } = useToast();
-  const { handleAddArtist } = useArtistAdd(() => {});
+  const { handleAddArtist, optionsDialog } = useArtistAdd(() => {});
   return <>
+    {optionsDialog}
     <p>Actor {actor?.id ?? 'anonymous'}</p>
     <button onClick={() => addToast({ type: 'info', title: 'Actor 1 private notification', duration: 0 })}>Notify</button>
     <button onClick={() => void handleAddArtist({ foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', artistName: 'Actor 1 private artist' })}>Start add</button>
@@ -30,6 +31,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(['auth'], auth(1));
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(auth(2)), { headers: { 'Content-Type': 'application/json' } })));
+  vi.spyOn(api, 'get').mockResolvedValue({ data: { qualityProfiles: [{id: 1, name: 'Default'}], metadataProfiles: [{id: 1, name: 'Default'}], rootFolders: [{id: 1, path: '/music'}] }, error: null } as any);
   vi.spyOn(api, 'post').mockImplementation(() => new Promise(resolve => { finishAdd = resolve; }));
   render(<QueryClientProvider client={client}><AuthProvider><ToastProvider><Consumer /></ToastProvider></AuthProvider></QueryClientProvider>);
 });
@@ -46,6 +48,9 @@ describe('authenticated consumer notification boundary', () => {
 
   it.each([['Logout', 'Actor anonymous'], ['Switch actor', 'Actor 2']])('ignores an original actor add response after %s', async (action, nextActor) => {
     fireEvent.click(screen.getByRole('button', { name: 'Start add' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: action }));
     await waitFor(() => expect(screen.getByText(nextActor)).toBeInTheDocument());
     await act(async () => finishAdd({ data: { success: true }, error: null }));

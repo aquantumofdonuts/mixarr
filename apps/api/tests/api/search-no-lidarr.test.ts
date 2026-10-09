@@ -40,8 +40,8 @@ vi.mock('../../src/middleware/auth.js', () => ({
 
 // Mock MusicBrainz service - returns results
 const mockMusicBrainzArtists = [
-  { id: 'mbid-1', name: 'Pink Floyd', country: 'GB', type: 'Group', disambiguation: 'English rock band' },
-  { id: 'mbid-2', name: 'Pink', country: 'US', type: 'Person', disambiguation: 'American singer' },
+  { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Pink Floyd', country: 'GB', type: 'Group', disambiguation: 'English rock band' },
+  { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', name: 'Pink', country: 'US', type: 'Person', disambiguation: 'American singer' },
 ];
 
 vi.mock('../../src/services/musicbrainz.js', () => ({
@@ -62,7 +62,7 @@ vi.mock('../../src/services/musicbrainz.js', () => ({
       return { releases: [], count: 0, offset: 0 };
     }
     async getArtist() {
-      return { id: 'mbid-1', name: 'Pink Floyd' };
+      return { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Pink Floyd' };
     }
     async getRelease() {
       return { id: 'release-1', title: 'Dark Side of the Moon' };
@@ -109,7 +109,7 @@ vi.mock('../../src/services/multi-search.js', () => ({
   multiSourceSearch: vi.fn().mockResolvedValue([
     { name: 'Test Artist', source: 'spotify' },
   ]),
-  resolveMbid: vi.fn().mockResolvedValue({ mbid: 'mbid-1' }),
+  resolveMbid: vi.fn().mockResolvedValue({ mbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
 }));
 
 // Mock metadata enrichment service
@@ -270,7 +270,7 @@ describe('Search API - No Lidarr Mode', () => {
     it('should require Lidarr connection for adding artists', async () => {
       const response = await request(app)
         .post('/api/search/artists/add')
-        .send({ foreignArtistId: 'mbid-1' });
+        .send({ foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
 
       // Adding artists MUST require Lidarr
       expect(response.status).toBe(400);
@@ -294,7 +294,7 @@ describe('Search API - No Lidarr Mode', () => {
     it('should require Lidarr connection for batch add', async () => {
       const response = await request(app)
         .post('/api/search/batch')
-        .send({ artistIds: ['mbid-1', 'mbid-2'] });
+        .send({ artistIds: ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'] });
 
       // Batch add MUST require Lidarr
       expect(response.status).toBe(400);
@@ -323,4 +323,45 @@ describe('Search API - No Lidarr Mode', () => {
       expect(response.body.error).toContain('Lidarr');
     });
   });
+  it('does not acquire implicitly even when a name resolution is confident', async () => {
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never);
+    vi.mocked(resolveMbid).mockResolvedValueOnce({ mbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
+    const providerAdd = vi.fn();
+    vi.mocked(LidarrService).mockImplementationOnce(function () { return { addArtistWithCacheWarm: providerAdd } as unknown as LidarrService; });
+    const response = await request(app).post('/api/search/discover/add').send({ artistName: 'Confident name' });
+    expect(response.status).toBe(422); expect(response.body.code).toBe('IDENTITY_REQUIRED');
+    expect(providerAdd).not.toHaveBeenCalled();
+  });
+  it.each(['/artists/add', '/discover/add', '/batch'])('passes selected effective options through the real %s route to the provider', async path => {
+    const mbid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music', searchOnAdd: true } };
+    vi.mocked(prisma.connection.findFirst).mockResolvedValue(connection as never);
+    const providerAdd = vi.fn().mockResolvedValue({ artist: { foreignArtistId: mbid, artistName: 'Artist' } });
+    vi.mocked(LidarrService).mockImplementation(function () { return { addArtistWithCacheWarm: providerAdd,
+      getQualityProfiles: vi.fn().mockResolvedValue([{ id: 9 }]), getMetadataProfiles: vi.fn().mockResolvedValue([{ id: 8 }]), getRootFolders: vi.fn().mockResolvedValue([{ path: '/archive' }]),
+    } as unknown as LidarrService; });
+    const identity = path === '/artists/add' ? { foreignArtistId: mbid } : path === '/batch' ? { artistIds: [mbid] } : { artistName: 'Artist', mbid };
+    const response = await request(app).post(`/api/search${path}`).send({ ...identity, qualityProfileId: 9, metadataProfileId: 8, rootFolderPath: '/archive', searchOnAdd: false, monitorOption: 'future', monitorNewItems: 'none' });
+    expect(response.status).toBe(200);
+    expect(providerAdd).toHaveBeenCalledWith(mbid, 9, 8, '/archive', true, false, false, 'future', 'none');
+    vi.mocked(prisma.connection.findFirst).mockResolvedValue(null);
+  });
+  it.each([{ qualityProfileId: -1 }, { monitorOption: 'invented' }, { searchOnAdd: 'false' }])('rejects malformed effective options before provider acquisition', async options => {
+    const response = await request(app).post('/api/search/artists/add').send({ foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', ...options });
+    expect(response.status).toBe(400);
+  });
+
+  it.each(['/artists/add', '/discover/add', '/batch'])('rejects an unavailable profile in %s without provider acquisition', async path => {
+    const mbid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    vi.mocked(prisma.connection.findFirst).mockResolvedValue(connection as never);
+    const add = vi.fn();
+    vi.mocked(LidarrService).mockImplementation(function () { return { addArtistWithCacheWarm: add, getQualityProfiles: vi.fn().mockResolvedValue([{ id: 1 }]) } as unknown as LidarrService; });
+    const identity = path === '/artists/add' ? { foreignArtistId: mbid } : path === '/batch' ? { artistIds: [mbid] } : { artistName: 'Artist', mbid };
+    const response = await request(app).post(`/api/search${path}`).send({ ...identity, qualityProfileId: 99 });
+    expect(response.status).toBe(400); expect(response.body.code).toBe('INVALID_OPTIONS'); expect(add).not.toHaveBeenCalled();
+    vi.mocked(prisma.connection.findFirst).mockResolvedValue(null);
+  });
+
 });

@@ -1,3 +1,6 @@
+import { addOptionsSchema, effectiveAddOptions } from '../lib/add-options.js';
+import { DecisionError } from '../lib/decision.js';
+import { validateBody } from '../middleware/validate.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { ArtistDetailInputError, ArtistDetailService } from '../services/artist-detail.js';
@@ -344,9 +347,9 @@ searchRouter.post('/resolve-mbid', async (req, res) => {
 });
 
 // Add artist from discovery search (with MBID resolution)
-searchRouter.post('/discover/add', async (req, res) => {
+searchRouter.post('/discover/add', validateBody(addOptionsSchema.extend({ artistName: z.string().min(1).max(500), mbid: z.string().uuid().transform(value => value.toLowerCase()).optional() })), async (req, res) => {
   try {
-    const { artistName, mbid, qualityProfileId, metadataProfileId, rootFolderPath } = req.body;
+    const { artistName, mbid } = req.body;
     
     if (!artistName) {
       res.status(400).json({ error: 'Artist name required' });
@@ -360,58 +363,26 @@ searchRouter.post('/discover/add', async (req, res) => {
     }
     const { service: lidarr, config: lidarrConfig } = lidarrResult;
     
-    // Use provided MBID or resolve it
-    let resolvedMbid = mbid;
+    const resolvedMbid = mbid;
     if (!resolvedMbid) {
       const resolution = await resolveMbid(artistName);
-      if (!resolution.mbid) {
-        // Return candidates for manual selection
-        res.status(422).json({
-          error: 'Could not automatically match artist in MusicBrainz',
-          code: 'IDENTITY_REQUIRED',
-          details: { candidates: resolution.candidates || [], artistName },
-          candidates: resolution.candidates,
-          artistName,
-        });
-        return;
-      }
-      resolvedMbid = resolution.mbid;
-    }
-    
-    // Get defaults from connection config, then fall back to fetching first available
-    let qpId = qualityProfileId || lidarrConfig.qualityProfileId;
-    let mpId = metadataProfileId || lidarrConfig.metadataProfileId;
-    let rfPath = rootFolderPath || lidarrConfig.rootFolderPath;
-
-    if (!qpId) {
-      const profiles = await lidarr.getQualityProfiles();
-      qpId = profiles[0]?.id;
-    }
-
-    if (!mpId) {
-      const profiles = await lidarr.getMetadataProfiles();
-      mpId = profiles[0]?.id;
-    }
-
-    if (!rfPath) {
-      const folders = await lidarr.getRootFolders();
-      rfPath = folders[0]?.path;
-    }
-
-    if (!qpId || !mpId || !rfPath) {
-      res.status(400).json({ error: 'Missing Lidarr configuration (profiles/folders)' });
+      res.status(422).json({ error: 'Choose a MusicBrainz artist before adding', code: 'IDENTITY_REQUIRED',
+        details: { candidates: resolution.candidates || [], artistName }, candidates: resolution.candidates || [], artistName });
       return;
     }
+
+    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
+    const { qualityProfileId: qpId, metadataProfileId: mpId, rootFolderPath: rfPath } = options;
 
     // Use addArtistWithCacheWarm to warm SkyHook cache for reliable metadata lookup
     // Use monitorOption from connection config (defaults to 'all' if not set)
     const { artist, refreshCommand } = await lidarr.addArtistWithCacheWarm(
       resolvedMbid, qpId, mpId, rfPath,
       true,  // monitored
-      lidarrConfig.searchOnAdd !== false,  // searchForMissingAlbums from config
+      options.searchOnAdd,  // searchForMissingAlbums from config
       false, // waitForRefresh (deprecated)
-      lidarrConfig.monitorOption || 'all',
-      lidarrConfig.monitorNewItems || 'all'
+      options.monitorOption,
+      options.monitorNewItems
     );
     
     // Log the successful artist addition
@@ -426,6 +397,7 @@ searchRouter.post('/discover/add', async (req, res) => {
     
     res.json({ success: true, artist, mbid: resolvedMbid, refreshTriggered: !!refreshCommand });
   } catch (error) {
+    if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     // Log the failed artist addition
     await addLogEntry('error', 'search', `Failed to add artist "${req.body.artistName}" from search`, {
       artistName: req.body.artistName,
@@ -444,9 +416,9 @@ searchRouter.post('/discover/add', async (req, res) => {
 });
 
 // Add artist to Lidarr
-searchRouter.post('/artists/add', async (req, res) => {
+searchRouter.post('/artists/add', validateBody(addOptionsSchema.extend({ foreignArtistId: z.string().uuid().transform(value => value.toLowerCase()) })), async (req, res) => {
   try {
-    const { foreignArtistId, qualityProfileId, metadataProfileId, rootFolderPath } = req.body;
+    const { foreignArtistId } = req.body;
     
     if (!foreignArtistId) {
       res.status(400).json({ error: 'Artist ID required' });
@@ -461,40 +433,18 @@ searchRouter.post('/artists/add', async (req, res) => {
     }
     const { service: lidarr, config: lidarrConfig } = lidarrResult;
     
-    // Get defaults from connection config, then fall back to fetching first available
-    let qpId = qualityProfileId || lidarrConfig.qualityProfileId;
-    let mpId = metadataProfileId || lidarrConfig.metadataProfileId;
-    let rfPath = rootFolderPath || lidarrConfig.rootFolderPath;
-
-    if (!qpId) {
-      const profiles = await lidarr.getQualityProfiles();
-      qpId = profiles[0]?.id;
-    }
-
-    if (!mpId) {
-      const profiles = await lidarr.getMetadataProfiles();
-      mpId = profiles[0]?.id;
-    }
-
-    if (!rfPath) {
-      const folders = await lidarr.getRootFolders();
-      rfPath = folders[0]?.path;
-    }
-
-    if (!qpId || !mpId || !rfPath) {
-      res.status(400).json({ error: 'Missing Lidarr configuration (profiles/folders)' });
-      return;
-    }
+    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
+    const { qualityProfileId: qpId, metadataProfileId: mpId, rootFolderPath: rfPath } = options;
 
     // Use addArtistWithCacheWarm to warm SkyHook cache for reliable metadata lookup
     // Use monitorOption from connection config (defaults to 'all' if not set)
     const { artist, refreshCommand } = await lidarr.addArtistWithCacheWarm(
       foreignArtistId, qpId, mpId, rfPath,
       true,  // monitored
-      lidarrConfig.searchOnAdd !== false,  // searchForMissingAlbums from config
+      options.searchOnAdd,  // searchForMissingAlbums from config
       false, // waitForRefresh (deprecated)
-      lidarrConfig.monitorOption || 'all',
-      lidarrConfig.monitorNewItems || 'all'
+      options.monitorOption,
+      options.monitorNewItems
     );
     
     // Log the successful artist addition
@@ -515,6 +465,7 @@ searchRouter.post('/artists/add', async (req, res) => {
     
     res.json({ success: true, artist, refreshTriggered: !!refreshCommand });
   } catch (error) {
+    if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     // Log the failed artist addition
     await addLogEntry('error', 'search', `Failed to add artist from search`, {
       mbid: req.body.foreignArtistId,
@@ -1343,9 +1294,9 @@ searchRouter.get('/label/:mbid/artists', async (req, res) => {
 });
 
 // Batch add artists to Lidarr
-searchRouter.post('/batch', async (req, res) => {
+searchRouter.post('/batch', validateBody(addOptionsSchema.extend({ artistIds: z.array(z.string().uuid().transform(value => value.toLowerCase())).min(1).max(100).transform(ids => [...new Set(ids)]) })), async (req, res) => {
   try {
-    const { artistIds, qualityProfileId, metadataProfileId, rootFolderPath } = req.body;
+    const { artistIds } = req.body;
     
     if (!artistIds || !Array.isArray(artistIds) || artistIds.length === 0) {
       res.status(400).json({ error: 'Artist IDs array required' });
@@ -1359,30 +1310,8 @@ searchRouter.post('/batch', async (req, res) => {
     }
     const { service: lidarr, config: lidarrConfig } = lidarrResult;
     
-    // Get defaults from connection config, then fall back to fetching first available
-    let qpId = qualityProfileId || lidarrConfig.qualityProfileId;
-    let mpId = metadataProfileId || lidarrConfig.metadataProfileId;
-    let rfPath = rootFolderPath || lidarrConfig.rootFolderPath;
-
-    if (!qpId) {
-      const profiles = await lidarr.getQualityProfiles();
-      qpId = profiles[0]?.id;
-    }
-
-    if (!mpId) {
-      const profiles = await lidarr.getMetadataProfiles();
-      mpId = profiles[0]?.id;
-    }
-
-    if (!rfPath) {
-      const folders = await lidarr.getRootFolders();
-      rfPath = folders[0]?.path;
-    }
-
-    if (!qpId || !mpId || !rfPath) {
-      res.status(400).json({ error: 'Missing Lidarr configuration (profiles/folders)' });
-      return;
-    }
+    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
+    const { qualityProfileId: qpId, metadataProfileId: mpId, rootFolderPath: rfPath } = options;
 
     // Get cache to check existing artists (shared 5-min cache)
     const lidarrResult2 = await getLidarrServiceWithConfig(req.user!.id);
@@ -1411,10 +1340,10 @@ searchRouter.post('/batch', async (req, res) => {
         await lidarr.addArtistWithCacheWarm(
           artistId, qpId, mpId, rfPath,
           true,  // monitored
-          lidarrConfig.searchOnAdd !== false,  // searchForMissingAlbums from config
+          options.searchOnAdd,  // searchForMissingAlbums from config
           false, // waitForRefresh (deprecated)
-          lidarrConfig.monitorOption || 'all',
-          lidarrConfig.monitorNewItems || 'all'
+          options.monitorOption,
+          options.monitorNewItems
         );
         results.added.push(artistId);
       } catch (error) {
@@ -1427,6 +1356,7 @@ searchRouter.post('/batch', async (req, res) => {
 
     res.json(results);
   } catch (error) {
+    if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Batch add failed' 
     });

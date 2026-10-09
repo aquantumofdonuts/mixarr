@@ -16,7 +16,7 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/search', useSearchParam
 vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: actorId } }) }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: toast }) }));
 vi.mock('@/lib/hooks', () => ({ useArtistDetail: () => detail, useArtistReleases: () => releases }));
-vi.mock('@/lib/api', () => ({ api: { post: vi.fn() } }));
+vi.mock('@/lib/api', () => ({ api: { post: vi.fn(), get: vi.fn() } }));
 const identity = (id = mbid) => ({ mbid: id, name: id === mbid ? 'Portishead' : 'Other artist', imageUrl: null, disambiguation: 'Bristol band', membership: 'not-in-library', sources: [], sourcesNextCursor: null, unavailable: [] });
 let pane: HTMLElement;
 function mount(children: React.ReactNode) {
@@ -25,7 +25,8 @@ function mount(children: React.ReactNode) {
   return { ...render(<QueryClientProvider client={client}><ListScrollContext.Provider value={pane}>{children}</ListScrollContext.Provider></QueryClientProvider>), client, invalidation };
 }
 beforeEach(() => {
-  vi.clearAllMocks(); actorId++; params = new URLSearchParams(`q=trip-hop&seed=one&seed=two&artist=${mbid}`);
+  vi.clearAllMocks();
+  vi.mocked(api.get).mockResolvedValue({ data: { qualityProfiles: [{id: 1, name: 'Default'}], metadataProfiles: [{id: 1, name: 'Default'}], rootFolders: [{id: 1, path: '/music'}] }, error: null } as any); actorId++; params = new URLSearchParams(`q=trip-hop&seed=one&seed=two&artist=${mbid}`);
   detail = { data: { pages: [identity()] }, isPending: false, isError: false, refetch: detailRetry, hasNextPage: false, fetchNextPage: sourceMore, isFetchingNextPage: false };
   releases = { data: { pages: [{ releaseGroups: [], count: 0 }] }, isPending: false, isError: false, refetch: releaseRetry, hasNextPage: false, fetchNextPage: releaseMore, isFetchingNextPage: false };
   pane = document.createElement('main'); document.body.append(pane);
@@ -103,7 +104,9 @@ describe('shared artist inspector', () => {
     vi.mocked(api.post).mockResolvedValue({ data: { success: true }, error: null } as any);
     const { invalidation } = mount(<ArtistInspector />);
     fireEvent.click(screen.getByRole('button', { name: 'Add artist' }));
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/search/artists/add', { foreignArtistId: mbid }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/search/artists/add', expect.objectContaining({ foreignArtistId: mbid, mbid, qualityProfileId: 1, rootFolderPath: '/music' })));
     await waitFor(() => expect(invalidation).toHaveBeenCalledWith({ queryKey: ['artists', actorId, mbid, 'detail'] }));
   });
   it('keeps a late acquisition response scoped to its original inspector', async () => {
@@ -111,6 +114,8 @@ describe('shared artist inspector', () => {
     vi.mocked(api.post).mockReturnValue(new Promise(resolve => { finish = resolve; }));
     const view = mount(<ArtistInspector />);
     fireEvent.click(screen.getByRole('button', { name: 'Add artist' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
     params.set('artist', other); detail.data.pages = [identity(other)];
     view.rerender(<QueryClientProvider client={view.client}><ArtistInspector /></QueryClientProvider>);
     await act(async () => finish({ data: { success: true }, error: null }));
@@ -127,6 +132,8 @@ describe('shared artist inspector', () => {
     vi.mocked(api.post).mockResolvedValue({ data: null, error: 'Provider failed' } as any);
     const { invalidation } = mount(<ArtistInspector />);
     fireEvent.click(screen.getByRole('button', { name: 'Add artist' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
     await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' })));
     expect(invalidation).not.toHaveBeenCalled(); expect(screen.getByText('Not in Lidarr')).toBeInTheDocument();
   });

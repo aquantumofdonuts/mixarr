@@ -7,7 +7,7 @@ vi.mock('@/lib/hooks', () => ({
   useApproveFeedItem: () => ({ mutateAsync: mocks.approve }), useDismissFeedItem: () => ({ mutateAsync: mocks.dismiss }), useRestoreDecision: () => ({ mutateAsync: mocks.restore }),
 }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: mocks.toast }) }));
-vi.mock('@/components/feed/FeedGrid', () => ({ FeedGrid: (props: any) => { mocks.grid(props); return <><button onClick={() => props.onApprove('feed-1')}>Add artist</button><button onClick={() => props.onDismiss('feed-1')}>Dismiss artist</button><p>{props.items[0]?.acquisitionState || 'available'}</p></>; } }));
+vi.mock('@/components/feed/FeedGrid', () => ({ FeedGrid: (props: any) => { mocks.grid(props); return <><button onClick={() => Promise.resolve(props.onApprove('feed-1')).catch(() => {})}>Add artist</button><button onClick={() => props.onDismiss('feed-1')}>Dismiss artist</button><p>{props.items[0]?.acquisitionState || 'available'}</p></>; } }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('seed=one&seed=two'), usePathname: () => '/', useRouter: () => ({ replace: mocks.replace }) }));
 vi.mock('@/hooks/useListContext', () => ({ useListContext: (options: any) => { mocks.context(options); return { remember: vi.fn() }; } }));
 beforeEach(() => { vi.clearAllMocks(); mocks.feed.current = { data: { pages: [{ items: [{ id: 'feed-1', artistName: 'Artist', artistMbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }], stats: { pending: 1, addedToday: 0 } }] }, fetchNextPage: vi.fn(), refetch: vi.fn() }; });

@@ -548,7 +548,8 @@ export class LidarrService {
     qualityProfileId: number,
     metadataProfileId: number,
     rootFolderPath: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    searchOnAdd = true
   ): Promise<{ artist: LidarrArtist; album: LidarrAlbum; isNewArtist: boolean }> {
     // Use slower rate limit for add operations
     signal?.throwIfAborted();
@@ -631,7 +632,7 @@ export class LidarrService {
 
     // Step 5: Trigger search for that album only (if not already downloaded)
     const percentComplete = updatedAlbum.statistics?.percentOfTracks ?? 0;
-    if (percentComplete >= 100) {
+    if (!searchOnAdd || percentComplete >= 100) {
       log.debug(`Album "${updatedAlbum.title}" already fully downloaded (${percentComplete}%), skipping search`);
     } else {
       log.debug(`Album "${updatedAlbum.title}" at ${percentComplete}% - triggering search`);
@@ -658,7 +659,8 @@ export class LidarrService {
     qualityProfileId: number,
     metadataProfileId: number,
     rootFolderPath: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    searchOnAdd = true
   ): Promise<{ artist: LidarrArtist; album: LidarrAlbum; isNewArtist: boolean; cacheWarmed?: boolean; wasAlreadyCached?: boolean }> {
     // Check if artist exists - only need to warm cache if adding new artist
     const existingArtist = await this.getArtistByMbid(artistMbid, signal);
@@ -693,7 +695,8 @@ export class LidarrService {
       qualityProfileId,
       metadataProfileId,
       rootFolderPath,
-      signal
+      signal,
+      searchOnAdd
     );
 
     return { ...result, cacheWarmed, wasAlreadyCached };

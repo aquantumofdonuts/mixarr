@@ -31,6 +31,7 @@ test('an artist action targets only the selected stable identity', async ({ cata
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByText('Common Name', { exact: true })).toHaveCount(2);
   await page.getByRole('button', { name: 'Add artist Common Name', exact: true }).first().click();
+  await page.getByRole('dialog', { name: 'Add artist options', exact: true }).getByRole('button', { name: 'Confirm add', exact: true }).click();
   await expect(page.getByText('Artist added', { exact: true })).toBeVisible();
   await expect(page.getByText('In Lidarr', { exact: true })).toHaveCount(1);
 });
@@ -70,7 +71,11 @@ test.describe('unconfirmed feed acquisition', () => {
       return true;
     })).toBe(true);
     await add.click();
+    const options = page.getByRole('dialog', { name: 'Add artist options', exact: true });
+    await options.getByRole('button', { name: 'Confirm add', exact: true }).click();
     await expect(page.getByText('Addition unconfirmed', { exact: true })).toBeVisible();
+    await expect(options).toBeVisible();
+    await options.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Retry Common Name', exact: true })).toBeVisible();
     await expect(page.getByText('Common Name', { exact: true })).toHaveCount(2);
     await expect(page.getByText('Added to Lidarr', { exact: true })).toHaveCount(0);

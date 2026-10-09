@@ -199,4 +199,32 @@ describe('review decisions through the real router and signed Undo helper', () =
     expect(response.status).toBe(200); expect(response.body.failed).toBe(1);
     expect(rows[0].status).toBe('approved'); expect(rows[0].updatedAt.getTime()).toBe(now + 4);
   });
+  it('passes effective options to targeted album approval even when the artist already exists', async () => {
+    rows[0].itemType = 'album'; rows[0].albumMbid = mbid;
+    mocks.exists.mockResolvedValue(true); mocks.profiles.mockResolvedValue([{ id: 8 }, { id: 9 }]); mocks.folders.mockResolvedValue([{ path: '/archive' }]);
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved', qualityProfileId: 9, metadataProfileId: 8, rootFolderPath: '/archive', searchOnAdd: false });
+    expect(response.status).toBe(200);
+    expect(mocks.addAlbum).toHaveBeenCalledWith(mbid, mbid, 9, 8, '/archive', undefined, false);
+    expect(mocks.exists).not.toHaveBeenCalled(); expect(rows[0].status).toBe('approved');
+  });
+  it('requires an explicit canonical choice for an unidentified review without acquiring', async () => {
+    rows[0].mbid = null as never;
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
+    expect(response.status).toBe(422); expect(response.body.code).toBe('IDENTITY_REQUIRED');
+    expect(mocks.addArtist).not.toHaveBeenCalled(); expect(rows[0].status).toBe('pending');
+  });
+  it('reports original successful and failed IDs and retains failed review items for option retries', async () => {
+    mocks.addArtist.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('Provider unavailable'));
+    const response = await bulk([1, 2], 'approved');
+    expect(response.status).toBe(200); expect(response.body.success).toBe(false);
+    expect(response.body.addedIds).toEqual([1]); expect(response.body.failedIds).toEqual([2]);
+    expect(rows[0].status).toBe('approved'); expect(rows[1].status).toBe('pending');
+  });
+
+  it('does not turn an unidentified album review into a whole artist addition', async () => {
+    rows[0].itemType = 'album'; rows[0].albumMbid = null;
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
+    expect(response.status).toBe(422); expect(mocks.addArtist).not.toHaveBeenCalled(); expect(mocks.addAlbum).not.toHaveBeenCalled(); expect(rows[0].status).toBe('pending');
+  });
+
 });

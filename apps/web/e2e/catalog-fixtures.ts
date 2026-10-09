@@ -167,15 +167,18 @@ export const test = base.extend<CatalogFixtures>({
           if (index < 0) return reply({ error: 'Not found' }, 404);
           const item = items[index];
           if (path.endsWith('/approve')) {
-            if (!item.artistMbid) return reply({ error: 'Choose an artist identity', code: 'IDENTITY_REQUIRED' }, 422);
+            const chosen = request.postDataJSON()?.mbid;
+            if (item.artistMbid && chosen && chosen !== item.artistMbid) return reply({ error: 'Source identity changed', code: 'IDENTITY_CONFLICT' }, 409);
+            const mbid = item.artistMbid || chosen;
+            if (!ARTIST_IDS.includes(mbid)) return reply({ error: 'Choose an artist identity', code: 'IDENTITY_REQUIRED' }, 422);
             if (catalogScenario === 'add-failed') {
               items[index] = { ...item, acquisitionState: 'uncertain', acquisitionMessage: 'Retry to check membership' };
-              return reply({ success: false, artistName: item.artistName, outcome: { artistMbid: item.artistMbid, state: 'uncertain', message: 'Retry to check membership' } });
+              return reply({ success: false, artistName: item.artistName, outcome: { artistMbid: mbid, state: 'uncertain', message: 'Retry to check membership' } });
             }
-            added.add(item.artistMbid);
+            added.add(mbid);
             feedRecordsMarkedAdded += item.id.slice('feed-'.length).split('-').length;
             items.splice(index, 1);
-            return reply({ success: true, artistName: item.artistName, outcome: { artistMbid: item.artistMbid, state: 'added', message: 'Artist added to Lidarr' } });
+            return reply({ success: true, artistName: item.artistName, outcome: { artistMbid: mbid, state: 'added', message: 'Artist added to Lidarr' } });
           }
           items.splice(index, 1);
           const undoToken = `catalog-undo-${item.id}`;

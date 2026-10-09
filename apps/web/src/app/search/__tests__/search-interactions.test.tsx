@@ -13,12 +13,14 @@ vi.mock('@/components/slskd/SearchModal', () => ({ SlskdSearchModal: () => null 
 vi.mock('../components/LabelArtistsModal', () => ({ LabelArtistsModal: () => null }));
 const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
 const request = vi.fn<typeof fetch>();
+const profiles = { qualityProfiles: [{ id: 1, name: 'Default' }], metadataProfiles: [{ id: 1, name: 'Default' }], rootFolders: [{ id: 1, path: '/music' }] };
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 function navigate(destination: string) { navigation.query = new URL(destination, 'https://mixarr.invalid').search.slice(1); navigation.listeners.forEach(callback => callback()); }
 beforeEach(() => {
   navigation.query = 'q=same'; navigation.push.mockImplementation(navigate); navigation.replace.mockImplementation(navigate); request.mockReset();
   request.mockImplementation(async (url, options) => {
     const path = String(url);
+    if (path === '/api/discover/profiles') return json(profiles);
     if (path === '/api/search/ai/status') return json({ available: false });
     if (path.startsWith('/api/search/discover?')) return json({ results: ids.map(mbid => ({ mbid, name: 'Same name', sources: ['spotify'] })) });
     if (path === '/api/search/artists/add') return json({ success: true, artist: { foreignArtistId: JSON.parse(String(options?.body)).foreignArtistId } });
@@ -35,16 +37,20 @@ describe('search actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Select this page' }));
     const rows = screen.getAllByRole('article');
     fireEvent.click(within(rows[0]).getByRole('button', { name: 'Add artist Same name' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
     await within(rows[0]).findByText('In Lidarr');
     expect(within(rows[1]).getByRole('checkbox', { name: 'Select Same name' })).toBeChecked();
     expect(screen.getByRole('region', { name: 'Bulk actions' })).toHaveTextContent('1 selected');
     const call = request.mock.calls.find(([url]) => String(url) === '/api/search/artists/add')!;
-    expect(JSON.parse(String(call[1]?.body))).toEqual({ foreignArtistId: ids[0] });
+    expect(JSON.parse(String(call[1]?.body))).toMatchObject({ foreignArtistId: ids[0], qualityProfileId: 1, rootFolderPath: '/music' });
   });
   it('retains failed bulk selection and displays its row error', async () => {
     render(<SearchPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Select this page' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add selected artists' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
     await screen.findByText('Provider offline');
     const rows = screen.getAllByRole('article');
     expect(within(rows[1]).getByRole('checkbox', { name: 'Select Same name' })).toBeChecked();
@@ -72,20 +78,25 @@ describe('search actions', () => {
   });
   it('describes the album artist-level action and records failed acquisition inline', async () => {
     navigation.query = 'q=record&tab=album';
-    request.mockImplementation(async (url) => String(url).startsWith('/api/search/album') ? json({ releases: [{ id: 'album', title: 'Record', 'artist-credit': [{ artist: { id: ids[0], name: 'Same name' } }] }], count: 1 }) : String(url).includes('artists/add') ? json({ error: 'Provider offline' }, 503) : json({ available: false }));
+    request.mockImplementation(async (url) => String(url) === '/api/discover/profiles' ? json(profiles) : String(url).startsWith('/api/search/album') ? json({ releases: [{ id: 'album', title: 'Record', 'artist-credit': [{ artist: { id: ids[0], name: 'Same name' } }] }], count: 1 }) : String(url).includes('artists/add') ? json({ error: 'Provider offline' }, 503) : json({ available: false }));
     render(<SearchPage />);
     const button = await screen.findByRole('button', { name: 'Add artist Same name' });
     expect(button).toHaveAccessibleDescription('Adds this artist to Lidarr. Lidarr applies its configured album monitoring and search settings.');
     fireEvent.click(button);
-    await screen.findByText('Provider offline');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    await screen.findAllByText('Provider offline');
     expect(screen.queryByText('In Lidarr')).toBeNull();
   });
   it('does not apply a late addition to replacement results after leaving and returning to the same URL scope', async () => {
     let finish!: (response: Response) => void;
-    request.mockImplementation(async (url) => String(url) === '/api/search/artists/add' ? new Promise(resolve => { finish = resolve; }) : String(url).startsWith('/api/search/discover?') ? json({ results: ids.map(mbid => ({ mbid, name: 'Same name' })) }) : json({ available: false }));
+    request.mockImplementation(async (url) => String(url) === '/api/discover/profiles' ? json(profiles) : String(url) === '/api/search/artists/add' ? new Promise(resolve => { finish = resolve; }) : String(url).startsWith('/api/search/discover?') ? json({ results: ids.map(mbid => ({ mbid, name: 'Same name' })) }) : json({ available: false }));
     render(<SearchPage />);
     const buttons = await screen.findAllByRole('button', { name: 'Add artist Same name' });
     fireEvent.click(buttons[0]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    await waitFor(() => expect(request.mock.calls.some(([url]) => String(url) === '/api/search/artists/add')).toBe(true));
     act(() => navigate('/search?q=other'));
     await waitFor(() => expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('other'));
     act(() => navigate('/search?q=same'));
@@ -96,7 +107,7 @@ describe('search actions', () => {
 
   it('prunes absent identities after refreshing the same search while retaining identities still on the page', async () => {
     let searches = 0;
-    request.mockImplementation(async (url) => String(url).startsWith('/api/search/discover?') ? json({ results: (++searches === 1 ? ids : [ids[1]]).map(mbid => ({ mbid, name: 'Same name' })) }) : json({ available: false }));
+    request.mockImplementation(async (url) => String(url) === '/api/discover/profiles' ? json(profiles) : String(url).startsWith('/api/search/discover?') ? json({ results: (++searches === 1 ? ids : [ids[1]]).map(mbid => ({ mbid, name: 'Same name' })) }) : json({ available: false }));
     render(<SearchPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Select this page' }));
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
@@ -104,30 +115,30 @@ describe('search actions', () => {
     expect(screen.getByRole('checkbox', { name: 'Select Same name' })).toBeChecked();
     expect(screen.getByRole('region', { name: 'Bulk actions' })).toHaveTextContent('1 selected');
   });
-  it('marks only the original provider result after choosing a canonical identity for same-name results', async () => {
+  it('requires explicit canonical choice without an acquisition POST and updates only the original provider row', async () => {
     request.mockImplementation(async (url, options) => {
+      if (String(url) === '/api/discover/profiles') return json(profiles);
+      if (String(url).startsWith('/api/search/musicbrainz/artist')) return json({ results: [{ id: ids[0], name: 'Same name', disambiguation: 'Original band' }, { id: ids[1], name: 'Same name', disambiguation: 'Other artist' }] });
       if (String(url).startsWith('/api/search/discover?')) return json({ results: [{ name: 'Same name', spotifyId: 'one' }, { name: 'Same name', spotifyId: 'two' }] });
-      if (String(url) === '/api/search/discover/add') {
-        const payload = JSON.parse(String(options?.body));
-        return payload.mbid ? json({ success: true, artist: { foreignArtistId: payload.mbid } }) : json({ error: 'Could not automatically match artist in MusicBrainz', code: 'IDENTITY_REQUIRED', details: { artistName: 'Same name', candidates: [{ id: ids[0], name: 'Same name', disambiguation: 'Original band' }, { id: ids[1], name: 'Same name', disambiguation: 'Other artist' }] } }, 422);
-      }
+      if (String(url) === '/api/search/discover/add') return json({ success: true, artist: { foreignArtistId: JSON.parse(String(options?.body)).mbid } });
       return json({ available: false });
     });
     render(<SearchPage />);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Add artist Same name' }))[0]);
-    const dialog = await screen.findByRole('dialog', { name: 'Select Artist' });
-    expect(screen.queryByText('In Lidarr')).toBeNull();
-    const discoveryCalls = request.mock.calls.filter(([url]) => String(url) === '/api/search/discover/add');
-    expect(discoveryCalls).toHaveLength(1);
-    expect(JSON.parse(String(discoveryCalls[0][1]?.body))).toEqual({ artistName: 'Same name' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Same name Original band' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add artist options' });
+    await within(dialog).findByRole('radio', { name: /Original band/ });
+    expect(request.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm add' }));
+    expect(within(dialog).getByRole('radio', { name: /Original band/ })).toHaveFocus();
+    expect(request.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Original band/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm add' }));
     await screen.findByText('In Lidarr');
     const rows = screen.getAllByRole('article');
     expect(within(rows[0]).getByText('In Lidarr')).toBeInTheDocument();
     expect(within(rows[1]).queryByText('In Lidarr')).toBeNull();
-    expect(within(rows[1]).getByRole('button', { name: 'Add artist Same name' })).toBeEnabled();
-    const selectedCall = request.mock.calls.filter(([url]) => String(url) === '/api/search/discover/add')[1];
-    expect(JSON.parse(String(selectedCall[1]?.body))).toEqual({ artistName: 'Same name', mbid: ids[0] });
+    const call = request.mock.calls.find(([url]) => String(url) === '/api/search/discover/add')!;
+    expect(JSON.parse(String(call[1]?.body))).toMatchObject({ artistName: 'Same name', mbid: ids[0], qualityProfileId: 1 });
   });
 
   it('retains selected identities through a query replacement and prunes only absent results after success', async () => {
@@ -150,14 +161,15 @@ describe('search actions', () => {
     expect(screen.getByRole('region', { name: 'Bulk actions' })).toHaveTextContent('1 selected');
   });
 
-  it.each([{ candidates: [] }, { candidates: [{ id: 'not-a-canonical-id', name: 'Same name' }] }])('keeps missing or invalid identity candidates recoverable without acquiring implicitly', async ({ candidates }) => {
-    request.mockImplementation(async url => String(url).startsWith('/api/search/discover?') ? json({ results: [{ name: 'Same name', spotifyId: 'one' }] }) : String(url) === '/api/search/discover/add' ? json({ error: 'Identity selection unavailable', code: 'IDENTITY_REQUIRED', details: { candidates, artistName: 'Same name' } }, 422) : json({ available: false }));
+  it.each([{ candidates: [] }, { candidates: [null, { id: 'not-a-canonical-id', name: 'Same name' }] }])('keeps missing or invalid identity candidates recoverable without acquiring implicitly', async ({ candidates }) => {
+    request.mockImplementation(async url => String(url) === '/api/discover/profiles' ? json(profiles) : String(url).startsWith('/api/search/musicbrainz/artist') ? json({ results: candidates }) : String(url).startsWith('/api/search/discover?') ? json({ results: [{ name: 'Same name', spotifyId: 'one' }] }) : json({ available: false }));
     render(<SearchPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Add artist Same name' }));
-    await screen.findByText('Identity selection unavailable');
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await screen.findByText('No artist identities found. Retry the identity search.');
+    expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByText('In Lidarr')).toBeNull();
-    expect(request.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+    expect(request.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Retry options' })).toBeEnabled();
   });
 
 });

@@ -1,503 +1,88 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
-
-// Hoist mock so it's available inside vi.mock factory
-const { mockAddToast } = vi.hoisted(() => ({
-  mockAddToast: vi.fn(),
-}));
-
-// Mock api module
-vi.mock('@/lib/api', () => ({
-  api: {
-    get: vi.fn(),
-    post: vi.fn(),
-  },
-}));
-
-// Mock toast module
-vi.mock('@/components/ui/toast', () => ({
-  useToast: () => ({ addToast: mockAddToast, toasts: [], removeToast: vi.fn() }),
-}));
-
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, act, cleanup } from '@testing-library/react';
+const mocks = vi.hoisted(() => ({ toast: vi.fn(), actor: 1, execute: null as null | ((options: any) => Promise<unknown>), request: vi.fn() }));
+const options = { qualityProfileId: 2, metadataProfileId: 3, rootFolderPath: '/archive', monitorOption: 'future', monitorNewItems: 'none', searchOnAdd: false };
+const a = '11111111-1111-4111-8111-111111111111', b = '22222222-2222-4222-8222-222222222222';
+vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: mocks.actor } }) }));
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: mocks.toast }) }));
+vi.mock('@/lib/api', () => ({ api: { post: vi.fn() } }));
+// These tests exercise the acquisition executor. The actual shared form/identity step is covered by search-interactions.
+vi.mock('@/components/artists/AddArtistOptions', () => ({ useAddArtistOptions: () => ({ dialog: null, runWithOptions: (request: any, execute: any) => {
+  mocks.request(request); mocks.execute = execute;
+  return execute({ qualityProfileId: 2, metadataProfileId: 3, rootFolderPath: '/archive', monitorOption: 'future', monitorNewItems: 'none', searchOnAdd: false, ...(request.bulk ? {} : { mbid: request.mbid || '22222222-2222-4222-8222-222222222222' }) }).catch(() => null);
+} }) }));
 import { api } from '@/lib/api';
-import { useArtistAdd, isAlreadyExistsError } from '../hooks/useArtistAdd';
-import type { ArtistResult } from '../hooks/useSearch';
-
-describe('useArtistAdd', () => {
-  let mockSetResults: Mock<(updater: (prev: any[]) => any[]) => void>;
-
-  beforeEach(() => {
-    vi.resetAllMocks();
-    mockSetResults = vi.fn();
+import { useArtistAdd } from '../hooks/useArtistAdd';
+const response = (data: any, error: string | null = null) => ({ data, error, status: error ? 503 : 200 });
+let rows: any[];
+const setRows = (update: (rows: any[]) => any[]) => { rows = update(rows); };
+beforeEach(() => { vi.clearAllMocks(); mocks.actor = 1; rows = [{ foreignArtistId: a, artistName: 'Same name' }, { foreignArtistId: b, artistName: 'Same name' }]; });
+afterEach(cleanup);
+describe('search acquisition executors', () => {
+  it('passes all selected effective options including false through the original canonical endpoint', async () => {
+    vi.mocked(api.post).mockResolvedValue(response({ success: true }));
+    const { result } = renderHook(() => useArtistAdd(setRows));
+    await act(async () => { await result.current.handleAddArtist(rows[0]); });
+    expect(api.post).toHaveBeenCalledWith('/api/search/artists/add', { ...options, mbid: a, foreignArtistId: a });
+    expect(rows[0].inLibrary).toBe(true); expect(rows[1].inLibrary).not.toBe(true);
   });
-
-  // ─── isAlreadyExistsError ─────────────────────────────────────────
-
-  describe('isAlreadyExistsError', () => {
-    it('returns true for ArtistExistsValidator message', () => {
-      expect(isAlreadyExistsError('ArtistExistsValidator: artist exists')).toBe(true);
-    });
-
-    it('returns true for "already been added" message', () => {
-      expect(isAlreadyExistsError('This artist has already been added to Lidarr')).toBe(true);
-    });
-
-    it('returns false for unrelated errors', () => {
-      expect(isAlreadyExistsError('Network timeout')).toBe(false);
-    });
+  it('preserves the original provider result key after an explicit canonical choice', async () => {
+    rows = [{ resultKey: 'spotify:one', spotifyId: 'one', artistName: 'Same name' }, { resultKey: 'spotify:two', spotifyId: 'two', artistName: 'Same name' }];
+    vi.mocked(api.post).mockResolvedValue(response({ success: true }));
+    const { result } = renderHook(() => useArtistAdd(setRows));
+    await act(async () => { await result.current.handleAddArtist(rows[0]); });
+    expect(api.post).toHaveBeenCalledWith('/api/search/discover/add', { artistName: 'Same name', ...options, mbid: b });
+    expect(rows[0]).toMatchObject({ resultKey: 'spotify:one', foreignArtistId: b, inLibrary: true });
+    expect(rows[1].inLibrary).not.toBe(true);
   });
-
-  // ─── handleAddArtist — with MBID ─────────────────────────────────
-
-  describe('handleAddArtist (with MBID)', () => {
-    const artistWithMbid: ArtistResult = {
-      foreignArtistId: 'mbid-123',
-      artistName: 'Radiohead',
-    };
-
-    it('calls POST /api/search/artists/add with foreignArtistId', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: { success: true, artist: { foreignArtistId: 'mbid-123' } },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist(artistWithMbid);
-      });
-
-      expect(api.post).toHaveBeenCalledWith('/api/search/artists/add', {
-        foreignArtistId: 'mbid-123',
-      });
-    });
-
-    it('shows success toast and updates results on success', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: { success: true, artist: { foreignArtistId: 'mbid-123' } },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist(artistWithMbid);
-      });
-
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'success', title: 'Artist added' }),
-      );
-      expect(mockSetResults).toHaveBeenCalledWith(expect.any(Function));
-
-      // Verify the updater function marks the artist as inLibrary
-      const updated = mockSetResults.mock.calls.reduce((rows, [updater]) => updater(rows), [
-        { foreignArtistId: 'mbid-123', artistName: 'Radiohead', inLibrary: false },
-        { foreignArtistId: 'other', artistName: 'Other', inLibrary: false },
-      ]);
-      expect(updated[0].inLibrary).toBe(true);
-      expect(updated[1].inLibrary).toBe(false);
-    });
-
-    it('keeps duplicate-provider error recoverable until membership is confirmed', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: null,
-        error: 'ArtistExistsValidator: artist already exists',
-        status: 409,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist(artistWithMbid);
-      });
-
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'error', title: 'Failed to add artist' }),
-      );
-    });
-
-    it('shows error toast for generic errors', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: null,
-        error: 'Server error',
-        status: 500,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist(artistWithMbid);
-      });
-
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'error', title: 'Failed to add artist', message: 'Server error' }),
-      );
-    });
-
-    it('sets and clears addingArtistId during the add', async () => {
-      let resolvePost!: (value: any) => void;
-      vi.mocked(api.post).mockImplementationOnce(
-        () => new Promise((resolve) => { resolvePost = resolve; }),
-      );
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      let addPromise: Promise<void>;
-      act(() => {
-        addPromise = result.current.handleAddArtist(artistWithMbid);
-      });
-
-      // While in-flight, addingArtistId should be the foreignArtistId
-      expect(result.current.addingArtistId).toBe('mbid-123');
-
-      await act(async () => {
-        resolvePost({ data: { success: true }, error: null, status: 200 });
-        await addPromise;
-      });
-
-      expect(result.current.addingArtistId).toBeNull();
-    });
+  it.each([response(null, 'Provider unavailable'), response({ success: false })])('keeps a failed addition recoverable and reports it once', async reply => {
+    vi.mocked(api.post).mockResolvedValue(reply);
+    const { result } = renderHook(() => useArtistAdd(setRows));
+    await act(async () => { await result.current.handleAddArtist(rows[0]); });
+    expect(rows[0].inLibrary).not.toBe(true); expect(rows[0].acquisitionError).toBeTruthy();
+    expect(mocks.toast).toHaveBeenCalledTimes(1); expect(result.current.pendingIds.size).toBe(0);
   });
-
-  // ─── handleAddArtist — without MBID (discovery) ──────────────────
-
-  describe('handleAddArtist (without MBID / discovery)', () => {
-    const artistWithoutMbid: ArtistResult = {
-      foreignArtistId: '',
-      artistName: 'New Artist',
-      resultKey: 'unidentified:one',
-    };
-
-    it('calls POST /api/search/discover/add with artistName', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: { success: true, artist: { foreignArtistId: 'new-mbid' } },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist(artistWithoutMbid);
-      });
-
-      expect(api.post).toHaveBeenCalledWith('/api/search/discover/add', {
-        artistName: 'New Artist',
-      });
-    });
-
-    it('tracks discovery pending state by original result key', async () => {
-      let resolvePost!: (value: any) => void;
-      vi.mocked(api.post).mockImplementationOnce(
-        () => new Promise((resolve) => { resolvePost = resolve; }),
-      );
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      let addPromise: Promise<void>;
-      act(() => {
-        addPromise = result.current.handleAddArtist(artistWithoutMbid);
-      });
-
-      expect(result.current.addingArtistId).toBe('unidentified:one');
-
-      await act(async () => {
-        resolvePost({ data: { success: true, artist: {} }, error: null, status: 200 });
-        await addPromise;
-      });
-
-      expect(result.current.addingArtistId).toBeNull();
-    });
-
-    it('shows error toast and clears addingArtistId on discovery add error', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: null,
-        error: 'Discovery service unavailable',
-        status: 503,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist(artistWithoutMbid);
-      });
-
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'error',
-          title: 'Failed to add artist',
-          message: 'Discovery service unavailable',
-        }),
-      );
-      expect(result.current.addingArtistId).toBeNull();
-    });
-
-    it('shows MBID candidates when API returns disambiguation data', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: {
-          candidates: [
-            { id: '11111111-1111-4111-8111-111111111111', name: 'New Artist', disambiguation: 'UK band' },
-            { id: '22222222-2222-4222-8222-222222222222', name: 'New Artist', disambiguation: 'US rapper' },
-          ],
-        },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist(artistWithoutMbid);
-      });
-
-      expect(result.current.mbidCandidates).toHaveLength(2);
-      expect(result.current.selectingArtist?.artistName).toBe('New Artist');
-      // Clearing old errors must not fabricate membership.
-      const updated = mockSetResults.mock.calls.reduce((rows, [updater]) => updater(rows), [artistWithoutMbid]);
-      expect(updated[0].inLibrary).not.toBe(true);
-    });
+  it.each(['scope', 'actor'])('ignores late original responses across a %s A to B to A transition', async change => {
+    let finish!: (reply: any) => void;
+    vi.mocked(api.post).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const { result, rerender } = renderHook(({ scope }) => useArtistAdd(setRows, scope), { initialProps: { scope: 'A' } });
+    let pending!: Promise<unknown>;
+    act(() => { pending = result.current.handleAddArtist(rows[0]); });
+    if (change === 'actor') mocks.actor = 2;
+    rerender({ scope: change === 'scope' ? 'B' : 'A' });
+    mocks.actor = 1; rerender({ scope: 'A' });
+    await act(async () => { finish(response({ success: true })); await pending; });
+    expect(rows[0].inLibrary).not.toBe(true); expect(mocks.toast).not.toHaveBeenCalled();
   });
-
-  // ─── handleAddWithMbid ────────────────────────────────────────────
-
-  describe('handleAddWithMbid', () => {
-    it('does nothing when no selectingArtist is set', async () => {
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddWithMbid('some-mbid');
-      });
-
-      expect(api.post).not.toHaveBeenCalled();
-    });
-
-    it('calls discovery add endpoint with artistName and selected mbid', async () => {
-      // Step 1: trigger disambiguation
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: {
-          candidates: [
-            { id: '11111111-1111-4111-8111-111111111111', name: 'Ambiguous', disambiguation: 'option A' },
-          ],
-        },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist({
-          foreignArtistId: '',
-          artistName: 'Ambiguous',
-        });
-      });
-
-      expect(result.current.selectingArtist?.artistName).toBe('Ambiguous');
-
-      // Step 2: select MBID
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: { success: true, artist: { foreignArtistId: '11111111-1111-4111-8111-111111111111' } },
-        error: null,
-        status: 200,
-      });
-
-      await act(async () => {
-        await result.current.handleAddWithMbid('11111111-1111-4111-8111-111111111111');
-      });
-
-      expect(api.post).toHaveBeenLastCalledWith('/api/search/discover/add', {
-        artistName: 'Ambiguous',
-        mbid: '11111111-1111-4111-8111-111111111111',
-      });
-
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'success', title: 'Artist added' }),
-      );
-      expect(result.current.selectingArtist).toBeNull();
-      expect(result.current.mbidCandidates).toBeNull();
-      expect(result.current.addingArtistId).toBeNull();
-    });
-
-    it('shows error toast when MBID add fails', async () => {
-      // Step 1: trigger disambiguation
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: { candidates: [{ id: '33333333-3333-4333-8333-333333333333', name: 'X' }] },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist({ foreignArtistId: '', artistName: 'X' });
-      });
-
-      // Step 2: MBID add fails
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: null,
-        error: 'Internal server error',
-        status: 500,
-      });
-
-      await act(async () => {
-        await result.current.handleAddWithMbid('33333333-3333-4333-8333-333333333333');
-      });
-
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'error', title: 'Failed to add artist' }),
-      );
-    });
+  it('ignores a late response after unmount', async () => {
+    let finish!: (reply: any) => void;
+    vi.mocked(api.post).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const { result, unmount } = renderHook(() => useArtistAdd(setRows));
+    let pending!: Promise<unknown>;
+    act(() => { pending = result.current.handleAddArtist(rows[0]); }); unmount();
+    await act(async () => { finish(response({ success: true })); await pending; });
+    expect(rows[0].inLibrary).not.toBe(true); expect(mocks.toast).not.toHaveBeenCalled();
   });
-
-  // ─── handleBatchAdd ───────────────────────────────────────────────
-
-  describe('handleBatchAdd', () => {
-    it('does nothing when ids set is empty', async () => {
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleBatchAdd(new Set());
-      });
-
-      expect(api.post).not.toHaveBeenCalled();
-    });
-
-    it('calls POST /api/search/batch with artist IDs', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: { added: ['id-1', 'id-2'], skipped: [], failed: [] },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleBatchAdd(new Set(['id-1', 'id-2']));
-      });
-
-      expect(api.post).toHaveBeenCalledWith('/api/search/batch', {
-        artistIds: expect.arrayContaining(['id-1', 'id-2']),
-      });
-    });
-
-    it('shows success toast with counts', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: { added: ['id-1'], skipped: ['id-2'], failed: [{ id: 'id-3', error: 'err' }] },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleBatchAdd(new Set(['id-1', 'id-2', 'id-3']));
-      });
-
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'success',
-          title: 'Bulk add complete',
-          message: 'Added: 1, Skipped: 1, Failed: 1',
-        }),
-      );
-    });
-
-    it('marks added and skipped artists as inLibrary', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: { added: ['id-1'], skipped: ['id-2'], failed: [] },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleBatchAdd(new Set(['id-1', 'id-2']));
-      });
-
-      expect(mockSetResults).toHaveBeenCalledWith(expect.any(Function));
-      const updated = mockSetResults.mock.calls.reduce((rows, [updater]) => updater(rows), [
-        { foreignArtistId: 'id-1', inLibrary: false },
-        { foreignArtistId: 'id-2', inLibrary: false },
-        { foreignArtistId: 'id-3', inLibrary: false },
-      ]);
-      expect(updated[0].inLibrary).toBe(true);
-      expect(updated[1].inLibrary).toBe(true);
-      expect(updated[2].inLibrary).toBe(false);
-    });
-
-    it('shows error toast when batch add fails', async () => {
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: null,
-        error: 'Batch failed',
-        status: 500,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleBatchAdd(new Set(['id-1']));
-      });
-
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'error', title: 'Bulk add failed', message: 'Batch failed' }),
-      );
-    });
-
-    it('sets and clears isBulkAdding', async () => {
-      let resolvePost!: (value: any) => void;
-      vi.mocked(api.post).mockImplementationOnce(
-        () => new Promise((resolve) => { resolvePost = resolve; }),
-      );
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      let batchPromise: Promise<any>;
-      act(() => {
-        batchPromise = result.current.handleBatchAdd(new Set(['id-1']));
-      });
-
-      expect(result.current.isBulkAdding).toBe(true);
-
-      await act(async () => {
-        resolvePost({ data: { added: ['id-1'], skipped: [], failed: [] }, error: null, status: 200 });
-        await batchPromise;
-      });
-
-      expect(result.current.isBulkAdding).toBe(false);
-    });
+  it('does not open a bulk action for an empty selection', async () => {
+    const { result } = renderHook(() => useArtistAdd(setRows));
+    await act(async () => { await result.current.handleBatchAdd(new Set()); });
+    expect(mocks.request).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled();
   });
-
-  // ─── clearMbidModal ───────────────────────────────────────────────
-
-  describe('clearMbidModal', () => {
-    it('clears mbidCandidates and selectingArtist', async () => {
-      // Trigger disambiguation to populate modal state
-      vi.mocked(api.post).mockResolvedValueOnce({
-        data: {
-          candidates: [{ id: '11111111-1111-4111-8111-111111111111', name: 'Artist' }],
-        },
-        error: null,
-        status: 200,
-      });
-
-      const { result } = renderHook(() => useArtistAdd(mockSetResults));
-
-      await act(async () => {
-        await result.current.handleAddArtist({ foreignArtistId: '', artistName: 'Artist' });
-      });
-
-      expect(result.current.mbidCandidates).not.toBeNull();
-      expect(result.current.selectingArtist).not.toBeNull();
-
-      act(() => {
-        result.current.clearMbidModal();
-      });
-
-      expect(result.current.mbidCandidates).toBeNull();
-      expect(result.current.selectingArtist).toBeNull();
-    });
+  it('passes effective options to bulk and retries only failed original IDs without marking confirmed rows failed', async () => {
+    vi.mocked(api.post).mockResolvedValueOnce(response({ added: [a], skipped: [], failed: [{ id: b, error: 'Provider offline' }] })).mockResolvedValueOnce(response({ added: [b], skipped: [], failed: [] }));
+    const { result } = renderHook(() => useArtistAdd(setRows));
+    await act(async () => { await result.current.handleBatchAdd(new Set([a, b])); });
+    expect(rows[0]).toMatchObject({ inLibrary: true }); expect(rows[0].acquisitionError).toBeUndefined();
+    expect(rows[1].acquisitionError).toBe('Provider offline'); expect(result.current.isBulkAdding).toBe(false);
+    await act(async () => { await mocks.execute!(options); });
+    expect(api.post).toHaveBeenNthCalledWith(1, '/api/search/batch', { artistIds: [a, b], ...options });
+    expect(api.post).toHaveBeenNthCalledWith(2, '/api/search/batch', { artistIds: [b], ...options });
+    expect(rows.every(row => row.inLibrary)).toBe(true);
+  });
+  it('preserves failed bulk rows after an unconfirmed response', async () => {
+    vi.mocked(api.post).mockResolvedValue(response(null, 'Provider unavailable'));
+    const { result } = renderHook(() => useArtistAdd(setRows));
+    await act(async () => { await result.current.handleBatchAdd(new Set([a, b])); });
+    expect(rows.every(row => !row.inLibrary && row.acquisitionError === 'Provider unavailable')).toBe(true);
   });
 });

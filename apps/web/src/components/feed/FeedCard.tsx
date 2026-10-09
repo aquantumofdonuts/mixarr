@@ -1,5 +1,6 @@
 'use client';
 
+import { useAddArtistOptions, type ArtistAddOptions } from '@/components/artists/AddArtistOptions';
 import Image from 'next/image';
 import Music from 'lucide-react/dist/esm/icons/music';
 import { ArtistLink, canonicalArtistMbid } from '@/components/artists/ArtistLink';
@@ -16,7 +17,7 @@ export interface FeedCardProps {
   acquisitionState?: AcquisitionState;
   acquisitionMessage?: string;
   isLoading?: boolean;
-  onApprove: (id: string) => void;
+  onApprove: (id: string, options?: ArtistAddOptions) => Promise<void> | void;
   onDismiss: (id: string) => void;
   onOpen?: (trigger: HTMLElement) => void;
   tags?: string[] | null;
@@ -33,6 +34,8 @@ function formatListeners(count: number) {
 
 export function FeedCard({ id, artistName, artistMbid, imageUrl, status, acquisitionState, acquisitionMessage, isLoading,
   onApprove, onDismiss, onOpen, tags, listeners, subscriptionName, sourceRecords, sourceRecordCount, view = 'list' }: FeedCardProps) {
+  const optionsAction = useAddArtistOptions(id);
+  const addArtist = () => optionsAction.runWithOptions({ name: artistName, mbid: artistMbid }, async options => onApprove(id, options));
   const state = acquisitionState ?? (status === 'added' ? 'added' : status === 'adding' ? 'adding' : status === 'failed' ? 'uncertain' : 'available');
   const pending = isLoading || state === 'adding';
   const confirmed = state === 'added' || state === 'already-in-library';
@@ -57,9 +60,10 @@ export function FeedCard({ id, artistName, artistMbid, imageUrl, status, acquisi
     </div>
     {!confirmed && status !== 'dismissed' && <div className="flex shrink-0 flex-wrap gap-2 sm:ml-auto">
       {state === 'connection-required' ? <a href="/connections" className="inline-flex min-h-11 items-center text-sm text-link hover:underline">Connect Lidarr</a>
-        : identify ? <a href="/search" aria-label={`Identify artist ${artistName}`} className="inline-flex min-h-11 items-center text-sm text-link hover:underline">Identify artist</a>
-        : <Button size="sm" disabled={pending} aria-label={`${state === 'failed' || state === 'uncertain' ? 'Retry' : 'Add artist'} ${artistName}`} onClick={() => onApprove(id)}>{state === 'failed' || state === 'uncertain' ? 'Retry' : 'Add artist'}</Button>}
+        : identify ? <Button size="sm" disabled={pending} aria-label={`Identify artist ${artistName}`} onClick={() => void addArtist()}>Identify artist</Button>
+        : <Button size="sm" disabled={pending} aria-label={`${state === 'failed' || state === 'uncertain' ? 'Retry' : 'Add artist'} ${artistName}`} onClick={() => void addArtist()}>{state === 'failed' || state === 'uncertain' ? 'Retry' : 'Add artist'}</Button>}
       <Button size="sm" variant="outline" disabled={pending} aria-label={`Dismiss ${artistName}`} onClick={() => onDismiss(id)}>Dismiss</Button>
     </div>}
+    {optionsAction.dialog}
   </article>;
 }

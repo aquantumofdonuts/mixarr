@@ -161,7 +161,7 @@ describe('Feed Routes', () => {
 
       expect(response.status).toBe(200);
       expect(response.body).toMatchObject({ success: true, artistName: 'Radiohead', outcome: { state: 'added' } });
-      expect(mockFeedService.approve).toHaveBeenCalledWith('feed-1-2-3', 1, expect.any(AbortSignal));
+      expect(mockFeedService.approve).toHaveBeenCalledWith('feed-1-2-3', 1, expect.any(AbortSignal), {});
     });
 
     it('returns 404 when feed item not found', async () => {

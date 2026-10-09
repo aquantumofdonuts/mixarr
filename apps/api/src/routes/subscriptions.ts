@@ -1,3 +1,4 @@
+import { addOptionsSchema, effectiveAddOptions } from '../lib/add-options.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/db.js';
@@ -173,7 +174,7 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
 });
 
 const mbidSchema = z.string().uuid().transform(value => value.toLowerCase());
-const approvalBody = z.object({ mbid: mbidSchema.optional() }).strict();
+const approvalBody = addOptionsSchema.extend({ mbid: mbidSchema.optional() }).strict();
 
 // Acquisitions and competing decisions share the feed's status/revision lease.
 subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
@@ -267,26 +268,12 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
     try {
       if (!alreadyInLibrary) alreadyInLibrary = await membership();
       if (!alreadyInLibrary) {
-        let qpId = config.qualityProfileId;
-        let mpId = config.metadataProfileId;
-        let rfPath = config.rootFolderPath;
-        const [qualityProfiles, metadataProfiles, rootFolders] = await Promise.all([
-          !qpId ? lidarr.getQualityProfiles(signal) : Promise.resolve([]),
-          !mpId ? lidarr.getMetadataProfiles(signal) : Promise.resolve([]),
-          !rfPath ? lidarr.getRootFolders(signal) : Promise.resolve([]),
-        ]);
-        qpId ||= qualityProfiles[0]?.id;
-        mpId ||= metadataProfiles[0]?.id;
-        rfPath ||= rootFolders[0]?.path;
-        signal.throwIfAborted();
-        if (!qpId || !mpId || !rfPath) {
-          throw Object.assign(new Error('Lidarr configuration is incomplete'), { status: 422 });
-        }
+        const options = await effectiveAddOptions(lidarr, config, body.data, signal);
         if (isAlbum) {
-          await lidarr.addAlbumWithCacheWarm(mbid, result.albumMbid!, qpId, mpId, rfPath, signal);
+          await lidarr.addAlbumWithCacheWarm(mbid, result.albumMbid!, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, signal, options.searchOnAdd);
         } else {
-          await lidarr.addArtistWithCacheWarm(mbid, qpId, mpId, rfPath, true, config.searchOnAdd !== false, false,
-            config.monitorOption || 'all', config.monitorNewItems || 'all', signal);
+          await lidarr.addArtistWithCacheWarm(mbid, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, true, options.searchOnAdd, false,
+            options.monitorOption, options.monitorNewItems, signal);
         }
       }
       outcome = alreadyInLibrary ? 'already-in-library' : 'added';

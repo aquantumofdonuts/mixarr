@@ -1,5 +1,6 @@
 'use client';
 
+import { useAddArtistOptions, type ArtistAddOptions } from '@/components/artists/AddArtistOptions';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -11,8 +12,6 @@ import { ResultState } from '@/components/ui/result-state';
 import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { ArtistLink, canonicalArtistMbid } from '@/components/artists/ArtistLink';
-import { MbidSelectionModal } from '@/app/search/components/MbidSelectionModal';
-import type { MbidCandidate } from '@/app/search/hooks/useSearch';
 import { useListContext } from '@/hooks/useListContext';
 import { readPage, updateQuery } from '@/lib/list-state';
 import { api } from '@/lib/api';
@@ -47,10 +46,10 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
   const [pending, setPending] = useState<Set<number>>(new Set());
   const pendingRef = useRef(new Set<number>());
   const [messages, setMessages] = useState<Record<number, string>>({});
-  const [picker, setPicker] = useState<{ result: SubscriptionResult; candidates: MbidCandidate[] } | null>(null);
   const lookup = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const scope = `${pathname}${updateQuery(new URLSearchParams(params.toString()), { artist: null })}`;
+  const optionsAction = useAddArtistOptions(scope);
   const scopeRef = useRef(scope); scopeRef.current = scope;
   const [running, setRunning] = useState(false);
   useEffect(() => {
@@ -63,7 +62,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
     mounted.current = true;
     return () => { mounted.current = false; lookup.current?.abort(); };
   }, []);
-  useEffect(() => { lookup.current?.abort(); setPicker(null); }, [scope]);
+  useEffect(() => { lookup.current?.abort(); }, [scope]);
   function navigate(patch: Record<string, string | null>, replace = false) {
     const method = replace ? router.replace : router.push;
     method(`${pathname}${updateQuery(new URLSearchParams(params.toString()), patch)}`, { scroll: false });
@@ -72,42 +71,29 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
     if (value) pendingRef.current.add(id); else pendingRef.current.delete(id);
     if (mounted.current) setPending(new Set(pendingRef.current));
   }
-  async function actOnResult(result: SubscriptionResult, action: 'approve' | 'reject', mbid?: string) {
+  async function actOnResult(result: SubscriptionResult, action: 'approve' | 'reject', mbid?: string, options?: ArtistAddOptions, isCurrent = () => true) {
     if (pendingRef.current.has(result.id)) return;
     const actionScope = scope;
     markPending(result.id, true);
     try {
-      const response = action === 'approve' ? await approve.mutateAsync(mbid ? { resultId: result.id, mbid } : result.id) : await reject.mutateAsync(result.id);
-      if (mounted.current && scopeRef.current === actionScope) {
+      const response = action === 'approve' ? await approve.mutateAsync(options ? { resultId: result.id, mbid, options } : mbid ? { resultId: result.id, mbid } : result.id) : await reject.mutateAsync(result.id);
+      if (isCurrent() && mounted.current && scopeRef.current === actionScope) {
         const message = action === 'reject' ? 'Result rejected' : response?.outcome === 'already-in-library' ? 'Artist already in Lidarr' : 'Artist added to Lidarr';
         setMessages(previous => ({ ...previous, [result.id]: message }));
         addToast({ type: 'success', title: message });
       }
     } catch (error) {
-      if (mounted.current && scopeRef.current === actionScope) {
+      if (isCurrent() && mounted.current && scopeRef.current === actionScope) {
         const message = error instanceof Error ? error.message : 'Decision failed; retry';
         setMessages(previous => ({ ...previous, [result.id]: message }));
         addToast({ type: 'error', title: 'Acquisition or decision not confirmed', message });
+        if (options) throw error;
       }
     } finally { markPending(result.id, false); }
   }
-  async function identify(result: SubscriptionResult) {
-    if (pendingRef.current.has(result.id)) return;
-    lookup.current?.abort();
-    const controller = new AbortController(); lookup.current = controller;
-    const lookupScope = scope;
-    markPending(result.id, true);
-    try {
-      const name = result.itemType === 'album' ? result.artistName : result.name;
-      if (!name) throw new Error('Artist name is missing; cannot search for an identity');
-      const { data, error } = await api.get<{ results: MbidCandidate[] }>(`/api/search/musicbrainz/artist?${new URLSearchParams({ q: name })}`, { signal: controller.signal });
-      if (error) throw new Error(error);
-      const candidates = data?.results.filter(candidate => canonicalArtistMbid(candidate.id)) || [];
-      if (!candidates.length) throw new Error('No artist identities found. Retry or search MusicBrainz by artist name.');
-      if (!controller.signal.aborted && mounted.current && scopeRef.current === lookupScope) setPicker({ result, candidates });
-    } catch (error) {
-      if (!controller.signal.aborted && mounted.current && scopeRef.current === lookupScope) setMessages(previous => ({ ...previous, [result.id]: error instanceof Error ? error.message : 'Identity search unavailable; retry' }));
-    } finally { markPending(result.id, false); }
+  async function addResult(result: SubscriptionResult) {
+    const name = result.itemType === 'album' ? result.artistName || result.name : result.name;
+    await optionsAction.runWithOptions({ name, mbid: result.mbid, album: result.itemType === 'album' }, (options, current) => actOnResult(result, 'approve', options.mbid, options, current));
   }
   async function runNow() {
     if (running) return;
@@ -136,7 +122,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={result.status === 'failed' ? 'destructive' : 'secondary'}>{result.status === 'added' ? 'Record marked added' : result.status}</Badge>
         {(actionable || checking) && <>
-          <Button size="sm" variant="outline" disabled={pending.has(result.id) || results.isPlaceholderData} aria-label={`${checking ? 'Check acquisition' : identity ? result.status === 'failed' ? 'Retry add artist' : 'Add artist' : 'Identify and add artist'} ${artistName}`} onClick={() => void (checking || identity ? actOnResult(result, 'approve') : identify(result))}>{pending.has(result.id) ? 'Working…' : checking ? 'Check acquisition' : identity ? result.status === 'failed' ? 'Retry' : 'Add artist' : 'Identify artist'}</Button>
+          <Button size="sm" variant="outline" disabled={pending.has(result.id) || results.isPlaceholderData} aria-label={`${checking ? 'Check acquisition' : identity ? result.status === 'failed' ? 'Retry add artist' : 'Add artist' : 'Identify and add artist'} ${artistName}`} onClick={() => void (checking ? actOnResult(result, 'approve') : addResult(result))}>{pending.has(result.id) ? 'Working…' : checking ? 'Check acquisition' : identity ? result.status === 'failed' ? 'Retry' : 'Add artist' : 'Identify artist'}</Button>
           {actionable && <Button size="sm" variant="outline" disabled={pending.has(result.id) || results.isPlaceholderData} aria-label={`Reject result ${result.name}`} onClick={() => void actOnResult(result, 'reject')}>Reject</Button>}
         </>}
       </div>
@@ -183,6 +169,6 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: number }) {
         </>}
       </TabPanel>
     </Tabs>
-    <MbidSelectionModal candidates={picker?.candidates || null} artist={picker ? { foreignArtistId: '', artistName: picker.result.itemType === 'album' ? picker.result.artistName || picker.result.name : picker.result.name } : null} onClose={() => setPicker(null)} onSelect={mbid => { if (!picker) return; const result = picker.result; setPicker(null); void actOnResult(result, 'approve', mbid); }} />
+    {optionsAction.dialog}
   </>;
 }

@@ -1,3 +1,4 @@
+import { effectiveAddOptions, type AddOptions } from '../lib/add-options.js';
 /**
  * FeedService - Aggregates subscription results into deduplicated feed items.
  *
@@ -721,16 +722,17 @@ export class FeedService {
     if (results.length !== ids.length) throw new NotFoundError('Feed item not found');
     if (results.some(row => row.subscription.userId !== userId)) throw new ForbiddenError('Not authorized');
     const mbid = results[0].mbid;
-    if (results.some(row => row.itemType !== 'artist' || row.mbid !== mbid)) {
+    if (results.some(row => row.itemType !== 'artist' || row.mbid !== mbid || !mbid && this.normalizeName(row.name) !== this.normalizeName(results[0].name))) {
       throw new DecisionError(409, 'INVALID_AGGREGATE', 'Feed records do not identify one artist');
     }
     return results;
   }
 
-  async approve(feedId: string, userId: number, signal = AbortSignal.timeout(60_000)): Promise<{ artistName: string; outcome: AcquisitionOutcome }> {
+  async approve(feedId: string, userId: number, signal = AbortSignal.timeout(60_000), input: AddOptions & { mbid?: string } = {}): Promise<{ artistName: string; outcome: AcquisitionOutcome }> {
     const results = await this.ownedResults(feedId, userId, signal);
     const artistName = results[0].name;
-    const artistMbid = results[0].mbid;
+    const artistMbid = (results[0].mbid || input.mbid)?.toLowerCase();
+    if (results[0].mbid && input.mbid && results[0].mbid.toLowerCase() !== input.mbid.toLowerCase()) throw new DecisionError(409, 'IDENTITY_CONFLICT', 'Feed records already have an artist identity');
     if (!artistMbid || !z.string().uuid().safeParse(artistMbid).success) {
       throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a MusicBrainz artist before adding');
     }
@@ -754,8 +756,8 @@ export class FeedService {
       for (const row of results) {
         signal.throwIfAborted();
         const changed = await tx.subscriptionResult.updateMany({
-          where: { id: row.id, subscriptionId: row.subscriptionId, subscription: { userId }, status: row.status, processedAt: row.processedAt },
-          data: { status: 'adding', processedAt: claim, errorMessage: null, skipReason: null },
+          where: { id: row.id, subscriptionId: row.subscriptionId, subscription: { userId }, status: row.status, processedAt: row.processedAt, mbid: row.mbid },
+          data: { mbid: artistMbid, status: 'adding', processedAt: claim, errorMessage: null, skipReason: null },
         });
         if (changed.count !== 1) throw new DecisionError(409, 'DECISION_CONFLICT', 'Artist decision changed; refresh and retry');
       }
@@ -768,17 +770,9 @@ export class FeedService {
       if (member) {
         outcome = { artistMbid, state: 'already-in-library', message: 'Artist is already in Lidarr' };
       } else {
-        let qpId = this.lidarrConfig?.qualityProfileId;
-        let mpId = this.lidarrConfig?.metadataProfileId;
-        let rfPath = this.lidarrConfig?.rootFolderPath;
-        if (!qpId) qpId = (await lidarr.getQualityProfiles(signal))[0]?.id;
-        if (!mpId) mpId = (await lidarr.getMetadataProfiles(signal))[0]?.id;
-        if (!rfPath) rfPath = (await lidarr.getRootFolders(signal))[0]?.path;
-        if (!qpId || !mpId || !rfPath) throw new DecisionError(409, 'CONFIGURATION_REQUIRED', 'Configure Lidarr profiles and root folder');
-        signal.throwIfAborted();
-        await lidarr.addArtistWithCacheWarm(artistMbid, qpId, mpId, rfPath, true,
-          this.lidarrConfig?.searchOnAdd !== false, false,
-          this.lidarrConfig?.monitorOption || 'all', this.lidarrConfig?.monitorNewItems || 'all', signal);
+        const options = await effectiveAddOptions(lidarr, this.lidarrConfig || {}, input, signal);
+        await lidarr.addArtistWithCacheWarm(artistMbid, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, true,
+          options.searchOnAdd, false, options.monitorOption, options.monitorNewItems, signal);
         outcome = { artistMbid, state: 'added', message: 'Artist added to Lidarr' };
       }
     } catch (error) {

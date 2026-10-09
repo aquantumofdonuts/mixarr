@@ -1,3 +1,4 @@
+vi.mock('@/components/artists/AddArtistOptions', () => ({ useAddArtistOptions: () => ({ dialog: null, runWithOptions: (request: { mbid?: string }, execute: (options: unknown) => Promise<unknown>) => Promise.resolve(execute(request.mbid?.includes('-') && request.mbid.length === 36 ? { mbid: request.mbid } : {})).catch(() => null) }) }));
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
@@ -12,7 +13,7 @@ describe('compact discovery row', () => {
     render(<FeedCard {...props} onApprove={approve} onDismiss={dismiss} />);
     expect(screen.getByRole('link', { name: 'Radiohead' })).toHaveAttribute('href', '/?view=list&seed=one&artist=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
     const add = screen.getByRole('button', { name: 'Add artist Radiohead' });
-    add.focus(); await user.keyboard('{Enter}'); expect(approve).toHaveBeenCalledWith('feed-1-2');
+    add.focus(); await user.keyboard('{Enter}'); expect(approve).toHaveBeenCalledWith('feed-1-2', { mbid: props.artistMbid });
     fireEvent.touchStart(screen.getByRole('button', { name: 'Dismiss Radiohead' }));
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss Radiohead' })); expect(dismiss).toHaveBeenCalledWith('feed-1-2');
     expect(add.closest('article')).not.toHaveClass('group');
@@ -42,7 +43,7 @@ describe('compact discovery row', () => {
   it('requires explicit identity recovery instead of guessing an MBID', () => {
     render(<FeedCard {...props} artistMbid={null} acquisitionState="identity-required" />);
     expect(screen.queryByRole('button', { name: /Add artist/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Identify artist Radiohead' })).toHaveAttribute('href', '/search');
+    expect(screen.getByRole('button', { name: 'Identify artist Radiohead' })).toBeEnabled();
     expect(screen.getByRole('status')).toHaveTextContent('matching MusicBrainz artist');
   });
   it('links connection recovery to settings', () => {

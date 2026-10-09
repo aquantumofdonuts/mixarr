@@ -34,7 +34,7 @@ function InspectorPanel({ identity, isOpen, onClose }: { identity: string | null
       void client.invalidateQueries({ queryKey: ['discover', 'library'] });
     }
   }, [client, user?.id, identity]);
-  const { handleAddArtist, addingArtistId } = useArtistAdd(refreshConfirmed);
+  const { handleAddArtist, addingArtistId, optionsDialog } = useArtistAdd(refreshConfirmed);
   const pages = detail.data?.pages.filter(page => page.mbid.toLowerCase() === identity) ?? [];
   const artist = pages[0];
   const sources = [...new Map(pages.flatMap(page => page.sources).map(source => [source.key, source])).values()];
@@ -43,7 +43,7 @@ function InspectorPanel({ identity, isOpen, onClose }: { identity: string | null
     .sort((a, b) => (b['first-release-date'] || '').localeCompare(a['first-release-date'] || '') || a.title.localeCompare(b.title));
   const unavailable = artist?.unavailable ?? [];
 
-  return <Modal isOpen={isOpen} onClose={onClose} title={artist?.name || 'Artist details'} placement="inspector">
+  return <><Modal isOpen={isOpen} onClose={onClose} title={artist?.name || 'Artist details'} placement="inspector">
     {!identity ? <p role="alert">This artist link does not contain a valid MusicBrainz identity.</p> : <>
       {detail.isPending && <p role="status">Loading artist details…</p>}
       {detail.isError && <div role="alert" className="mb-4 space-y-2"><p>{detail.error?.message || 'Artist details unavailable'}</p><Button variant="outline" onClick={() => void detail.refetch()}>Retry artist details</Button></div>}
@@ -94,5 +94,5 @@ function InspectorPanel({ identity, isOpen, onClose }: { identity: string | null
     <ModalFooter><Button variant="outline" onClick={onClose}>Back to list</Button>
       {artist && artist.membership !== 'in-library' && <Button isLoading={addingArtistId !== null} onClick={() => void handleAddArtist({ foreignArtistId: artist.mbid, artistName: artist.name })}>Add artist</Button>}
     </ModalFooter>
-  </Modal>;
+  </Modal>{optionsDialog}</>;
 }

@@ -1,3 +1,4 @@
+import { addOptionsSchema } from '../lib/add-options.js';
 import { z } from 'zod';
 
 // ============================================================================
@@ -97,14 +98,15 @@ export const reviewQueueQuerySchema = z.object({
 /**
  * Body for PUT /review/:id — single review item status update
  */
-export const updateReviewItemSchema = z.object({
+export const updateReviewItemSchema = addOptionsSchema.extend({
+  mbid: z.string().uuid().transform(value => value.toLowerCase()).optional(),
   status: z.enum(['approved', 'rejected']),
 });
 
 /**
  * Body for POST /review/bulk — bulk review
  */
-export const bulkReviewSchema = z.object({
+export const bulkReviewSchema = addOptionsSchema.extend({
   ids: z.array(z.number().int().positive().safe()).min(1, 'At least one ID is required').max(100),
   status: z.enum(['approved', 'rejected']),
 });
