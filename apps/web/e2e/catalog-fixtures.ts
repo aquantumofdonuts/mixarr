@@ -103,6 +103,12 @@ export const test = base.extend<CatalogFixtures>({
             return reply({ items: items.slice(offset, offset + limit).map(({ status: _status, ...item }) => item), total: items.length, stats: { pending: pendingDiscoveryRecords(), addedToday: feedRecordsMarkedAdded } });
           }
           case '/api/dashboard/stats': return reply({ stats: { activeSubscriptions: 1, pendingDiscoveryRecords: pendingDiscoveryRecords(), subscriptionRecordsMarkedAdded: feedRecordsMarkedAdded + subscriptionResults.filter(result => result.status === 'added').length, pendingReviews: queue.length, runningJobs: 0, activeConnections: 1 } });
+          case '/api/discover/profiles': return reply({
+            qualityProfiles: [{ id: 1, name: 'Lossless' }, { id: 2, name: 'Portable' }],
+            metadataProfiles: [{ id: 1, name: 'Studio albums' }],
+            rootFolders: [{ id: 1, path: '/music' }, { id: 2, path: '/archive' }],
+            defaults: { qualityProfileId: 1, metadataProfileId: 1, rootFolderPath: '/music', monitorOption: 'all', monitorNewItems: 'all', searchOnAdd: true },
+          });
           case '/api/search/ai/status': return reply({ available: false });
           case '/api/search/lidarr/artists': return reply({ artists: [], total: 0, needingRefresh: 0, issueStats: { noAlbums: 0, noPoster: 0, noOverview: 0, noGenres: 0 }, healthScore: 100 });
           case '/api/search/discover': return reply({ results: catalogScenario === 'empty' ? [] : catalogFeed.map((item, index) => ({ name: item.artistName, mbid: item.artistMbid, imageUrl: item.imageUrl, sources: item.sources, spotifyId: `fixture-${index}`, inLibrary: added.has(item.artistMbid || '') })) });
