@@ -123,18 +123,44 @@ test('a partial bulk retry retains options and sends only the failed identities'
   expect(bodies.every(body => body.rootFolderPath === '/archive' && body.searchOnAdd === false)).toBe(true);
 });
 
-test('an unavailable required option focuses its field without making an acquisition request', async ({ catalogPage: page }) => {
-  let acquisitions = 0;
-  page.on('request', request => { if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/add')) acquisitions++; });
-  await page.route('**/api/discover/profiles', route => route.fulfill({ json: {
-    qualityProfiles: [{ id: 1, name: 'Lossless' }], metadataProfiles: [{ id: 1, name: 'Studio albums' }], rootFolders: [],
-    defaults: { qualityProfileId: 1, metadataProfileId: 1 },
+for (const unidentified of [false, true]) {
+  test(`an unavailable required option focuses ${unidentified ? 'identity before root folder' : 'root folder'} without making an acquisition request`, async ({ catalogPage: page }) => {
+    let acquisitions = 0;
+    page.on('request', request => { if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/add')) acquisitions++; });
+    await page.route('**/api/discover/profiles', route => route.fulfill({ json: {
+      qualityProfiles: [{ id: 1, name: 'Lossless' }], metadataProfiles: [{ id: 1, name: 'Studio albums' }], rootFolders: [],
+      defaults: { qualityProfileId: 1, metadataProfileId: 1 },
+    } }));
+    await page.goto('/search?q=Common+Name&tab=artist');
+    await page.getByRole('button', { name: unidentified ? /Add artist Unidentified Ensemble/ : 'Add artist Common Name', exact: !unidentified }).first().click();
+    const options = page.getByRole('dialog', { name: 'Add artist options', exact: true });
+    await options.getByRole('button', { name: 'Confirm add', exact: true }).click();
+    await expect(options.getByRole('alert')).toBeVisible();
+    await expect(unidentified ? options.getByRole('radio', { name: /British solo artist/ }) : options.getByRole('combobox', { name: 'Root folder', exact: true })).toBeFocused();
+    expect(acquisitions).toBe(0);
+  });
+}
+
+test('label artist actions expose usable shared options above the originating dialog', async ({ catalogPage: page }) => {
+  const labelId = '33333333-3333-4333-8333-333333333333';
+  const bodies: { artistIds: string[]; rootFolderPath: string }[] = [];
+  await page.route('**/api/search/label?**', route => route.fulfill({ json: { labels: [{ id: labelId, name: 'Catalog Label' }], count: 1 } }));
+  await page.route('**/api/search/label/*/artists?**', route => route.fulfill({ json: {
+    artists: ARTIST_IDS.map((id, index) => ({ id, name: `Label Artist ${index + 1}`, sortName: `Label Artist ${index + 1}`, imageUrl: null })), count: 2,
   } }));
-  await page.goto('/search?q=Common+Name&tab=artist');
-  await page.getByRole('button', { name: 'Add artist Common Name', exact: true }).first().click();
+  await page.route('**/api/search/batch', route => {
+    bodies.push(route.request().postDataJSON());
+    return route.fulfill({ json: { added: ARTIST_IDS, skipped: [], failed: [] } });
+  });
+  await page.goto('/search?q=Catalog&tab=label');
+  await page.getByRole('button', { name: 'View Artists', exact: true }).click();
+  await page.getByRole('button', { name: 'Select All', exact: true }).click();
+  await page.getByRole('button', { name: 'Add 2 Selected', exact: true }).click();
   const options = page.getByRole('dialog', { name: 'Add artist options', exact: true });
+  await options.getByRole('combobox', { name: 'Root folder', exact: true }).selectOption('/archive');
+  expect(bodies).toEqual([]);
   await options.getByRole('button', { name: 'Confirm add', exact: true }).click();
-  await expect(options.getByRole('alert')).toBeVisible();
-  await expect(options.getByRole('combobox', { name: 'Root folder', exact: true })).toBeFocused();
-  expect(acquisitions).toBe(0);
+  await expect(options).toHaveCount(0);
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toMatchObject({ artistIds: ARTIST_IDS, rootFolderPath: '/archive' });
 });
