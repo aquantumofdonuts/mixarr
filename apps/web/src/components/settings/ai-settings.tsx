@@ -16,12 +16,19 @@ import Save from 'lucide-react/dist/esm/icons/save';
 interface AISettingsData {
   openaiEnabled: boolean;
   openaiConfigured: boolean;
-  openaiApiKey?: string;
-  openaiBaseUrl?: string;
-  openaiModel?: string;
+  openaiApiKey?: string | null;
+  openaiBaseUrl?: string | null;
+  openaiModel?: string | null;
   anthropicEnabled: boolean;
   anthropicConfigured: boolean;
-  anthropicApiKey?: string;
+  anthropicApiKey?: string | null;
+}
+
+function isAISettings(value: unknown): value is AISettingsData {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const stored = value as Record<string, unknown>;
+  return ['openaiEnabled', 'openaiConfigured', 'anthropicEnabled', 'anthropicConfigured'].every(key => typeof stored[key] === 'boolean')
+    && ['openaiApiKey', 'openaiBaseUrl', 'openaiModel', 'anthropicApiKey'].every(key => stored[key] == null || typeof stored[key] === 'string');
 }
 
 export function AISettings() {
@@ -53,12 +60,11 @@ export function AISettings() {
     let current = true;
     void api.get<{ settings: AISettingsData }>('/api/ai/settings').then(({ data, error }) => {
       if (!current) return;
-      if (data) {
-        setLoaded(true); setSettings(data.settings);
-        const initial = { openaiEnabled: data.settings.openaiEnabled, anthropicEnabled: data.settings.anthropicEnabled, openaiApiKey: data.settings.openaiApiKey || '', openaiBaseUrl: data.settings.openaiBaseUrl || '', openaiModel: data.settings.openaiModel || '', anthropicApiKey: data.settings.anthropicApiKey || '' };
-        setOpenaiKey(initial.openaiApiKey); setOpenaiBaseUrl(initial.openaiBaseUrl); setOpenaiModel(initial.openaiModel); setAnthropicKey(initial.anthropicApiKey); setBaseline(initial);
-      }
-      setError(error); setIsLoading(false);
+      if (error || !isAISettings(data?.settings)) { setError(error || 'Failed to load AI settings: invalid response.'); setIsLoading(false); return; }
+      setLoaded(true); setSettings(data.settings);
+      const initial = { openaiEnabled: data.settings.openaiEnabled, anthropicEnabled: data.settings.anthropicEnabled, openaiApiKey: data.settings.openaiApiKey || '', openaiBaseUrl: data.settings.openaiBaseUrl || '', openaiModel: data.settings.openaiModel || '', anthropicApiKey: data.settings.anthropicApiKey || '' };
+      setOpenaiKey(initial.openaiApiKey); setOpenaiBaseUrl(initial.openaiBaseUrl); setOpenaiModel(initial.openaiModel); setAnthropicKey(initial.anthropicApiKey); setBaseline(initial);
+      setError(null); setIsLoading(false);
     });
     return () => { current = false; active.current = false; };
   }, []);
@@ -127,7 +133,7 @@ export function AISettings() {
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        <p role={error ? "alert" : "status"} className={error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>{error || (isSaving ? "Saving AI settings…" : dirty ? "Unsaved AI settings changes" : "AI settings saved")}</p>
+        <p role={error ? "alert" : "status"} className={error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>{error || (isSaving ? "Saving AI settings…" : dirty ? "Unsaved AI settings changes" : loaded ? "AI settings saved" : "AI settings unavailable")}</p>
         <fieldset disabled={!loaded} className="space-y-6">
         {/* OpenAI Section */}
         <div className="rounded-container border p-4 space-y-4">

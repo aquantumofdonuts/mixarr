@@ -146,16 +146,24 @@ export default function SettingsPage() {
     let current = true;
     void api.get<{ settings: Record<string, SettingValue> }>('/api/settings').then(({ data, error }) => {
       if (!current) return;
-      if (data) {
-        const initial = Object.fromEntries(settingGroups.flatMap(group => group.settings.map(setting => [setting.key, data.settings[setting.key] ?? setting.defaultValue])));
-        setLoadedPersonal(true); setSettings(initial); setBaseline(initial);
-      }
-      setError(error); setLoadingPersonal(false);
+      const stored = data?.settings;
+      const valid = stored && typeof stored === 'object' && !Array.isArray(stored) && settingGroups.every(group => group.settings.every(setting => {
+        const value = stored[setting.key];
+        return value == null || (typeof value === typeof setting.defaultValue && (typeof value !== 'number' || Number.isFinite(value)) && (!setting.options || setting.options.some(option => option.value === value)));
+      }));
+      if (error || !valid) { setError(error || 'Failed to load personal settings: invalid response.'); setLoadingPersonal(false); return; }
+      const initial = Object.fromEntries(settingGroups.flatMap(group => group.settings.map(setting => [setting.key, stored[setting.key] ?? setting.defaultValue])));
+      setLoadedPersonal(true); setSettings(initial); setBaseline(initial);
+      setError(null); setLoadingPersonal(false);
     });
     void api.get<{ settings: Record<string, SettingValue> }>('/api/settings/global').then(({ data, error }) => {
       if (!current) return;
-      if (data) { const initial = { baseUrl: typeof data.settings.baseUrl === 'string' ? data.settings.baseUrl : '' }; setLoadedGlobal(true); setGlobalSettings(initial); setGlobalBaseline(initial); }
-      setGlobalError(error); setLoadingGlobal(false);
+      const stored = data?.settings;
+      const valid = stored && typeof stored === 'object' && !Array.isArray(stored) && (stored.baseUrl == null || typeof stored.baseUrl === 'string');
+      if (error || !valid) { setGlobalError(error || 'Failed to load global settings: invalid response.'); setLoadingGlobal(false); return; }
+      const initial = { baseUrl: typeof stored.baseUrl === 'string' ? stored.baseUrl : '' };
+      setLoadedGlobal(true); setGlobalSettings(initial); setGlobalBaseline(initial);
+      setGlobalError(null); setLoadingGlobal(false);
     });
     return () => { current = false; };
   }, [isAdmin]);
@@ -328,7 +336,7 @@ export default function SettingsPage() {
                 ))}
                 {group.key === 'notifications' && (
                   <>
-                  <p role={error ? 'alert' : 'status'} className={error ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>{error || (isSaving ? 'Saving personal settings…' : dirty ? 'Unsaved personal settings changes' : 'Personal settings saved')}</p>
+                  <p role={error ? 'alert' : 'status'} className={error ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>{error || (isSaving ? 'Saving personal settings…' : dirty ? 'Unsaved personal settings changes' : loadedPersonal ? 'Personal settings saved' : 'Personal settings unavailable')}</p>
                   <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={handleReset} disabled={!loadedPersonal}>Restore personal defaults</Button><Button onClick={handleSave} disabled={isSaving || !dirty || !loadedPersonal}>Save personal settings</Button></div>
                   <a
                     href="/settings/notifications"
@@ -382,7 +390,7 @@ export default function SettingsPage() {
                 </div>
               </div>
               
-              <p role={globalError ? "alert" : "status"} className="text-sm text-muted-foreground">{globalError || (isSavingGlobal ? "Saving global settings…" : globalDirty ? "Unsaved global settings changes" : "Global settings saved")}</p>
+              <p role={globalError ? "alert" : "status"} className="text-sm text-muted-foreground">{globalError || (isSavingGlobal ? "Saving global settings…" : globalDirty ? "Unsaved global settings changes" : loadedGlobal ? "Global settings saved" : "Global settings unavailable")}</p>
               <div className="flex justify-end pt-2">
                 <Button onClick={handleSaveGlobal} disabled={isSavingGlobal || !globalDirty || !loadedGlobal}>
                   <Save className="h-4 w-4 mr-2" /> {isSavingGlobal ? 'Saving...' : 'Save Global Settings'}

@@ -117,3 +117,19 @@ test.describe('non-admin settings access', () => {
     await page.goto('/settings'); await expect(page).toHaveURL(/\/$/); expect(reads).toEqual([]); expect(api.writes).toEqual([]);
   });
 });
+
+for (const kind of ['missing', 'malformed'] as const) {
+  test(`${kind} settings read responses show load failures and never claim saved baselines`, async ({ catalogPage: page }) => {
+    const api = await settingsApi(page);
+    await page.route(/\/api\/(?:settings(?:\/global)?|ai\/settings)$/, async route => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      return kind === 'missing' ? route.fulfill({ status: 204 }) : route.fulfill({ json: { settings: [] } });
+    });
+    await page.goto('/settings');
+    for (const [scope, saved, save] of [['personal', 'Personal settings saved', 'Save personal settings'], ['global', 'Global settings saved', 'Save Global Settings'], ['AI', 'AI settings saved', 'Save AI settings']]) {
+      await expect(page.getByRole('alert').filter({ hasText: `Failed to load ${scope} settings: invalid response.` })).toBeVisible();
+      await expect(page.getByText(saved, { exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: save, exact: true })).toBeDisabled();
+    }
+    expect(api.writes).toEqual([]);
+  });
+}
