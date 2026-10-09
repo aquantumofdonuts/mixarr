@@ -67,8 +67,9 @@ test('mobile add options keep fields and confirmation inside the viewport', asyn
   await expect(options.getByRole('combobox', { name: 'Root folder', exact: true })).toBeVisible();
   await expect(options.getByRole('button', { name: 'Confirm add', exact: true })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await mkdir('/tmp/mixarr-catalog-evidence/add-options', { recursive: true });
-  await page.screenshot({ path: '/tmp/mixarr-catalog-evidence/add-options/mobile.png', animations: 'disabled' });
+  const evidence = `${process.env.CATALOG_EVIDENCE_DIR || '/tmp/mixarr-catalog-evidence'}/add-options`;
+  await mkdir(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/mobile.png`, animations: 'disabled' });
   await page.keyboard.press('Escape');
   await expect(options).toHaveCount(0);
 });
@@ -146,7 +147,8 @@ test('label artist actions expose usable shared options above the originating di
   const bodies: { artistIds: string[]; rootFolderPath: string }[] = [];
   await page.route('**/api/search/label?**', route => route.fulfill({ json: { labels: [{ id: labelId, name: 'Catalog Label' }], count: 1 } }));
   await page.route('**/api/search/label/*/artists?**', route => route.fulfill({ json: {
-    artists: ARTIST_IDS.map((id, index) => ({ id, name: `Label Artist ${index + 1}`, sortName: `Label Artist ${index + 1}`, imageUrl: null })), count: 2,
+    artists: ARTIST_IDS.map((id, index) => ({ id, name: `Label Artist ${index + 1}`, sortName: `Label Artist ${index + 1}`, imageUrl: null })),
+    releasesProcessed: 2, totalReleases: 2, nextReleaseOffset: null,
   } }));
   await page.route('**/api/search/batch', route => {
     bodies.push(route.request().postDataJSON());
@@ -154,8 +156,8 @@ test('label artist actions expose usable shared options above the originating di
   });
   await page.goto('/search?q=Catalog&tab=label');
   await page.getByRole('button', { name: 'View Artists', exact: true }).click();
-  await page.getByRole('button', { name: 'Select All', exact: true }).click();
-  await page.getByRole('button', { name: 'Add 2 Selected', exact: true }).click();
+  await page.getByRole('button', { name: 'Select all loaded artists', exact: true }).click();
+  await page.getByRole('button', { name: 'Add 2 selected artists', exact: true }).click();
   const options = page.getByRole('dialog', { name: 'Add artist options', exact: true });
   await options.getByRole('combobox', { name: 'Root folder', exact: true }).selectOption('/archive');
   expect(bodies).toEqual([]);

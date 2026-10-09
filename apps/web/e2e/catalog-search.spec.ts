@@ -81,8 +81,9 @@ test('mobile search places the input before controls without horizontal overflow
   expect(input).not.toBeNull(); expect(type).not.toBeNull();
   expect(input!.y + input!.height).toBeLessThanOrEqual(type!.y);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await mkdir('/tmp/mixarr-catalog-evidence/search', { recursive: true });
-  await page.screenshot({ path: '/tmp/mixarr-catalog-evidence/search/mobile.png' });
+  const evidence = `${process.env.CATALOG_EVIDENCE_DIR || '/tmp/mixarr-catalog-evidence'}/search`;
+  await mkdir(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/mobile.png` });
 });
 
 test('replacing the query keeps selected identities still present in the new results', async ({ catalogPage: page }) => {
