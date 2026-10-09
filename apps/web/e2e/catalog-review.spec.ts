@@ -3,6 +3,17 @@ import type { Page } from '@playwright/test';
 import { test, expect, ARTIST_IDS, catalogQueue } from './catalog-fixtures';
 const makeRow = (id: number, userId = 7) => ({ ...catalogQueue[0], id, userId, artistName: 'Same name', mbid: ARTIST_IDS[id % 2] as string | null, user: { username: `owner-${userId}`, displayName: `Owner ${userId}` } });
 type Row = ReturnType<typeof makeRow>;
+async function navigateCatalog(page: Page, name: 'Review Queue' | 'Library') {
+  const menu = page.getByRole('button', { name: 'Open menu', exact: true });
+  if (await menu.isVisible()) {
+    await menu.click();
+    const drawer = page.getByRole('dialog', { name: 'Mixarr navigation', exact: true });
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole('link', { name, exact: true }).click();
+    await expect(drawer).toHaveCount(0);
+  } else await page.getByRole('link', { name, exact: true }).click();
+}
+
 async function mutableQueue(page: Page, initial: Row[]) {
   const state = { rows: initial, approvals: [] as Record<string, unknown>[], rejections: [] as Record<string, unknown>[], restores: [] as Record<string, unknown>[], failFirstBulk: false, restoreFails: false };
   const rejected = new Map<string, Row[]>();
@@ -97,8 +108,8 @@ test('a visible signed Undo remains actionable after native navigation to the li
   const state = await mutableQueue(page,[makeRow(2),makeRow(1)]);
   await page.route('**/api/search/lidarr/artists/fix-all/status', route=>route.fulfill({json:{jobId:null,status:null,total:0,processed:0,fixed:0,failed:0}}));
   await page.goto('/library'); await expect(page.getByRole('heading', {name:'Lidarr Library',exact:true})).toBeVisible();
-  await page.getByRole('link', {name:'Review Queue',exact:true}).click(); await page.getByRole('article', {name:'Review item 2',exact:true}).getByRole('button', {name:'Reject',exact:true}).click(); await expect(page.getByRole('button', {name:'Undo',exact:true})).toBeVisible();
-  await page.getByRole('link', {name:'Library',exact:true}).click(); await expect(page).toHaveURL(/\/library$/); const undo = page.getByRole('button', {name:'Undo',exact:true}); await expect(undo).toBeVisible(); await undo.focus(); await page.keyboard.press('Enter'); await expect.poll(()=>state.restores.length).toBe(1); await expect(page.getByText('Rejection restored', {exact:true})).toBeVisible(); expect(state.restores).toEqual([{undoToken:'opaque-signed-1'}]);
+  await navigateCatalog(page, 'Review Queue'); await page.getByRole('article', {name:'Review item 2',exact:true}).getByRole('button', {name:'Reject',exact:true}).click(); await expect(page.getByRole('button', {name:'Undo',exact:true})).toBeVisible();
+  await navigateCatalog(page, 'Library'); await expect(page).toHaveURL(/\/library$/); const undo = page.getByRole('button', {name:'Undo',exact:true}); await expect(undo).toBeVisible(); await undo.focus(); await page.keyboard.press('Enter'); await expect.poll(()=>state.restores.length).toBe(1); await expect(page.getByText('Rejection restored', {exact:true})).toBeVisible(); expect(state.restores).toEqual([{undoToken:'opaque-signed-1'}]);
 });
 test('empty queues and no-match searches have distinct recovery and preserve unrelated filters', async ({ catalogPage: page }) => {
   await mutableQueue(page,[]); await page.goto('/queue?keep=value'); await expect(page.getByText('No pending review items.', {exact:true})).toBeVisible(); await expect(page.getByRole('button', {name:'Clear queue filters',exact:true})).toHaveCount(0);
@@ -111,6 +122,10 @@ test('a restoration finishing after logout cannot publish feedback into the repl
   await page.route('**/api/auth/logout', route=>route.fulfill({json:{success:true}}));
   let finish!: ()=>Promise<void>, restores=0;
   await page.route('**/api/imports/review/restore', route=>new Promise<void>(resolve=>{restores++;finish=async()=>{await route.fulfill({json:{restoredIds:[2]}});resolve();};}));
-  await page.goto('/library'); await expect(page.getByRole('heading', {name:'Lidarr Library',exact:true})).toBeVisible(); await page.getByRole('link', {name:'Review Queue',exact:true}).click(); await page.getByRole('article', {name:'Review item 2',exact:true}).getByRole('button', {name:'Reject',exact:true}).click(); await expect(page.getByRole('button', {name:'Undo',exact:true})).toBeVisible(); await page.getByRole('link', {name:'Library',exact:true}).click(); await page.getByRole('button', {name:'Undo',exact:true}).click(); await expect.poll(()=>restores).toBe(1);
-  await page.getByRole('button', {name:'Account menu',exact:true}).click(); await page.getByRole('button', {name:'Logout',exact:true}).click(); await expect(page).toHaveURL(/\/login(?:\?|$)/); await expect(page.getByRole('button', {name:'Undo',exact:true})).toHaveCount(0); const completed=page.waitForResponse('**/api/imports/review/restore'); await finish(); await (await completed).finished(); await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))); await expect(page.getByText('Rejection restored', {exact:true})).toHaveCount(0); await expect(page.getByText('Could not restore rejection', {exact:true})).toHaveCount(0); expect(restores).toBe(1);
+  await page.goto('/library'); await expect(page.getByRole('heading', {name:'Lidarr Library',exact:true})).toBeVisible(); await navigateCatalog(page, 'Review Queue'); await page.getByRole('article', {name:'Review item 2',exact:true}).getByRole('button', {name:'Reject',exact:true}).click(); await expect(page.getByRole('button', {name:'Undo',exact:true})).toBeVisible(); await navigateCatalog(page, 'Library'); await page.getByRole('button', {name:'Undo',exact:true}).click(); await expect.poll(()=>restores).toBe(1);
+  const menu = page.getByRole('button', {name:'Open menu',exact:true});
+  if (await menu.isVisible()) {
+    await menu.click(); const drawer = page.getByRole('dialog', {name:'Mixarr navigation',exact:true}); await expect(drawer).toBeVisible(); const logout = drawer.getByRole('button', {name:'Logout',exact:true}); await logout.focus(); await page.keyboard.press('Enter'); await expect(drawer).toHaveCount(0);
+  } else { await page.getByRole('button', {name:'Account menu',exact:true}).click(); await page.getByRole('button', {name:'Logout',exact:true}).click(); }
+  await expect(page).toHaveURL(/\/login(?:\?|$)/); await expect(page.getByRole('button', {name:'Undo',exact:true})).toHaveCount(0); const completed=page.waitForResponse('**/api/imports/review/restore'); await finish(); await (await completed).finished(); await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))); await expect(page.getByText('Rejection restored', {exact:true})).toHaveCount(0); await expect(page.getByText('Could not restore rejection', {exact:true})).toHaveCount(0); expect(restores).toBe(1);
 });
