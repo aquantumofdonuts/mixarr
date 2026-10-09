@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import { api } from '@/lib/api';
 import Brain from 'lucide-react/dist/esm/icons/brain';
 import Eye from 'lucide-react/dist/esm/icons/eye';
@@ -40,56 +41,45 @@ export function AISettings() {
   const [isLoading, setIsLoading] = useState(true);
   const { addToast } = useToast();
 
-  const fetchSettings = async () => {
-    setIsLoading(true);
-    try {
-      const { data } = await api.get<{ settings: AISettingsData }>('/api/ai/settings');
-      if (data) {
-        setSettings(data.settings);
-        if (data.settings.openaiApiKey) {
-          setOpenaiKey(data.settings.openaiApiKey);
-        }
-        if (data.settings.openaiBaseUrl) {
-          setOpenaiBaseUrl(data.settings.openaiBaseUrl);
-        }
-        if (data.settings.openaiModel) {
-          setOpenaiModel(data.settings.openaiModel);
-        }
-        if (data.settings.anthropicApiKey) {
-          setAnthropicKey(data.settings.anthropicApiKey);
-        }
-      }
-    } catch {
-      addToast({ type: 'error', title: 'Failed to load AI settings' });
-    }
-    setIsLoading(false);
-  };
-
+  const [loaded, setLoaded] = useState(false);
+  const [baseline, setBaseline] = useState<Record<string, string | boolean>>({});
+  const [error, setError] = useState<string | null>(null);
+  const active = useRef(false);
+  const draft = { openaiEnabled: settings.openaiEnabled, anthropicEnabled: settings.anthropicEnabled, openaiApiKey: openaiKey, openaiBaseUrl, openaiModel, anthropicApiKey: anthropicKey };
+  const dirty = loaded && JSON.stringify(draft) !== JSON.stringify(baseline);
+  useUnsavedChanges(dirty);
   useEffect(() => {
-    fetchSettings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    active.current = true;
+    let current = true;
+    void api.get<{ settings: AISettingsData }>('/api/ai/settings').then(({ data, error }) => {
+      if (!current) return;
+      if (data) {
+        setLoaded(true); setSettings(data.settings);
+        const initial = { openaiEnabled: data.settings.openaiEnabled, anthropicEnabled: data.settings.anthropicEnabled, openaiApiKey: data.settings.openaiApiKey || '', openaiBaseUrl: data.settings.openaiBaseUrl || '', openaiModel: data.settings.openaiModel || '', anthropicApiKey: data.settings.anthropicApiKey || '' };
+        setOpenaiKey(initial.openaiApiKey); setOpenaiBaseUrl(initial.openaiBaseUrl); setOpenaiModel(initial.openaiModel); setAnthropicKey(initial.anthropicApiKey); setBaseline(initial);
+      }
+      setError(error); setIsLoading(false);
+    });
+    return () => { current = false; active.current = false; };
   }, []);
 
   const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const { error } = await api.put('/api/ai/settings', {
-        openaiEnabled: settings.openaiEnabled,
-        openaiApiKey: openaiKey || undefined,
-        openaiBaseUrl: openaiBaseUrl || undefined,
-        openaiModel: openaiModel || undefined,
-        anthropicEnabled: settings.anthropicEnabled,
-        anthropicApiKey: anthropicKey || undefined,
-      });
-
-      if (error) {
-        addToast({ type: 'error', title: 'Failed to save AI settings', message: error });
-      } else {
-        addToast({ type: 'success', title: 'AI settings saved' });
-        fetchSettings();
-      }
-    } catch {
-      addToast({ type: 'error', title: 'Failed to save AI settings' });
+    if (isSaving || !loaded) return;
+    if (openaiBaseUrl) {
+      try { const url = new URL(openaiBaseUrl); if (!['http:', 'https:'].includes(url.protocol)) throw new Error(); }
+      catch { setError('Base URL must be an HTTP or HTTPS URL.'); document.getElementById('ai-base-url')?.focus(); return; }
+    }
+    if (openaiModel && !/^[a-zA-Z0-9._:-]+$/.test(openaiModel)) { setError('Model contains unsupported characters.'); document.getElementById('ai-model')?.focus(); return; }
+    const submitted = { ...draft };
+    const changes = Object.fromEntries(Object.entries(submitted).filter(([key, value]) => value !== baseline[key]));
+    setIsSaving(true); setError(null);
+    const { data, error } = await api.put<{ settings?: AISettingsData }>('/api/ai/settings', changes);
+    if (!active.current) return;
+    setError(error);
+    if (!error) {
+      setBaseline(submitted);
+      if (data?.settings) setSettings(current => ({ ...current, openaiConfigured: data.settings!.openaiConfigured, anthropicConfigured: data.settings!.anthropicConfigured }));
+      addToast({ type: 'success', title: 'AI settings saved' });
     }
     setIsSaving(false);
   };
@@ -131,12 +121,14 @@ export function AISettings() {
               </CardDescription>
             </div>
           </div>
-          <Button onClick={handleSave} disabled={isSaving} size="sm">
-            <Save className="h-4 w-4 mr-2" /> {isSaving ? 'Saving...' : 'Save'}
+          <Button onClick={handleSave} disabled={isSaving || !dirty || !loaded} size="sm">
+            <Save className="h-4 w-4 mr-2" /> {isSaving ? 'Saving...' : 'Save AI settings'}
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
+        <p role={error ? "alert" : "status"} className={error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>{error || (isSaving ? "Saving AI settings…" : dirty ? "Unsaved AI settings changes" : "AI settings saved")}</p>
+        <fieldset disabled={!loaded} className="space-y-6">
         {/* OpenAI Section */}
         <div className="rounded-container border p-4 space-y-4">
           <div className="flex items-center justify-between">
@@ -153,12 +145,11 @@ export function AISettings() {
             />
           </div>
 
-          {settings.openaiEnabled && (
-            <>
+          <>
               <div className="space-y-2">
-                <label className="text-sm font-medium">API Key</label>
+                <label htmlFor="ai-openai-key" className="text-sm font-medium">API Key</label>
                 <div className="relative">
-                  <Input
+                  <Input id="ai-openai-key"
                     type={showOpenaiKey ? 'text' : 'password'}
                     value={openaiKey}
                     onChange={(e) => setOpenaiKey(e.target.value)}
@@ -166,7 +157,7 @@ export function AISettings() {
                     className="pr-10"
                   />
                   <button
-                    type="button"
+                    type="button" aria-label={showOpenaiKey ? "Hide OpenAI API key" : "Show OpenAI API key"}
                     onClick={() => setShowOpenaiKey(!showOpenaiKey)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
@@ -179,8 +170,8 @@ export function AISettings() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Base URL (Optional)</label>
-                <Input
+                <label htmlFor="ai-base-url" className="text-sm font-medium">Base URL (Optional)</label>
+                <Input id="ai-base-url"
                   type="text"
                   value={openaiBaseUrl}
                   onChange={(e) => setOpenaiBaseUrl(e.target.value)}
@@ -192,8 +183,8 @@ export function AISettings() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Model (Optional)</label>
-                <Input
+                <label htmlFor="ai-model" className="text-sm font-medium">Model (Optional)</label>
+                <Input id="ai-model"
                   type="text"
                   value={openaiModel}
                   onChange={(e) => setOpenaiModel(e.target.value)}
@@ -207,8 +198,7 @@ export function AISettings() {
               {settings.openaiConfigured && (
                 <p className="text-xs text-status-success">✓ OpenAI-compatible provider configured</p>
               )}
-            </>
-          )}
+          </>
         </div>
 
         {/* Anthropic Section */}
@@ -227,12 +217,11 @@ export function AISettings() {
             />
           </div>
 
-          {settings.anthropicEnabled && (
-            <>
+          <>
               <div className="space-y-2">
-                <label className="text-sm font-medium">API Key</label>
+                <label htmlFor="ai-anthropic-key" className="text-sm font-medium">API Key</label>
                 <div className="relative">
-                  <Input
+                  <Input id="ai-anthropic-key"
                     type={showAnthropicKey ? 'text' : 'password'}
                     value={anthropicKey}
                     onChange={(e) => setAnthropicKey(e.target.value)}
@@ -240,7 +229,7 @@ export function AISettings() {
                     className="pr-10"
                   />
                   <button
-                    type="button"
+                    type="button" aria-label={showAnthropicKey ? "Hide Anthropic API key" : "Show Anthropic API key"}
                     onClick={() => setShowAnthropicKey(!showAnthropicKey)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
@@ -251,8 +240,7 @@ export function AISettings() {
                   <p className="text-xs text-status-success">✓ API key configured</p>
                 )}
               </div>
-            </>
-          )}
+          </>
         </div>
 
         {/* Info */}
@@ -263,6 +251,7 @@ export function AISettings() {
             Configure AI recommendation strategy per-subscription when creating an AI Recommendations subscription.
           </p>
         </div>
+        </fieldset>
       </CardContent>
     </Card>
   );

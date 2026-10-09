@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import { api } from '@/lib/api';
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import Eye from 'lucide-react/dist/esm/icons/eye';
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off';
@@ -118,101 +118,67 @@ export function SSOSettings() {
   });
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [savingProvider, setSavingProvider] = useState<SSOProviderType | null>(null);
+  const [savingProviders, setSavingProviders] = useState<Partial<Record<SSOProviderType, boolean>>>({});
   const [testingProvider, setTestingProvider] = useState<SSOProviderType | null>(null);
   const [baseUrl, setBaseUrl] = useState<string>('');
   const { addToast } = useToast();
 
-  const fetchProviders = async () => {
-    setIsLoading(true);
-    try {
-      const [providersRes, baseUrlRes] = await Promise.all([
-        api.get<{ providers: SSOProvider[] }>('/api/sso/providers'),
-        api.get<{ baseUrl: string }>('/api/settings/base-url'),
-      ]);
-
-      if (providersRes.error) {
-        addToast({ type: 'error', title: 'Failed to load SSO providers', message: providersRes.error });
-      } else if (providersRes.data) {
-        setProviders(providersRes.data.providers);
-        // Initialize form data from fetched providers
-        const newFormData = { ...formData };
-        providersRes.data.providers.forEach((provider) => {
-          newFormData[provider.type] = { ...provider.config };
-        });
-        setFormData(newFormData);
-      }
-
-      if (baseUrlRes.data?.baseUrl) {
-        setBaseUrl(baseUrlRes.data.baseUrl);
-      }
-    } catch {
-      addToast({ type: 'error', title: 'Failed to load SSO providers' });
-    }
-    setIsLoading(false);
-  };
-
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [baseline, setBaseline] = useState(formData);
+  const [enabled, setEnabled] = useState<Partial<Record<SSOProviderType, boolean>>>({});
+  const [enabledBaseline, setEnabledBaseline] = useState(enabled);
+  const [errors, setErrors] = useState<Partial<Record<SSOProviderType, string>>>({});
+  const active = useRef(false);
+  const dirtyProvider = (type: SSOProviderType) => JSON.stringify(formData[type]) !== JSON.stringify(baseline[type]) || !!enabled[type] !== !!enabledBaseline[type];
+  useUnsavedChanges(providerConfigs.some(config => dirtyProvider(config.type)));
   useEffect(() => {
-    fetchProviders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    active.current = true;
+    let current = true;
+    void Promise.all([api.get<{ providers: SSOProvider[] }>('/api/sso/providers'), api.get<{ baseUrl: string }>('/api/settings/base-url')]).then(([result, baseUrlResult]) => {
+      if (!current) return;
+      setLoadError(result.error);
+      if (result.data) {
+        setLoaded(true); setProviders(result.data.providers);
+        const initial = { ldap: {}, saml: {}, google: {}, plex: {}, oidc: {} } as typeof formData;
+        const initialEnabled: typeof enabled = {};
+        result.data.providers.forEach(provider => { initial[provider.type] = { ...provider.config }; initialEnabled[provider.type] = provider.isEnabled; });
+        setFormData(initial); setBaseline(initial); setEnabled(initialEnabled); setEnabledBaseline(initialEnabled);
+      }
+      if (baseUrlResult.data) setBaseUrl(baseUrlResult.data.baseUrl);
+      setIsLoading(false);
+    });
+    return () => { current = false; active.current = false; };
   }, []);
 
   const getProvider = (type: SSOProviderType): SSOProvider | undefined => {
     return providers.find((p) => p.type === type);
   };
 
-  const handleToggle = async (type: SSOProviderType) => {
-    const provider = getProvider(type);
-    const newEnabled = !provider?.isEnabled;
-
-    try {
-      const { error } = await api.patch(`/api/sso/providers/${type}/toggle`, { isEnabled: newEnabled });
-      if (error) {
-        addToast({ type: 'error', title: `Failed to ${newEnabled ? 'enable' : 'disable'} ${type.toUpperCase()}`, message: error });
-      } else {
-        addToast({ type: 'success', title: `${type.toUpperCase()} ${newEnabled ? 'enabled' : 'disabled'}` });
-        fetchProviders();
-      }
-    } catch {
-      addToast({ type: 'error', title: `Failed to toggle ${type.toUpperCase()}` });
-    }
-  };
+  const handleToggle = (type: SSOProviderType) => setEnabled(current => ({ ...current, [type]: !current[type] }));
 
   const handleSave = async (type: SSOProviderType) => {
-    const config = providerConfigs.find((c) => c.type === type);
+    if (savingProviders[type] || !loaded) return;
+    const config = providerConfigs.find(item => item.type === type);
     if (!config) return;
-
-    // Validate required fields
-    const missingFields = config.fields
-      .filter((f) => f.required && !formData[type][f.key])
-      .map((f) => f.label);
-
-    if (missingFields.length > 0) {
-      addToast({
-        type: 'error',
-        title: 'Missing required fields',
-        message: missingFields.join(', '),
-      });
-      return;
+    const missing = config.fields.find(field => field.required && !formData[type][field.key]);
+    if (missing) {
+      setErrors(current => ({ ...current, [type]: `${missing.label} is required.` }));
+      document.getElementById(`sso-${type}-${missing.key}`)?.focus(); return;
     }
-
-    setSavingProvider(type);
-    try {
-      const { error } = await api.put(`/api/sso/providers/${type}`, {
-        name: config.name,
-        config: formData[type],
-      });
-
-      if (error) {
-        addToast({ type: 'error', title: `Failed to save ${config.name} settings`, message: error });
-      } else {
-        addToast({ type: 'success', title: `${config.name} settings saved` });
-        fetchProviders();
-      }
-    } catch {
-      addToast({ type: 'error', title: `Failed to save ${config.name} settings` });
+    const submitted = { ...formData[type] };
+    const submittedEnabled = !!enabled[type];
+    setSavingProviders(current => ({ ...current, [type]: true })); setErrors(current => ({ ...current, [type]: '' }));
+    const { data, error } = await api.put<{ provider?: SSOProvider }>(`/api/sso/providers/${type}`, { name: config.name, config: submitted, isEnabled: submittedEnabled });
+    if (!active.current) return;
+    if (error) setErrors(current => ({ ...current, [type]: error }));
+    else {
+      setBaseline(current => ({ ...current, [type]: submitted }));
+      setEnabledBaseline(current => ({ ...current, [type]: submittedEnabled }));
+      setProviders(current => [...current.filter(provider => provider.type !== type), data?.provider || { id: type, type, name: config.name, config: submitted, isEnabled: submittedEnabled }]);
+      addToast({ type: 'success', title: `${config.name} settings saved` });
     }
-    setSavingProvider(null);
+    setSavingProviders(current => ({ ...current, [type]: false }));
   };
 
   const handleTest = async (type: SSOProviderType) => {
@@ -223,6 +189,7 @@ export function SSOSettings() {
     try {
       const { data, error } = await api.post<{ success: boolean; message?: string }>(`/api/sso/providers/${type}/test`);
 
+      if (!active.current) return;
       if (error) {
         addToast({ type: 'error', title: `${config.name} connection test failed`, message: error });
       } else if (data?.success) {
@@ -231,6 +198,7 @@ export function SSOSettings() {
         addToast({ type: 'error', title: `${config.name} connection test failed`, message: data?.message || 'Unknown error' });
       }
     } catch {
+      if (!active.current) return;
       addToast({ type: 'error', title: `Failed to test ${config.name} connection` });
     }
     setTestingProvider(null);
@@ -291,22 +259,24 @@ export function SSOSettings() {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
+        <fieldset disabled={!loaded} className="space-y-4">
         {providerConfigs.map((config) => {
           const provider = getProvider(config.type);
           const isExpanded = expandedProvider === config.type;
-          const isEnabled = provider?.isEnabled ?? false;
+          const isEnabled = !!enabled[config.type];
           const isSaved = !!provider;
           const mainFields = config.fields.filter((f) => !f.advanced);
           const advancedFields = config.fields.filter((f) => f.advanced);
 
           const renderField = (field: FieldConfig) => (
             <div key={field.key} className="space-y-2">
-              <label className="text-sm font-medium">
+              <label htmlFor={`sso-${config.type}-${field.key}`} className="text-sm font-medium">
                 {field.label}
-                {field.required && <span className="text-destructive ml-1">*</span>}
+                {field.required && <span aria-hidden="true" className="text-destructive ml-1">*</span>}
               </label>
               {field.type === 'textarea' ? (
-                <textarea
+                <textarea id={`sso-${config.type}-${field.key}`} aria-required={field.required}
                   value={formData[config.type][field.key] || ''}
                   onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
                   placeholder={field.placeholder}
@@ -314,7 +284,7 @@ export function SSOSettings() {
                 />
               ) : field.type === 'password' ? (
                 <div className="relative">
-                  <Input
+                  <Input id={`sso-${config.type}-${field.key}`} aria-required={field.required}
                     type={showPasswords[`${config.type}-${field.key}`] ? 'text' : 'password'}
                     value={formData[config.type][field.key] || ''}
                     onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
@@ -322,7 +292,7 @@ export function SSOSettings() {
                     className="pr-10"
                   />
                   <button
-                    type="button"
+                    type="button" aria-label={`Toggle ${field.label} visibility`}
                     onClick={() => togglePasswordVisibility(`${config.type}-${field.key}`)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
@@ -334,7 +304,7 @@ export function SSOSettings() {
                   </button>
                 </div>
               ) : (
-                <Input
+                <Input id={`sso-${config.type}-${field.key}`} aria-required={field.required}
                   type="text"
                   value={formData[config.type][field.key] || ''}
                   onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
@@ -348,26 +318,23 @@ export function SSOSettings() {
           );
 
           return (
-            <div key={config.type} className="rounded-container border">
+            <section key={config.type} aria-label={`${config.name} settings`} className="rounded-container border">
               {/* Accordion Header */}
               <div
                 className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors"
                 onClick={() => toggleExpanded(config.type)}
               >
                 <div className="flex items-center gap-3">
-                  <button className="p-0.5">
-                    {isExpanded ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    )}
+                  <button type="button" aria-label={`Configure ${config.name}`} aria-expanded={isExpanded} className="flex h-11 w-11 items-center justify-center">
+                    <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform duration-[140ms] ${isExpanded ? 'rotate-90' : ''}`} />
                   </button>
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold">{config.name}</h3>
-                      <Badge variant={isEnabled ? 'success' : 'secondary'}>
-                        {isEnabled ? 'Enabled' : 'Disabled'}
+                      <Badge variant={provider?.isEnabled ? 'success' : 'secondary'}>
+                        {provider?.isEnabled ? 'Enabled' : 'Disabled'}
                       </Badge>
+                      {dirtyProvider(config.type) && <span className="font-mono text-xs text-muted-foreground">Unsaved</span>}
                     </div>
                     <p className="text-sm text-muted-foreground">{config.description}</p>
                   </div>
@@ -379,19 +346,7 @@ export function SSOSettings() {
                 >
                   <Switch
                     checked={isEnabled}
-                    onChange={() => {
-                      if (isSaved) {
-                        handleToggle(config.type);
-                      } else {
-                        addToast({
-                          type: 'warning',
-                          title: 'Configuration required',
-                          message: `Please configure and save ${config.name} settings first`,
-                        });
-                        setExpandedProvider(config.type);
-                      }
-                    }}
-                    disabled={!isSaved}
+                    onChange={() => handleToggle(config.type)}
                     label={`Enable ${config.name}`}
                   />
                 </div>
@@ -400,6 +355,7 @@ export function SSOSettings() {
               {/* Accordion Content */}
               {isExpanded && (
                 <div className="border-t p-4 space-y-4">
+                  <p role={errors[config.type] ? "alert" : "status"} className="text-sm text-muted-foreground">{errors[config.type] || (savingProviders[config.type] ? "Saving provider settings…" : dirtyProvider(config.type) ? "Unsaved provider settings changes" : "Provider settings saved")}</p>
                   {mainFields.map(renderField)}
 
                   {advancedFields.length > 0 && (
@@ -465,15 +421,15 @@ export function SSOSettings() {
                   <div className="flex gap-2 pt-2">
                     <Button
                       onClick={() => handleSave(config.type)}
-                      disabled={savingProvider === config.type}
+                      disabled={savingProviders[config.type] || !dirtyProvider(config.type)}
                       size="sm"
                     >
-                      {savingProvider === config.type ? (
+                      {savingProviders[config.type] ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       ) : (
                         <Save className="h-4 w-4 mr-2" />
                       )}
-                      {savingProvider === config.type ? 'Saving...' : 'Save'}
+                      {savingProviders[config.type] ? 'Saving...' : `Save ${config.name} settings`}
                     </Button>
                     <Button
                       variant="outline"
@@ -491,7 +447,7 @@ export function SSOSettings() {
                   </div>
                 </div>
               )}
-            </div>
+            </section>
           );
         })}
 
@@ -502,6 +458,7 @@ export function SSOSettings() {
             SSO allows users to authenticate using external identity providers. Enable a provider and configure its settings to allow users to sign in with their existing credentials.
           </p>
         </div>
+        </fieldset>
       </CardContent>
     </Card>
   );

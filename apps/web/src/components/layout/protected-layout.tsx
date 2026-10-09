@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/toast';
 import { MobileNav } from './mobile-nav';
 import Menu from 'lucide-react/dist/esm/icons/menu';
 import { ArtistInspector } from '@/components/artists/ArtistInspector';
+import { UnsavedChangesProvider } from '@/hooks/useUnsavedChanges';
 import { ListScrollContext } from '@/hooks/useListContext';
 
 interface ProtectedLayoutProps {
@@ -22,7 +23,7 @@ const publicRoutes = ['/login', '/setup'];
 const artistRoutes = ['/', '/search', '/discover', '/library', '/queue', '/constellation'];
 
 export function ProtectedLayout({ children }: ProtectedLayoutProps) {
-  return <Suspense fallback={<LoadingPage text="Checking authentication..." />}><AuthenticatedLayout>{children}</AuthenticatedLayout></Suspense>;
+  return <Suspense fallback={<LoadingPage text="Checking authentication..." />}><UnsavedChangesProvider><AuthenticatedLayout>{children}</AuthenticatedLayout></UnsavedChangesProvider></Suspense>;
 }
 
 function AuthenticatedLayout({ children }: ProtectedLayoutProps) {

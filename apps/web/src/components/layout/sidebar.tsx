@@ -10,7 +10,7 @@ import LogOut from 'lucide-react/dist/esm/icons/log-out';
 import { navigationForRole } from './navigation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
-import { useRouter } from 'next/navigation';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import { ThemePicker } from '@/components/ui/theme-picker';
 
 export function Sidebar() {
@@ -19,7 +19,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const { user, logout } = useAuth();
-  const router = useRouter();
+  const { guardedNavigation } = useUnsavedChanges();
 
   // Fetch version and update status
   const { data: healthData } = useQuery<{
@@ -97,8 +97,9 @@ export function Sidebar() {
                 const isActive = item.href === '/'
                   ? pathname === '/'
                   : pathname === item.href || pathname.startsWith(`${item.href}/`);
+                const NavigationLink = item.href === '/settings' ? 'a' : Link;
                 return (
-                  <Link
+                  <NavigationLink
                     key={item.href}
                     href={item.href}
                     className={cn(
@@ -114,7 +115,7 @@ export function Sidebar() {
                   >
                     <item.icon className="h-5 w-5 flex-shrink-0" />
                     {!collapsed && <span>{item.label}</span>}
-                  </Link>
+                  </NavigationLink>
                 );
               })}
             </div>
@@ -175,16 +176,14 @@ export function Sidebar() {
               collapsed && "left-0 right-auto w-48"
             )}>
               <div className="p-1">
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    router.push(user?.role === 'admin' ? '/settings' : '/users/me');
-                  }}
-                  className="flex w-full items-center gap-2 rounded px-3 py-2 text-sm hover:bg-accent"
+                <a
+                  href={user?.role === 'admin' ? '/settings' : '/users/me'}
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-sm hover:bg-accent"
                 >
                   <Settings className="h-4 w-4" />
                   {user?.role === 'admin' ? 'Settings' : 'My Profile'}
-                </button>
+                </a>
                 <div className="border-t my-1" />
                 <div className="px-3 py-2">
                   <p className="text-xs text-muted-foreground mb-1.5">Theme</p>
@@ -193,8 +192,7 @@ export function Sidebar() {
                 <div className="border-t my-1" />
                 <button
                   onClick={() => {
-                    setUserMenuOpen(false);
-                    logout();
+                    guardedNavigation(() => { setUserMenuOpen(false); void logout(); });
                   }}
                   className="flex w-full items-center gap-2 rounded px-3 py-2 text-sm hover:bg-accent text-destructive"
                 >
