@@ -21,6 +21,7 @@ export type ConstellationSeed = { type: 'artist'; id: string } | null;
  */
 export interface UseConstellationOptions {
   roleMask?: number;
+  actorId?: number;
 }
 
 export interface UseConstellationResult {
@@ -124,130 +125,87 @@ export function useConstellation(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Latest stream token in a ref so `recenter` / `expandMore` read the current
-  // value without being torn down and recreated on every token change.
   const tokenRef = useRef<StreamToken | null>(null);
-  useEffect(() => {
-    tokenRef.current = streamToken;
-  }, [streamToken]);
-
-  // Latest roleMask in a ref so `recenter` / `expandMore` apply the current
-  // server-side filter without being recreated on every mask change.
-  const roleMaskRef = useRef<number | undefined>(roleMask);
-  useEffect(() => {
-    roleMaskRef.current = roleMask;
-  }, [roleMask]);
-
-  // Tracks unmount so imperative callbacks (`recenter` / `expandMore`) don't
-  // setState after the component is gone.
-  const unmountedRef = useRef(false);
-  useEffect(() => {
-    unmountedRef.current = false;
-    return () => {
-      unmountedRef.current = true;
-    };
+  const epoch = useRef(0);
+  const active = useRef(false);
+  const controllers = useRef(new Set<AbortController>());
+  const expansions = useRef(new Map<number, AbortController>());
+  const roleMaskRef = useRef(roleMask); roleMaskRef.current = roleMask;
+  const retire = useCallback(() => {
+    epoch.current += 1;
+    for (const controller of controllers.current) controller.abort();
+    controllers.current.clear(); expansions.current.clear();
+    return epoch.current;
   }, []);
-
-  /** Apply a fresh seed/re-center response, replacing the graph. */
   const applySeed = useCallback((data: SeedResponse) => {
+    tokenRef.current = data.streamToken;
     setFocusId(data.focusId);
     setGraph({ nodes: data.subgraph.nodes, edges: data.subgraph.edges });
     setStreamToken(data.streamToken);
   }, []);
-
-  // Key the seed effect on the stable primitive fields of `seed` rather than the
-  // object identity — callers routinely pass an inline `{ type, id }` literal
-  // that changes identity every render, and re-fetching on identity would loop.
   const seedType = seed?.type ?? null;
   const seedId = seed?.id ?? null;
-
-  // Initial seed / re-seed whenever the seed prop changes.
   useEffect(() => {
-    if (seedType === null || seedId === null) {
-      setGraph({ nodes: [], edges: [] });
-      setFocusId(null);
-      setStreamToken(null);
-      setError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    api
-      .get<SeedResponse>(seedUrl(seedId, undefined, roleMask))
-      .then(({ data, error: err }) => {
-        if (cancelled) return;
-        if (err || !data) {
-          setError(err ?? 'Failed to load constellation');
-          return;
-        }
-        applySeed(data);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-    // roleMask is a dependency: changing the server-side role filter must re-seed
-    // so the backend re-computes the filtered subgraph.
-  }, [seedType, seedId, roleMask, applySeed]);
-
-  /**
-   * Re-center on `personId`: re-seed with the current token id so the backend
-   * bumps that token's generation, then replace the graph and stream token.
-   */
-  const recenter = useCallback(
-    async (personId: number) => {
+    active.current = true;
+    const generation = retire();
+    tokenRef.current = null; setStreamToken(null);
+    setGraph({ nodes: [], edges: [] }); setFocusId(null); setError(null); setLoading(false);
+    if (seedType !== null && seedId !== null) {
+      const controller = new AbortController(); controllers.current.add(controller);
       setLoading(true);
-      setError(null);
-      try {
-        const { data, error: err } = await api.get<SeedResponse>(
-          seedUrl(String(personId), tokenRef.current?.id, roleMaskRef.current),
-        );
-        // Bail if the hook unmounted mid-request — no setState after unmount.
-        if (unmountedRef.current) return;
-        if (err || !data) {
-          setError(err ?? 'Failed to re-center constellation');
-          return;
-        }
-        applySeed(data);
-      } finally {
-        if (!unmountedRef.current) setLoading(false);
-      }
-    },
-    [applySeed],
-  );
-
-  /**
-   * Expand `personId`: fetch its cached neighbourhood and merge it into the
-   * current graph (dedupe by personId / source->target). Does not touch the
-   * focus or stream token.
-   */
-  const expandMore = useCallback(async (personId: number) => {
-    const { data, error: err } = await api.get<ExpandResponse>(
-      expandUrl(personId, tokenRef.current, roleMaskRef.current),
-    );
-    if (unmountedRef.current) return;
-    if (err || !data) {
-      setError(err ?? 'Failed to expand node');
-      return;
+      void api.get<SeedResponse>(seedUrl(seedId, undefined, roleMask), { signal: controller.signal })
+        .then(({ data, error: err }) => {
+          if (controller.signal.aborted || epoch.current !== generation) return;
+          if (err || !data) { setError(err ?? 'Failed to load constellation'); return; }
+          applySeed(data);
+        }).catch(() => {
+          if (!controller.signal.aborted && epoch.current === generation) setError('Failed to load constellation');
+        }).finally(() => {
+          controllers.current.delete(controller);
+          if (!controller.signal.aborted && epoch.current === generation) setLoading(false);
+        });
     }
-    const incoming = data.subgraph;
-    setGraph((prev) => mergeSubgraph(prev, incoming));
+    return () => { active.current = false; retire(); };
+  }, [seedType, seedId, roleMask, options.actorId, applySeed, retire]);
+
+  const recenter = useCallback(async (personId: number) => {
+    if (!active.current || !Number.isSafeInteger(personId) || personId <= 0) return;
+    const previousToken = tokenRef.current;
+    const generation = retire();
+    tokenRef.current = null; setStreamToken(null);
+    const controller = new AbortController(); controllers.current.add(controller);
+    setLoading(true); setError(null);
+    try {
+      const { data, error: err } = await api.get<SeedResponse>(seedUrl(String(personId), previousToken?.id, roleMaskRef.current), { signal: controller.signal });
+      if (controller.signal.aborted || epoch.current !== generation) return;
+      if (err || !data) { setError(err ?? 'Failed to re-center constellation'); return; }
+      applySeed(data);
+    } catch {
+      if (!controller.signal.aborted && epoch.current === generation) setError('Failed to re-center constellation');
+    } finally {
+      controllers.current.delete(controller);
+      if (!controller.signal.aborted && epoch.current === generation) setLoading(false);
+    }
+  }, [applySeed, retire]);
+
+  const expandMore = useCallback(async (personId: number) => {
+    if (!active.current || !tokenRef.current || !Number.isSafeInteger(personId) || personId <= 0) return;
+    const generation = epoch.current;
+    expansions.current.get(personId)?.abort();
+    const controller = new AbortController();
+    expansions.current.set(personId, controller); controllers.current.add(controller);
+    try {
+      const { data, error: err } = await api.get<ExpandResponse>(expandUrl(personId, tokenRef.current, roleMaskRef.current), { signal: controller.signal });
+      if (controller.signal.aborted || epoch.current !== generation) return;
+      if (err || !data) { setError(err ?? 'Failed to expand node'); return; }
+      setGraph(prev => mergeSubgraph(prev, data.subgraph));
+    } catch {
+      if (!controller.signal.aborted && epoch.current === generation) setError('Failed to expand node');
+    } finally {
+      controllers.current.delete(controller);
+      if (expansions.current.get(personId) === controller) expansions.current.delete(personId);
+    }
   }, []);
 
-  return {
-    nodes: graph.nodes,
-    edges: graph.edges,
-    focusId,
-    streamToken,
-    loading,
-    error,
-    recenter,
-    expandMore,
-  };
+  return { nodes: graph.nodes, edges: graph.edges, focusId, streamToken, loading, error, recenter, expandMore };
 }

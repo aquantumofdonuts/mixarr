@@ -424,6 +424,7 @@ export interface ConstellationDeps {
 }
 
 export interface ConstellationHandlers {
+  identity(req: Request, res: Response): Promise<void>;
   seed(req: Request, res: Response): Promise<void>;
   expand(req: Request, res: Response): Promise<void>;
   path(req: Request, res: Response): Promise<void>;
@@ -445,6 +446,32 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
   const warmOrbit = deps.warmOrbit ?? ((userId: number) => warmOrbitIfStale(userId));
 
   return {
+    async identity(req: Request, res: Response): Promise<void> {
+      const { mbid, personId, name } = req.query;
+      const validPerson = typeof personId === 'string' && /^[1-9][0-9]*$/.test(personId) && Number.isSafeInteger(Number(personId));
+      if (Object.keys(req.query).some(key => !['mbid', 'personId', 'name'].includes(key)) ||
+          (mbid !== undefined ? typeof mbid !== 'string' || !MBID_RE.test(mbid) || personId !== undefined || name !== undefined : !validPerson) ||
+          (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 200))) {
+        res.status(400).json({ error: 'Provide a valid MusicBrainz identity or positive person id' });
+        return;
+      }
+      try {
+        // IdentityService owns linked/corroborated/manual resolution. This read never starts an orbit or an expansion.
+        if (typeof mbid === 'string') {
+          const resolved = await identity.mbidToDiscogs(mbid.toLowerCase());
+          res.json({ mbid: mbid.toLowerCase(), personId: resolved, needsManual: resolved === null });
+        } else {
+          const id = Number(personId);
+          const person = await prisma.constellationPerson.findUnique({ where: { personId: id }, select: { displayName: true } });
+          const displayName = person?.displayName || (typeof name === 'string' ? name.trim() : '');
+          const resolution = await identity.discogsToMbid(id, displayName || undefined);
+          res.json({ ...resolution, personId: id, displayName });
+        }
+      } catch (error) {
+        log.error('identity lookup failed', { error: error instanceof Error ? error.message : String(error) });
+        res.status(500).json({ error: 'Artist identity lookup failed' });
+      }
+    },
     /**
      * GET /seed?type=artist&id=<discogsId|mbid>[&token=<id>]
      * Resolve the seed to a Discogs person id, return its subgraph + a stream
@@ -872,6 +899,7 @@ export function createConstellationRouter(deps: ConstellationDeps = {}): Router 
 
   const h = buildConstellationHandlers(deps);
 
+  router.get('/identity', h.identity);
   router.get('/seed', h.seed);
   router.get('/expand/:personId', h.expand);
   router.get('/path', h.path);

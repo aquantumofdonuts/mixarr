@@ -91,7 +91,7 @@ function InspectorPanel({ identity, isOpen, onClose }: { identity: string | null
         {releases.hasNextPage && <Button variant="outline" isLoading={releases.isFetchingNextPage} onClick={() => void releases.fetchNextPage()}>Load more releases</Button>}
       </section>
     </>}
-    <ModalFooter><Button variant="outline" onClick={onClose}>Back to list</Button>
+    <ModalFooter>{identity && <a className="inline-flex min-h-11 items-center text-sm text-link hover:underline" href={`/constellation?seed=${identity}`}>Explore collaborations</a>}<Button variant="outline" onClick={onClose}>Back to list</Button>
       {artist && artist.membership !== 'in-library' && <Button isLoading={addingArtistId !== null} onClick={() => void handleAddArtist({ foreignArtistId: artist.mbid, artistName: artist.name })}>Add artist</Button>}
     </ModalFooter>
   </Modal>{optionsDialog}</>;

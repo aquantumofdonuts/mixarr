@@ -84,13 +84,14 @@ export function ConstellationControls({
   return (
     <div
       data-testid="constellation-controls"
-      className="flex flex-col gap-3 rounded-container bg-background/80 p-3 text-xs text-foreground backdrop-blur"
+      className="flex flex-col gap-3 rounded-container bg-background p-3 text-xs text-foreground"
     >
+      <p className="text-muted-foreground">Color: genre · node size: prominence · ring: in library · red ring: seed · line width: collaboration strength · warm line: confident bridge score. Shared releases and roles appear in person details when recorded.</p>
       <fieldset className="flex flex-col gap-1">
         <legend className="mb-1 font-medium text-muted-foreground">Roles</legend>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
           {ROLE_FILTER_OPTIONS.map((role) => (
-            <label key={role} className="flex items-center gap-1">
+            <label key={role} className="flex min-h-11 items-center gap-1">
               <input
                 type="checkbox"
                 checked={selectedRoles.has(role)}
@@ -102,13 +103,13 @@ export function ConstellationControls({
         </div>
       </fieldset>
 
-      <label className="flex items-center gap-2">
+      <label className="flex min-h-11 items-center gap-2">
         <input type="checkbox" checked={hideHotness} onChange={onHideHotness} />
         Hide hotness
       </label>
 
       <div className="flex flex-col gap-1">
-        <label className="flex items-center gap-2" htmlFor="genre-highlight">
+        <label className="flex min-h-11 items-center gap-2" htmlFor="genre-highlight">
           Highlight genre
           <select
             id="genre-highlight"
@@ -130,7 +131,7 @@ export function ConstellationControls({
           className="flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground"
         >
           {legend.map((entry) => (
-            <li key={entry.genre} className="flex items-center gap-1">
+            <li key={entry.genre} className="flex min-h-11 items-center gap-1">
               <span
                 aria-hidden="true"
                 className="inline-block h-2.5 w-2.5 rounded-full"

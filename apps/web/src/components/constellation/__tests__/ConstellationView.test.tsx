@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Mock } from 'vitest';
 import type { UseConstellationResult } from '@/hooks/useConstellation';
@@ -137,6 +137,8 @@ function mockResult(over: Partial<UseConstellationResult> = {}): UseConstellatio
 const graphProps = () => graphState.get() as Record<string, unknown>;
 type ClickHandler = (node: { id: number; name: string }, event?: unknown) => void;
 
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+
 describe('ConstellationView', () => {
   beforeEach(() => {
     graphState.reset();
@@ -252,7 +254,7 @@ describe('ConstellationView', () => {
     act(() => onNodeClick({ id: 2, name: 'Person 2' }));
     expandMore.mockClear();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Person 2' }));
+    await userEvent.click(within(screen.getByTestId('constellation-breadcrumbs')).getByRole('button', { name: 'Person 2' }));
     expect(expandMore).toHaveBeenCalledWith(2);
   });
 
@@ -284,7 +286,7 @@ describe('ConstellationView', () => {
     act(() => onNodeClick({ id: 2, name: 'Person 2' }));
     act(() => onNodeClick({ id: 2, name: 'Person 2' }));
 
-    const crumbs = screen.getAllByRole('button', { name: 'Person 2' });
+    const crumbs = within(screen.getByTestId('constellation-breadcrumbs')).getAllByRole('button', { name: 'Person 2' });
     expect(crumbs).toHaveLength(1);
   });
 
@@ -454,4 +456,39 @@ describe('ConstellationView — controls wiring', () => {
     // The PathFinder is rendered inside the view.
     expect(screen.getByTestId('path-finder')).toBeInTheDocument();
   });
+});
+
+it('renders actual credit roles and the recorded Discogs master release in the person panel', async () => {
+  mockUseConstellation.mockReturnValue(mockResult({ nodes: [node(1), node(2)], edges: [edge(1, 2, { roleBitmask: 6, sampleMasterId: 987, sharedMasterCount: 4, bridge: 0.75 })] }));
+  render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  act(() => (graphProps().onNodeClick as ClickHandler)({ id: 2, name: 'Person 2' }));
+  const panel = screen.getByTestId('person-panel'); expect(within(panel).getByText('Producer · Composer')).toBeInTheDocument();
+  expect(within(panel).getByText('4 shared releases')).toBeInTheDocument();
+  expect(within(panel).getByRole('link', { name: 'Shared release on Discogs' })).toHaveAttribute('href', 'https://www.discogs.com/master/987');
+});
+
+it('reads the shared foreground token on theme changes for canvas labels', async () => {
+  mockUseConstellation.mockReturnValue(mockResult());
+  const previous = document.documentElement.style.getPropertyValue('--foreground');
+  document.documentElement.style.setProperty('--foreground', '210 10% 11%');
+  const view = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  const { ctx } = makeCtx();
+  act(() => (graphProps().nodeCanvasObject as PaintFn)({ id: 1, size: 1, genre: null, owned: false, isFocus: true, name: 'Name' }, ctx as unknown as CanvasRenderingContext2D, 2));
+  expect(ctx.fillStyle).toBe('hsl(210 10% 11%)');
+  document.documentElement.style.setProperty('--foreground', '204 15% 94%'); document.documentElement.setAttribute('data-theme', 'dark');
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  act(() => (graphProps().nodeCanvasObject as PaintFn)({ id: 1, size: 1, genre: null, owned: false, isFocus: true, name: 'Name' }, ctx as unknown as CanvasRenderingContext2D, 2));
+  expect(ctx.fillStyle).toBe('hsl(204 15% 94%)');
+  view.unmount(); document.documentElement.style.setProperty('--foreground', previous); document.documentElement.removeAttribute('data-theme');
+});
+
+it('sizes the canvas from the content box and disconnects its observer on unmount', () => {
+  const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(294);
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(589);
+  const disconnect = vi.fn();
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect = disconnect; });
+  mockUseConstellation.mockReturnValue(mockResult());
+  const view = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  expect(graphProps()).toMatchObject({ width: 294, height: 589 }); view.unmount(); expect(disconnect).toHaveBeenCalledTimes(1);
+  width.mockRestore(); height.mockRestore();
 });

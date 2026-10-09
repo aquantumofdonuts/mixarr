@@ -521,3 +521,9 @@ describe('GraphService.bridgeFill', () => {
     expect('bridge' in arg.data).toBe(false); // bridge left untouched / null
   });
 });
+
+it('returns recorded shared-release metadata alongside actual role bits, never a bridge score as a release id', async () => {
+  installStore({ edges: [{ ...edge(1, 2, 3, 6), bridge: 0.5, sampleMasterId: 987, sharedMasterCount: 4 } as any], persons: [person(1), person(2)], genres: [], owned: [] });
+  const graph = await new GraphService().subgraph(1);
+  expect(graph.edges[0]).toMatchObject({ source: 1, target: 2, roleBitmask: 6, bridge: 0.5, sampleMasterId: 987, sharedMasterCount: 4 });
+});

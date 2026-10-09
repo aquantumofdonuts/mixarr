@@ -94,7 +94,7 @@ describe('useConstellation', () => {
     const { result } = renderHook(() => useConstellation({ type: 'artist', id: '10' }));
 
     await waitFor(() => expect(result.current.focusId).toBe(10));
-    expect(api.get).toHaveBeenCalledWith('/api/constellation/seed?type=artist&id=10');
+    expect(api.get).toHaveBeenCalledWith('/api/constellation/seed?type=artist&id=10', { signal: expect.any(AbortSignal) });
     expect(result.current.nodes).toHaveLength(2);
     expect(result.current.streamToken).toEqual({ id: 'tok-1', generation: 1 });
   });
@@ -122,7 +122,7 @@ describe('useConstellation', () => {
     });
 
     expect(api.get).toHaveBeenLastCalledWith(
-      '/api/constellation/seed?type=artist&id=20&token=tok-1',
+      '/api/constellation/seed?type=artist&id=20&token=tok-1', { signal: expect.any(AbortSignal) },
     );
     expect(result.current.focusId).toBe(20);
     // Graph is REPLACED, not merged.
@@ -154,7 +154,7 @@ describe('useConstellation', () => {
     });
 
     expect(api.get).toHaveBeenLastCalledWith(
-      '/api/constellation/expand/11?token=tok-1&generation=3',
+      '/api/constellation/expand/11?token=tok-1&generation=3', { signal: expect.any(AbortSignal) },
     );
     // Merged + deduped: nodes {10,11,12}, edges {10->11, 11->12}.
     expect(result.current.nodes.map((n) => n.personId).sort()).toEqual([10, 11, 12]);
@@ -207,7 +207,7 @@ describe('useConstellation', () => {
     );
 
     await waitFor(() => expect(result.current.focusId).toBe(10));
-    expect(api.get).toHaveBeenCalledWith('/api/constellation/seed?type=artist&id=10&roleMask=6');
+    expect(api.get).toHaveBeenCalledWith('/api/constellation/seed?type=artist&id=10&roleMask=6', { signal: expect.any(AbortSignal) });
   });
 
   it('omits roleMask from the seed request when undefined (all roles)', async () => {
@@ -221,7 +221,7 @@ describe('useConstellation', () => {
     const { result } = renderHook(() => useConstellation({ type: 'artist', id: '10' }));
 
     await waitFor(() => expect(result.current.focusId).toBe(10));
-    expect(api.get).toHaveBeenCalledWith('/api/constellation/seed?type=artist&id=10');
+    expect(api.get).toHaveBeenCalledWith('/api/constellation/seed?type=artist&id=10', { signal: expect.any(AbortSignal) });
   });
 
   it('re-seeds when the roleMask changes', async () => {
@@ -238,11 +238,11 @@ describe('useConstellation', () => {
       { initialProps: { mask: undefined as number | undefined } },
     );
     await waitFor(() => expect(result.current.focusId).toBe(10));
-    expect(api.get).toHaveBeenLastCalledWith('/api/constellation/seed?type=artist&id=10');
+    expect(api.get).toHaveBeenLastCalledWith('/api/constellation/seed?type=artist&id=10', { signal: expect.any(AbortSignal) });
 
     rerender({ mask: 3 });
     await waitFor(() =>
-      expect(api.get).toHaveBeenLastCalledWith('/api/constellation/seed?type=artist&id=10&roleMask=3'),
+      expect(api.get).toHaveBeenLastCalledWith('/api/constellation/seed?type=artist&id=10&roleMask=3', { signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -257,5 +257,39 @@ describe('useConstellation', () => {
     expect(result.current.focusId).toBeNull();
     expect(result.current.nodes).toHaveLength(0);
     expect(api.get).not.toHaveBeenCalled();
+  });
+});
+
+describe('request retirement', () => {
+  beforeEach(() => vi.resetAllMocks());
+  const response = (id: number) => ok({ focusId: id, subgraph: subgraph(id, [node(id)], []), streamToken: { id: `token-${id}`, generation: 1 } });
+  it('aborts rapid seed changes and ignores old seed/finally while latest is loading', async () => {
+    const pending: Array<(value: any) => void> = [];
+    vi.mocked(api.get).mockImplementation(() => new Promise(resolve => pending.push(resolve)));
+    const { result, rerender } = renderHook(({ id }) => useConstellation({ type: 'artist', id }), { initialProps: { id: '1' } });
+    const firstSignal = vi.mocked(api.get).mock.calls[0][1]!.signal!;
+    rerender({ id: '2' }); expect(firstSignal.aborted).toBe(true);
+    await act(async () => pending[0](response(1)));
+    expect(result.current.focusId).toBeNull(); expect(result.current.loading).toBe(true);
+    await act(async () => pending[1](response(2))); expect(result.current.focusId).toBe(2); expect(result.current.loading).toBe(false);
+  });
+  it.each(['seed', 'role', 'actor', 'recenter'] as const)('cannot merge an old expansion after %s changes', async kind => {
+    let complete!: (value: any) => void;
+    vi.mocked(api.get).mockImplementation(async url => url.includes('/expand/') ? await new Promise(resolve => { complete = resolve; }) : response(url.includes('id=2') ? 2 : 1));
+    const { result, rerender } = renderHook(({ id, mask, actor }) => useConstellation({ type: 'artist', id }, { roleMask: mask, actorId: actor }), { initialProps: { id: '1', mask: undefined as number | undefined, actor: 7 } });
+    await waitFor(() => expect(result.current.focusId).toBe(1));
+    let expansion!: Promise<void>; act(() => { expansion = result.current.expandMore(9); });
+    const signal = vi.mocked(api.get).mock.calls.find(([url]) => url.includes('/expand/'))![1]!.signal!;
+    if (kind === 'recenter') await act(async () => { await result.current.recenter(2); });
+    else rerender({ id: kind === 'seed' ? '2' : '1', mask: kind === 'role' ? 2 : undefined, actor: kind === 'actor' ? 8 : 7 });
+    expect(signal.aborted).toBe(true);
+    await act(async () => { complete(ok({ subgraph: subgraph(9, [node(99)], []) })); await expansion; });
+    expect(result.current.nodes.some(person => person.personId === 99)).toBe(false);
+  });
+  it('clears pending/loading state for a null seed and consumes cancellation rejections', async () => {
+    vi.mocked(api.get).mockImplementation((_url, options) => new Promise((_resolve, reject) => options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason))));
+    const { result, rerender, unmount } = renderHook(({ seed }) => useConstellation(seed), { initialProps: { seed: { type: 'artist', id: '1' } as import('../useConstellation').ConstellationSeed } });
+    expect(result.current.loading).toBe(true); rerender({ seed: null });
+    await waitFor(() => expect(result.current.loading).toBe(false)); expect(result.current.error).toBeNull(); unmount();
   });
 });

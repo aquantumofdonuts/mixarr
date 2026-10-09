@@ -150,3 +150,8 @@ describe('shared artist inspector', () => {
     fireEvent.keyDown(document, { key: 'Escape' }); expect(router.replace).not.toHaveBeenCalled();
   });
 });
+
+it('launches the graph from the verified inspector MusicBrainz identity', () => {
+  mount(<ArtistInspector />);
+  expect(screen.getByRole('link', { name: 'Explore collaborations' })).toHaveAttribute('href', `/constellation?seed=${mbid}`);
+});

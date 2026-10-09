@@ -71,6 +71,7 @@ export function useFrontierStream(
   const generation = token?.generation ?? null;
 
   useEffect(() => {
+    setConnected(false); setError(null);
     if (tokenId === null || generation === null) return;
 
     // Fresh connection for this token/generation: reset status.
@@ -80,8 +81,10 @@ export function useFrontierStream(
     const source = new EventSource(`${STREAM_BASE}/${encodeURIComponent(tokenId)}`);
     let consecutiveErrors = 0;
     let abandoned = false;
+    let retired = false;
 
     source.onopen = () => {
+      if (retired || abandoned) return;
       // A successful (re)connect clears the failure streak.
       consecutiveErrors = 0;
       setConnected(true);
@@ -89,6 +92,7 @@ export function useFrontierStream(
     };
 
     source.onmessage = (event: MessageEvent) => {
+      if (retired || abandoned) return;
       let payload: StreamPayload;
       try {
         payload = JSON.parse(event.data) as StreamPayload;
@@ -103,6 +107,7 @@ export function useFrontierStream(
     };
 
     source.onerror = () => {
+      if (retired || abandoned) return;
       setConnected(false);
       consecutiveErrors += 1;
       if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
@@ -114,6 +119,7 @@ export function useFrontierStream(
     };
 
     return () => {
+      retired = true;
       // Avoid overwriting a fatal error state during teardown of an abandoned
       // stream, but always close (idempotent) so nothing leaks.
       if (!abandoned) setConnected(false);

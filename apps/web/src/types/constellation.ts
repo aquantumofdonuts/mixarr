@@ -26,6 +26,8 @@ export interface GraphEdge {
   bridge: number | null;
   bridgeConfident: boolean;
   roleBitmask: number;
+  sampleMasterId?: number | null;
+  sharedMasterCount?: number;
 }
 
 /** A focus-centred slice of the graph (focus + ring-1 + ring-2). */

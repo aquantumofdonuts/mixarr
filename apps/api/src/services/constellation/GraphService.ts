@@ -19,6 +19,8 @@ export interface GraphEdge {
   bridge: number | null;
   bridgeConfident: boolean;
   roleBitmask: number;
+  sampleMasterId?: number | null;
+  sharedMasterCount?: number;
 }
 
 export interface SubgraphResult {
@@ -83,6 +85,8 @@ type EdgeRow = {
   bridge: number | null;
   bridgeConfident: boolean;
   roleBitmask: number;
+  sampleMasterId?: number | null;
+  sharedMasterCount?: number;
 };
 
 const DEFAULT_TOP_N = 8;
@@ -264,6 +268,8 @@ export class GraphService {
         bridge: e.bridge ?? null,
         bridgeConfident: e.bridgeConfident,
         roleBitmask: e.roleBitmask,
+        ...(e.sampleMasterId != null ? { sampleMasterId: e.sampleMasterId } : {}),
+        ...(e.sharedMasterCount !== undefined ? { sharedMasterCount: e.sharedMasterCount } : {}),
       });
     }
 

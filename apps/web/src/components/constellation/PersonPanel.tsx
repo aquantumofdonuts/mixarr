@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import X from 'lucide-react/dist/esm/icons/x';
 import Play from 'lucide-react/dist/esm/icons/play';
 import { api } from '@/lib/api';
+import { ArtistLink, canonicalArtistMbid } from '@/components/artists/ArtistLink';
+import type { IdentityResponse } from './ArtistLookup';
 import { useConstellationPlayer } from './ConstellationPlayer';
 import type {
   ReleaseItem,
@@ -32,13 +34,15 @@ export interface PersonPanelProps {
   /** Whether this person is in the user's library (drives the player's owned badge). */
   owned?: boolean;
   onClose: () => void;
+  actorId?: number;
+  credits?: React.ReactNode;
 }
 
 /** Per-target acquisition state, keyed by 'artist' or a release id. */
 type AcquireState =
   | { status: 'idle' }
   | { status: 'pending' }
-  | { status: 'added'; target: 'artist' | 'album' }
+  | { status: 'added'; target: 'artist' | 'album'; added: boolean }
   | { status: 'needsManual' }
   | { status: 'error'; message: string };
 
@@ -48,7 +52,7 @@ function musicBrainzSearchUrl(name: string): string {
   return `https://musicbrainz.org/search?query=${encodeURIComponent(name)}&type=artist&method=indexed`;
 }
 
-export function PersonPanel({ personId, displayName, owned, onClose }: PersonPanelProps) {
+export function PersonPanel({ personId, displayName, owned, onClose, actorId, credits }: PersonPanelProps) {
   const player = useConstellationPlayer();
   const [releases, setReleases] = useState<ReleaseItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -59,6 +63,29 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
   const [artistState, setArtistState] = useState<AcquireState>(IDLE);
   const [releaseState, setReleaseState] = useState<Record<number, AcquireState>>({});
 
+  const [identity, setIdentity] = useState<string | null>(null);
+  const [identityError, setIdentityError] = useState(false);
+  const [identityRetry, setIdentityRetry] = useState(0);
+  const generation = useRef(0);
+  const acquisitionRequests = useRef(new Set<AbortController>());
+  useEffect(() => {
+    generation.current += 1;
+    return () => { generation.current += 1; for (const controller of acquisitionRequests.current) controller.abort(); acquisitionRequests.current.clear(); };
+  }, [personId, actorId]);
+  useEffect(() => {
+    setIdentity(null); setIdentityError(false);
+    if (personId === null) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ personId: String(personId) });
+    if (displayName && displayName.length <= 200) params.set('name', displayName);
+    void api.get<IdentityResponse>(`/api/constellation/identity?${params}`, { signal: controller.signal }).then(({ data, error }) => {
+      if (controller.signal.aborted) return;
+      if (error || !data) { setIdentityError(true); return; }
+      if (!data.needsManual && data.personId === personId) setIdentity(canonicalArtistMbid(data.mbid));
+    }).catch(() => { if (!controller.signal.aborted) setIdentityError(true); });
+    return () => controller.abort();
+  }, [personId, displayName, actorId, identityRetry]);
+
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const name = displayName ?? (personId !== null ? `Person ${personId}` : '');
@@ -68,17 +95,13 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
   useEffect(() => {
     if (personId === null) return;
     closeButtonRef.current?.focus();
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [personId, onClose]);
+
+  }, [personId, actorId]);
 
   // Fetch the discography whenever the panel opens on a new person.
   useEffect(() => {
     if (personId === null) return;
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
     setReleases([]);
@@ -86,23 +109,24 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
     setReleaseState({});
 
     api
-      .get<ReleasesResponse>(`/api/constellation/person/${personId}/releases`)
+      .get<ReleasesResponse>(`/api/constellation/person/${personId}/releases`, { signal: controller.signal })
       .then(({ data, error: err }) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         if (err || !data) {
           setError(err ?? 'Failed to load discography');
           return;
         }
         setReleases(data.releases);
       })
+      .catch(() => { if (!controller.signal.aborted) setError('Failed to load discography'); })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [personId]);
+  }, [personId, actorId]);
 
   const subscribe = useCallback(
     async (
@@ -110,23 +134,23 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
       setState: (s: AcquireState) => void,
     ) => {
       if (personId === null) return;
+      const currentGeneration = generation.current;
+      const controller = new AbortController(); acquisitionRequests.current.add(controller);
       setState({ status: 'pending' });
-      const { data, error: err, status } = await api.post<SubscribeResponse>(
-        `/api/constellation/person/${personId}/subscribe`,
-        { releaseTitle, name: displayName },
-      );
-      // 409 = the honest dead-end: not linked to MusicBrainz.
-      if (status === 409) {
-        setState({ status: 'needsManual' });
-        return;
-      }
-      if (err || !data) {
-        setState({ status: 'error', message: err ?? 'Failed to add to Lidarr' });
-        return;
-      }
-      setState({ status: 'added', target: data.target });
+      try {
+        const { data, error: err, status } = await api.post<SubscribeResponse>(
+          `/api/constellation/person/${personId}/subscribe`,
+          { releaseTitle, name: displayName }, { signal: controller.signal },
+        );
+        if (controller.signal.aborted || generation.current !== currentGeneration) return;
+        if (status === 409) { setState({ status: 'needsManual' }); return; }
+        if (err || !data) { setState({ status: 'error', message: err ?? 'Failed to add to Lidarr' }); return; }
+        setState({ status: 'added', target: data.target, added: data.added });
+      } catch {
+        if (!controller.signal.aborted && generation.current === currentGeneration) setState({ status: 'error', message: 'Failed to add to Lidarr' });
+      } finally { acquisitionRequests.current.delete(controller); }
     },
-    [personId, displayName],
+    [personId, displayName, actorId],
   );
 
   const monitorArtist = useCallback(
@@ -159,6 +183,7 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
 
   return (
     <aside
+      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); } }}
       role="dialog"
       aria-modal="false"
       aria-label={`${name} details`}
@@ -170,6 +195,8 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold text-foreground">{name}</h2>
           <p className="text-xs text-muted-foreground">Discography</p>
+          {identity && <ArtistLink mbid={identity} className="inline-flex min-h-11 items-center text-sm">Open artist inspector</ArtistLink>}
+          {identityError ? <p className="text-xs">Identity unavailable. <button type="button" className="min-h-11 text-link underline" onClick={() => setIdentityRetry(value => value + 1)}>Retry identity</button></p> : !identity && <p className="text-xs text-muted-foreground">Inspector available after verified identity resolution.</p>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {player && (
@@ -178,7 +205,7 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
               onClick={playArtist}
               aria-label={`Play ${name}`}
               data-testid="person-panel-play"
-              className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="min-h-11 min-w-11 rounded-button p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <Play className="h-5 w-5" />
             </button>
@@ -188,12 +215,14 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
             type="button"
             onClick={onClose}
             aria-label="Close panel"
-            className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="min-h-11 min-w-11 rounded-button p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
       </div>
+
+      {credits && <div className="max-h-40 overflow-auto border-b p-4 text-xs">{credits}</div>}
 
       {/* Whole-artist monitor (the coarse grain) */}
       <div className="border-b border-border p-4">
@@ -207,7 +236,7 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
         </button>
         {artistState.status === 'added' && (
           <p role="status" className="mt-2 text-xs text-muted-foreground">
-            Added to Lidarr — monitoring this artist.
+            {artistState.added ? 'Added to Lidarr — monitoring this artist.' : 'Already in Lidarr.'}
           </p>
         )}
         {artistState.status === 'error' && (
@@ -257,7 +286,7 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
                     </p>
                     {state.status === 'added' && (
                       <p role="status" className="mt-1 text-xs text-muted-foreground">
-                        Added to Lidarr.
+                        {state.added ? 'Added to Lidarr.' : 'Already in Lidarr.'}
                       </p>
                     )}
                     {state.status === 'error' && (
@@ -274,7 +303,7 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
                         onClick={() => playRelease(release)}
                         aria-label={`Play ${release.title}`}
                         data-testid={`person-panel-play-release-${release.releaseId}`}
-                        className="rounded-lg border border-border p-1 text-foreground hover:bg-accent"
+                        className="min-h-11 min-w-11 rounded-button border border-border p-1 text-foreground hover:bg-accent"
                       >
                         <Play className="h-3.5 w-3.5" />
                       </button>
@@ -283,7 +312,7 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
                       type="button"
                       onClick={() => addRelease(release)}
                       disabled={state.status === 'pending' || state.status === 'added'}
-                      className="rounded-lg border border-border px-2 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-60"
+                      className="min-h-11 rounded-button border border-border px-2 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-60"
                     >
                       {state.status === 'pending'
                         ? 'Adding…'
@@ -309,7 +338,7 @@ export function PersonPanel({ personId, displayName, owned, onClose }: PersonPan
 function NeedsManualNotice({ name }: { name: string }) {
   return (
     <p role="status" data-testid="person-panel-needs-manual" className="mt-2 text-xs text-muted-foreground">
-      Not in MusicBrainz — can&apos;t auto-add.{' '}
+      No verified MusicBrainz identity — can&apos;t auto-add.{' '}
       <a
         href={musicBrainzSearchUrl(name)}
         target="_blank"

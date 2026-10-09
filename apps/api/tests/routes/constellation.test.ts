@@ -967,3 +967,44 @@ describe('stored constellation exploration bounds', () => {
     expect(deps.graph!.path).toHaveBeenCalledWith(1, 2, { mode: 'shortest', max: expected });
   });
 });
+
+describe('read-only constellation identities', () => {
+  const mbid = '11111111-1111-4111-8111-111111111111';
+  it('forward resolution returns a person without graph/enqueue/orbit/acquisition side effects', async () => {
+    const deps = makeDeps(); vi.mocked(deps.identity!.mbidToDiscogs).mockResolvedValue(15);
+    const res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query: { mbid } }), res);
+    expect(res.body).toEqual({ mbid, personId: 15, needsManual: false });
+    expect(deps.identity!.mbidToDiscogs).toHaveBeenCalledWith(mbid);
+    expect(deps.graph!.subgraph).not.toHaveBeenCalled(); expect(deps.expandQueue!.add).not.toHaveBeenCalled();
+    expect(deps.warmOrbit).not.toHaveBeenCalled(); expect(deps.subscribeToLidarr).not.toHaveBeenCalled();
+  });
+  it('returns unresolved rather than guesses when forward identity has no link', async () => {
+    const deps = makeDeps(); vi.mocked(deps.identity!.mbidToDiscogs).mockResolvedValue(null);
+    const res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query: { mbid } }), res);
+    expect(res.body).toEqual({ mbid, personId: null, needsManual: true });
+  });
+  it.each([false, true])('reverse resolution preserves service manual decision %s', async manual => {
+    const deps = makeDeps(); vi.mocked(prisma.constellationPerson.findUnique).mockResolvedValue({ displayName: 'Known person' } as any);
+    vi.mocked(deps.identity!.discogsToMbid).mockResolvedValue({ mbid: manual ? null : mbid, confidence: manual ? null : 'linked', needsManual: manual });
+    const res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query: { personId: '15', name: 'Other name' } }), res);
+    expect(deps.identity!.discogsToMbid).toHaveBeenCalledWith(15, 'Known person');
+    expect(res.body).toMatchObject({ personId: 15, displayName: 'Known person', mbid: manual ? null : mbid, needsManual: manual });
+    expect(deps.expandQueue!.add).not.toHaveBeenCalled(); expect(deps.warmOrbit).not.toHaveBeenCalled();
+  });
+  it.each([{}, { mbid: 'name' }, { mbid, personId: '1' }, { mbid, name: 'guess' }, { personId: '0' }, { personId: '-2' }, { personId: '1.2' }, { personId: '9007199254740992' }, { personId: ['1', '2'] }, { personId: '1', name: 'x'.repeat(201) }, { personId: '1', extra: 'unexpected' }])('rejects malformed identity queries %j', async query => {
+    const deps = makeDeps(), res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query }), res);
+    expect(res.statusCode).toBe(400); expect(deps.identity!.mbidToDiscogs).not.toHaveBeenCalled(); expect(deps.identity!.discogsToMbid).not.toHaveBeenCalled();
+  });
+  it('uses the existing router/auth boundary', async () => {
+    const deps = makeDeps(); vi.mocked(deps.identity!.mbidToDiscogs).mockResolvedValue(15);
+    const app = express(); app.use((req: any, _res, next) => { req.isAuthenticated = () => true; req.user = { id: 7 }; next(); }); app.use('/api/constellation', createConstellationRouter(deps));
+    const response = await request(app).get(`/api/constellation/identity?mbid=${mbid}`); expect(response.status).toBe(200); expect(response.body.personId).toBe(15);
+    const anonymous = express(); anonymous.use((req: any, _res, next) => { req.isAuthenticated = () => false; next(); }); anonymous.use('/api/constellation', createConstellationRouter(deps));
+    expect((await request(anonymous).get(`/api/constellation/identity?mbid=${mbid}`)).status).toBe(401);
+  });
+  it('reports real service failures inline without starting a graph', async () => {
+    const deps = makeDeps(); vi.mocked(deps.identity!.mbidToDiscogs).mockRejectedValue(new Error('unavailable'));
+    const res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query: { mbid } }), res);
+    expect(res.statusCode).toBe(500); expect(res.body.error).toBe('Artist identity lookup failed'); expect(deps.warmOrbit).not.toHaveBeenCalled();
+  });
+});

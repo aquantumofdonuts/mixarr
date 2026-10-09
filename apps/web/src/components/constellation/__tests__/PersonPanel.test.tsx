@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Mock the api wrapper so no real fetch happens.
@@ -10,6 +10,10 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
+const navigation = vi.hoisted(() => ({ params: new URLSearchParams('seed=11111111-1111-4111-8111-111111111111&focus=5'), push: vi.fn(), actorId: 7 }));
+vi.mock('next/navigation', () => ({ usePathname: () => '/constellation', useSearchParams: () => navigation.params, useRouter: () => ({ push: navigation.push }) }));
+vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: navigation.actorId } }) }));
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PersonPanel } from '../PersonPanel';
 
@@ -44,7 +48,7 @@ describe('PersonPanel', () => {
     releasesOk();
     render(<PersonPanel personId={5} displayName="Nine Inch Nails" onClose={vi.fn()} />);
 
-    expect(mockGet).toHaveBeenCalledWith('/api/constellation/person/5/releases');
+    expect(mockGet).toHaveBeenCalledWith('/api/constellation/person/5/releases', { signal: expect.any(AbortSignal) });
     expect(await screen.findByText('The Downward Spiral')).toBeInTheDocument();
     expect(screen.getByText('The Fragile')).toBeInTheDocument();
     expect(screen.getByText('Nine Inch Nails')).toBeInTheDocument();
@@ -77,7 +81,7 @@ describe('PersonPanel', () => {
     expect(mockPost).toHaveBeenCalledWith('/api/constellation/person/5/subscribe', {
       releaseTitle: undefined,
       name: 'Nine Inch Nails',
-    });
+    }, { signal: expect.any(AbortSignal) });
     expect(await screen.findByText(/monitoring this artist/i)).toBeInTheDocument();
   });
 
@@ -97,7 +101,7 @@ describe('PersonPanel', () => {
     expect(mockPost).toHaveBeenCalledWith('/api/constellation/person/5/subscribe', {
       releaseTitle: 'The Downward Spiral',
       name: 'Nine Inch Nails',
-    });
+    }, { signal: expect.any(AbortSignal) });
   });
 
   it('shows the honest needsManual message (not a generic error) on a 409', async () => {
@@ -113,7 +117,7 @@ describe('PersonPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: /monitor artist/i }));
 
     const notice = await screen.findByTestId('person-panel-needs-manual');
-    expect(notice).toHaveTextContent(/not in musicbrainz/i);
+    expect(notice).toHaveTextContent(/No verified MusicBrainz identity/i);
     // It offers a MusicBrainz search link rather than a generic error.
     const link = screen.getByRole('link', { name: /search musicbrainz/i });
     expect(link).toHaveAttribute('href', expect.stringContaining('musicbrainz.org'));
@@ -168,5 +172,49 @@ describe('PersonPanel', () => {
     await screen.findByText('The Downward Spiral');
     await userEvent.click(screen.getByRole('button', { name: /close panel/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('verified inspector and acquisition lifecycles', () => {
+  const mbid = '11111111-1111-4111-8111-111111111111';
+  const panel = (personId: number, actorId = 7) => <QueryClientProvider client={new QueryClient()}><PersonPanel personId={personId} actorId={actorId} displayName={`Artist ${personId}`} onClose={vi.fn()} /></QueryClientProvider>;
+  beforeEach(() => {
+    vi.resetAllMocks(); navigation.actorId = 7;
+    mockGet.mockImplementation(async (url: string) => ({ data: url.includes('/identity?') ? { personId: Number(new URL(url, 'http://local').searchParams.get('personId')), mbid, needsManual: false } : { personId: 5, releases }, error: null, status: 200 }));
+  });
+  it('opens the actual common ArtistLink only after verified resolution, preserving graph identifiers', async () => {
+    render(panel(5)); const link = await screen.findByRole('link', { name: 'Open artist inspector' });
+    expect(link).toHaveAttribute('href', `/constellation?seed=${mbid}&focus=5&artist=${mbid}`);
+    await userEvent.click(link); expect(navigation.push).toHaveBeenCalledWith(`/constellation?seed=${mbid}&focus=5&artist=${mbid}`, { scroll: false });
+  });
+  it('keeps unresolved people browsable without guessing an inspector identity', async () => {
+    mockGet.mockImplementation(async (url: string) => ({ data: url.includes('/identity?') ? { personId: 5, mbid: null, needsManual: true } : { personId: 5, releases }, error: null, status: 200 }));
+    render(panel(5)); await screen.findByText('The Fragile'); expect(screen.queryByRole('link', { name: 'Open artist inspector' })).toBeNull();
+  });
+  it('reports added:false as existing membership without claiming an artist was added or newly monitored', async () => {
+    mockPost.mockResolvedValue({ data: { added: false, mbid, target: 'artist' }, error: null, status: 200 });
+    render(panel(5)); await screen.findByText('The Fragile'); await userEvent.click(screen.getByRole('button', { name: /Monitor artist/ }));
+    expect(await screen.findByText('Already in Lidarr.')).toBeInTheDocument(); expect(screen.queryByText(/Added to Lidarr — monitoring/)).toBeNull();
+  });
+  it.each(['person', 'actor'] as const)('ignores old acquisition completions after the %s changes', async kind => {
+    let complete!: (value: any) => void; mockPost.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    const view = render(panel(5)); await screen.findByText('The Fragile'); await userEvent.click(screen.getByRole('button', { name: /Monitor artist/ }));
+    const signal = mockPost.mock.calls[0][2].signal as AbortSignal;
+    navigation.actorId = kind === 'actor' ? 8 : 7; view.rerender(panel(kind === 'person' ? 6 : 5, navigation.actorId));
+    expect(signal.aborted).toBe(true); await act(async () => complete({ data: { added: true, target: 'artist', mbid }, error: null, status: 200 }));
+    expect(screen.queryByText(/Added to Lidarr — monitoring/)).toBeNull(); expect(screen.getByRole('button', { name: /Monitor artist/ })).toBeEnabled();
+  });
+  it('ignores old identity and release completions after a person retires', async () => {
+    const pending: Array<(value: any) => void> = []; mockGet.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
+    const view = render(panel(5)); view.rerender(panel(6));
+    await act(async () => { pending[0]({ data: { personId: 5, mbid, needsManual: false }, error: null }); pending[1]({ data: { personId: 5, releases }, error: null }); });
+    expect(screen.queryByText('The Fragile')).toBeNull(); expect(screen.queryByRole('link', { name: 'Open artist inspector' })).toBeNull();
+    view.unmount();
+  });
+  it('catches rejected reads and acquisition without asserting provider confirmation', async () => {
+    mockGet.mockRejectedValue(new Error('Offline')); mockPost.mockRejectedValue(new Error('Offline'));
+    render(panel(5)); expect(await screen.findByTestId('person-panel-error')).toHaveTextContent('Failed to load discography');
+    await userEvent.click(screen.getByRole('button', { name: /Monitor artist/ })); expect(await screen.findByText('Failed to add to Lidarr')).toBeInTheDocument();
+    expect(screen.queryByText(/Added to Lidarr/)).toBeNull();
   });
 });

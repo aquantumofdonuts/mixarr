@@ -204,3 +204,18 @@ describe('useFrontierStream', () => {
     expect(result.current.error).toBeNull();
   });
 });
+
+it('ignores callbacks retained by a closed source even when their generation matches', () => {
+  const callback = vi.fn();
+  const { rerender, result, unmount } = renderHook(({ id }) => useFrontierStream(token(id, 1), callback), { initialProps: { id: 'old' } });
+  const old = MockEventSource.latest(); rerender({ id: 'new' });
+  act(() => { old.open(); old.emit({ generation: 1, nodes: [{ personId: 99 }] }); old.fail(); });
+  expect(callback).not.toHaveBeenCalled(); expect(result.current.connected).toBe(false);
+  const current = MockEventSource.latest(); unmount();
+  act(() => { current.open(); current.emit({ generation: 1 }); }); expect(callback).not.toHaveBeenCalled();
+});
+it('resets stream status when the token is removed', () => {
+  const { result, rerender } = renderHook(({ handle }) => useFrontierStream(handle, vi.fn()), { initialProps: { handle: token('old', 1) as StreamToken | null } });
+  act(() => MockEventSource.latest().open()); expect(result.current.connected).toBe(true);
+  rerender({ handle: null }); expect(result.current).toEqual({ connected: false, error: null }); expect(MockEventSource.latest().closed).toBe(true);
+});
