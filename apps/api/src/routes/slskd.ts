@@ -93,9 +93,13 @@ router.use(apiLimiter);
  * Helper to get slskd connection and service
  * Returns null if no enabled slskd connection exists
  */
-async function getSlskdService(): Promise<{ service: SlskdService; connectionId: number } | null> {
+function connectionScope(req: Request): Prisma.ConnectionWhereInput {
+  return req.user!.role === 'admin' ? {} : { userId: req.user!.id };
+}
+
+async function getSlskdService(req: Request, connectionId?: number): Promise<{ service: SlskdService; connectionId: number } | null> {
   const connection = await prisma.connection.findFirst({
-    where: { type: 'slskd', isActive: true },
+    where: { type: 'slskd', isActive: true, ...connectionScope(req), ...(connectionId === undefined ? {} : { id: connectionId }) },
   });
 
   if (!connection) {
@@ -126,7 +130,7 @@ router.post('/search', validateBody(slskdSearchSchema), async (req: Request, res
   try {
     const { query, options } = req.body;
 
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
@@ -152,7 +156,7 @@ router.get('/search/:id', validateParams(slskdSearchIdParamsSchema), async (req:
   try {
     const { id } = req.params;
 
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
@@ -178,7 +182,7 @@ router.delete('/search/:id', validateParams(slskdSearchIdParamsSchema), async (r
   try {
     const { id } = req.params;
 
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
@@ -212,7 +216,7 @@ router.post('/download', validateBody(slskdDownloadSchema), async (req: Request,
   try {
     const { username, files, artistName, albumName, albumYear } = req.body;
 
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
@@ -285,7 +289,10 @@ router.get('/downloads', validateQuery(slskdDownloadsQuerySchema), async (req: R
     const { status, limit } = req.query as { status?: string; limit?: number };
     
     // Build where clause with proper Prisma types
-    const where: Prisma.SlskdDownloadWhereInput = {};
+    const connections = await prisma.connection.findMany({
+      where: { type: 'slskd', ...connectionScope(req) }, select: { id: true },
+    });
+    const where: Prisma.SlskdDownloadWhereInput = { connectionId: { in: connections.map(connection => connection.id) } };
     
     if (status && typeof status === 'string') {
       const statuses = status.split(',').map(s => s.trim());
@@ -322,7 +329,10 @@ router.post('/downloads/:id/retry', validateParams(slskdDownloadIdParamsSchema),
     
     const download = await prisma.slskdDownload.findUnique({ where: { id } });
     
-    if (!download) {
+    const connection = download && await prisma.connection.findFirst({
+      where: { id: download.connectionId, type: 'slskd', ...connectionScope(req) },
+    });
+    if (!download || !connection) {
       res.status(404).json({ error: 'Download not found' });
       return;
     }
@@ -332,7 +342,7 @@ router.post('/downloads/:id/retry', validateParams(slskdDownloadIdParamsSchema),
       return;
     }
     
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req, download.connectionId);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
@@ -398,7 +408,10 @@ router.delete('/downloads/:id', validateParams(slskdDownloadIdParamsSchema), val
     
     const download = await prisma.slskdDownload.findUnique({ where: { id } });
     
-    if (!download) {
+    const connection = download && await prisma.connection.findFirst({
+      where: { id: download.connectionId, type: 'slskd', ...connectionScope(req) },
+    });
+    if (!download || !connection) {
       res.status(404).json({ error: 'Download not found' });
       return;
     }

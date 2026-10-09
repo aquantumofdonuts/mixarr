@@ -921,42 +921,49 @@ export interface SlskdDownload {
   connectionId: number;
   username: string;
   artistName: string;
-  albumName?: string;
-  albumYear?: number;
+  albumName?: string | null;
+  albumYear?: number | null;
   filename: string;
-  fileSize: number;
-  downloadPath?: string;
-  organizedPath?: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled';
-  error?: string;
+  fileSize: number | string;
+  downloadPath?: string | null;
+  finalPath?: string | null;
+  status: 'queued_locally' | 'pending' | 'downloading' | 'organizing' | 'completed' | 'failed' | 'cancelled';
+  error?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export function useSlskdDownloads(status?: string) {
-  const queryParams = status ? `?status=${status}` : '';
+  const { user } = useAuth();
+  const queryParams = new URLSearchParams({ limit: '100' });
+  if (status) queryParams.set('status', status);
   return useQuery({
-    queryKey: ['slskd', 'downloads', status],
+    queryKey: ['slskd', 'downloads', user?.id, user?.role, status],
+    enabled: !!user,
     queryFn: async ({ signal }) => {
-      const { data, error } = await api.get<SlskdDownload[]>(`/api/slskd/downloads${queryParams}`, { signal });
-      if (error) throw new Error(error);
-      return data!;
+      const { data, error } = await api.get<SlskdDownload[]>(`/api/slskd/downloads?${queryParams}`, { signal });
+      if (error || !Array.isArray(data)) throw new Error(error || 'Downloads unavailable');
+      return data;
     },
-    staleTime: 10 * 1000, // Refresh every 10s for active downloads
-    refetchInterval: status === 'downloading' || status === 'pending' ? 5000 : false,
+    staleTime: 10_000,
+    refetchInterval: query => status === 'queued_locally' || status === 'pending' || status === 'downloading' || status === 'organizing'
+      || query.state.data?.some(download => ['queued_locally', 'pending', 'downloading', 'organizing'].includes(download.status)) ? 5000 : false,
   });
 }
 
 export function useRetrySlskdDownload() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient), role: queryClient.getQueryData<{ user?: { role?: string } }>(queryKeys.auth)?.user?.role }),
     mutationFn: async (id: number) => {
       const { data, error } = await api.post<{ success: boolean }>(`/api/slskd/downloads/${id}/retry`);
-      if (error) throw new Error(error);
-      return data!;
+      if (error || data?.success !== true) throw new Error(error || 'Download retry was not confirmed');
+      return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['slskd', 'downloads'] });
+    onSuccess: (_data, _variables, context) => {
+      if (context.actorId !== currentActor(queryClient) || context.role !== queryClient.getQueryData<{ user?: { role?: string } }>(queryKeys.auth)?.user?.role) return;
+      return queryClient.invalidateQueries({ queryKey: ['slskd', 'downloads'] });
     },
   });
 }
@@ -964,14 +971,17 @@ export function useRetrySlskdDownload() {
 export function useCancelSlskdDownload() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient), role: queryClient.getQueryData<{ user?: { role?: string } }>(queryKeys.auth)?.user?.role }),
     mutationFn: async ({ id, remove = false }: { id: number; remove?: boolean }) => {
       const queryParams = remove ? '?remove=true' : '';
       const { data, error } = await api.delete<{ success: boolean }>(`/api/slskd/downloads/${id}${queryParams}`);
-      if (error) throw new Error(error);
-      return data!;
+      if (error || data?.success !== true) throw new Error(error || 'Tracking change was not confirmed');
+      return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['slskd', 'downloads'] });
+    onSuccess: (_data, _variables, context) => {
+      if (context.actorId !== currentActor(queryClient) || context.role !== queryClient.getQueryData<{ user?: { role?: string } }>(queryKeys.auth)?.user?.role) return;
+      return queryClient.invalidateQueries({ queryKey: ['slskd', 'downloads'] });
     },
   });
 }
