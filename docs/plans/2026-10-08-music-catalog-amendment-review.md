@@ -1,14 +1,14 @@
 # Constellation amendment preflight
 
-**State:** FAIL pending the owner's R27 priority decision. Routine dispositions below are accepted for implementation, not implemented or runtime verified. T22 completed with independent spec/quality PASS and fresh web/production verification; do not start T23/plan batch F until this preflight has been cleared by independent re-review.
+**State:** PASS — owner hard-cap decision recorded and final independent amendment re-review cleared October 9, 2026. Routine dispositions below are accepted for implementation, not implemented or runtime verified. T22 completed with independent spec/quality PASS and fresh web/production verification; T23/plan batch F may now proceed under the binding contract below.
 
 **Scope:** R26–R28/T31–T32 in the authoritative main-checkout design and plan, read against feature baseline `8ee27b0`. The main checkout's original uncommitted specification edits remain untouched. This separate execution addendum records review findings and dispositions; it does not replace the full design or claim completion.
 
-## Product decision pending
+## Accepted product decision
 
 R27 requires both “Field never exceeds 300 nodes” and preservation of the seed, five breadcrumb persons and all their neighbours. T32 protects focus instead of explicitly retaining the original seed. Both seed and current focus must remain identifiable. A deterministic root probe with one seed and 300 neighbours produces 301 protected nodes and zero eligible removals. The independent reviewer also reproduced an overflowing protected set. No pruning implementation can satisfy both unconditional requirements.
 
-The owner has been asked to choose between a hard 300-node cap with mandatory seed/focus/breadcrumb identities and conditional neighbour preservation, or unconditional neighbour preservation permitting overflow. The first option is recommended. A preselected answer is not acceptance; the answer remains pending.
+On October 9, 2026 the owner answered **“keep the cap”** and authorized continued execution. The effective R27/T32 acceptance contract is a hard maximum of 300 displayed nodes after every HTTP or streamed merge. Always retain the original seed, current focus and last five breadcrumb identities. First prune oldest-merged non-mandatory nodes outside those anchors' neighbourhoods; if their neighbours alone still exceed capacity, prune oldest-merged remaining non-mandatory neighbours until the cap holds. Neighbour preservation is conditional on capacity. Remove edges touching evicted nodes, preserve surviving node objects/positions, and allow explicit breadcrumb expansion to restore its neighbourhood subject to the same cap. This owner-approved priority supersedes the incompatible unconditional neighbour-preservation clause in the original uncommitted specification; it does not authorize overflow or pruning mandatory identities. Both pruning passes use actual merge order, never ID order.
 
 ## Routine dispositions
 
@@ -32,6 +32,10 @@ Independent read-only review traced the current budget class, worker lifetime, r
 
 This gate reviews the amended implementation contract. It does not substitute for each task's spec/quality reviews, live provider verification, T29 completion-audit or T30 full-review.
 
-Independent routine re-review: **PASS with the recorded fan-out bound correction**. The overall gate remains pending the R27 answer. API baseline evidence: tool chunk `483250`, exit 0, 62 tests/four files; web baseline: session `9994`, completed chunk `d04180`, exit 0, 51 tests/four files. Actual-source probes: chunks `e903b5` (protected set and denied budget charges), `94d652` (status loss/old-client no-op), and `1538be` (50-neighbour focus overflow). These identifiers refer to review tool output, not files.
+Independent routine re-review: **PASS with the recorded fan-out bound correction**. The R27 answer and final independent PASS are now recorded; the overall amendment gate is clear. API baseline evidence: tool chunk `483250`, exit 0, 62 tests/four files; web baseline: session `9994`, completed chunk `d04180`, exit 0, 51 tests/four files. Actual-source probes: chunks `e903b5` (protected set and denied budget charges), `94d652` (status loss/old-client no-op), and `1538be` (50-neighbour focus overflow). These identifiers refer to review tool output, not files.
 
 At the T22 checkpoint, no owner answer had arrived. T23 and T31 were not started; the pending answer must be recorded and independently re-reviewed before plan batch F begins. Task source commit: `2cdbf7c`. See the execution checkpoint for the actual T22 evidence and its limits.
+
+October 9 continuation: the owner explicitly selected the hard cap. Final amendment review must assess the effective contract above together with every routine disposition before T23 begins. The previous unanswered checkpoint is historical, not an active request.
+
+Final independent contract re-review: **PASS**, October 9, 2026 (`/root/constellation_contract_final_review`). The reviewer verified the owner priority, mandatory identity preservation, deterministic two-pass pruning and surviving object references, plus every routine disposition against current source. No additional blocking contradictions or required scope corrections remain. This clears T23/plan batch F; it does not claim that T31/T32 are implemented or provider/runtime verified.
