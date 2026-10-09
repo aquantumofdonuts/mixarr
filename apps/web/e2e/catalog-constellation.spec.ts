@@ -169,3 +169,51 @@ test('seed names and IDs follow cross-seed Back, Forward and reload independentl
   await expect(page.getByRole('dialog', { name: `${people[2].displayName} details` })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Explore artist' })).toBeEnabled(); expect(fixture.invalid).toEqual([]);
 });
+
+for (const theme of ['light', 'dark'] as const) test(`320px ${theme} bounded live field keeps cached nodes through source Retry`, async ({ catalogPage: page }) => {
+  const fixture = await constellationFixture(page);
+  const expansions: number[] = [];
+  const extra = (start: number, count: number) => Array.from({ length: count }, (_, i) => ({ personId: start + i, displayName: `Session collaborator ${start + i}`, genre: null, size: 1, owned: false }));
+  await page.route('**/api/constellation/seed?*', route => {
+    const url = new URL(route.request().url());
+    if (route.request().method() !== 'GET' || url.searchParams.get('id') !== ARTIST_IDS[0] || url.searchParams.get('type') !== 'artist') return route.fallback();
+    return route.fulfill({ json: { focusId: 1, creditSource: 'live', subgraph: { focusId: 1, nodes: [...people, ...extra(100, 350)], edges: credits }, streamToken: { id: 'fixture-1', generation: 1 } } });
+  });
+  await page.route('**/api/constellation/expand/*?*', route => {
+    const url = new URL(route.request().url()); const personId = Number(url.pathname.split('/').at(-1));
+    if (route.request().method() !== 'GET' || !Number.isSafeInteger(personId) || ![1, 7, 42].includes(personId) || url.searchParams.get('token') !== 'fixture-1' || url.searchParams.get('generation') !== '1') return route.fallback();
+    expansions.push(personId);
+    return route.fulfill({ json: { personId, enqueued: expansions.length > 1, creditSource: 'live', subgraph: { focusId: personId, nodes: [...people, ...extra(1000 + expansions.length * 100, 100)], edges: credits } } });
+  });
+  await page.route('**/api/constellation/stream/fixture-1', route => route.fulfill({ contentType: 'text/event-stream', body: [null, { generation: 1, nodes: [null], edges: [] }, { generation: 1, focusId: 42, nodes: extra(2000, 100), edges: [] }, { generation: 1, focusId: 42, nodes: [], edges: [], status: 'source-unavailable', detail: 'private token=secret' }].map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('') }));
+  await page.setViewportSize({ width: 320, height: 844 }); await page.addInitScript(value => localStorage.setItem('theme', value), theme);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`/constellation?seed=${ARTIST_IDS[0]}&focus=42`);
+  await expect(page.getByText('Genre colour unavailable on the live Discogs source')).toBeVisible();
+  await expect(page.getByLabel('Highlight genre')).toBeDisabled();
+  const notice = page.getByRole('status', { name: 'Some results are unavailable' }); await expect(notice).toContainText('Collaborator source is unavailable. Please retry.');
+  await expect(notice).not.toContainText('secret');
+  await expect.poll(() => expansions.filter(id => id === 42).length).toBe(1);
+  await page.getByRole('button', { name: 'Close panel' }).click();
+  await page.getByText('People in this field', { exact: true }).click();
+  const field = page.locator('details').filter({ has: page.getByText('People in this field', { exact: true }) });
+  await expect(field.getByRole('button')).toHaveCount(300);
+  await expect(field.getByRole('button', { name: people[0].displayName, exact: true })).toBeVisible();
+  await notice.getByRole('button', { name: 'Retry' }).click();
+  await expect.poll(() => expansions.filter(id => id === 42).length).toBe(2); await expect(notice).toHaveCount(0);
+  await expect(field.getByRole('button')).toHaveCount(300); await expect(page.locator('canvas').first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const evidence = process.env.CATALOG_EVIDENCE_DIR || '/tmp/t32-browser'; await mkdir(evidence, { recursive: true });
+  await page.locator('canvas').first().scrollIntoViewIfNeeded(); await page.screenshot({ path: `${evidence}/constellation-bounded-live-320-${theme}.png`, animations: 'disabled' });
+  expect(errors).toEqual([]); expect(fixture.invalid).toEqual([]);
+});
+
+test('budget status retains cached graph without Retry and quiet stream shows no availability notice', async ({ catalogPage: page }) => {
+  const fixture = await constellationFixture(page); let quiet = false;
+  await page.route('**/api/constellation/stream/fixture-1', route => route.fulfill({ contentType: 'text/event-stream', body: quiet ? ': heartbeat\n\n' : `data: ${JSON.stringify({ generation: 1, focusId: 1, nodes: [], edges: [], status: 'budget-exhausted' })}\n\n` }));
+  await page.goto(`/constellation?seed=${ARTIST_IDS[0]}&focus=1`);
+  await expect(page.getByText('Daily Discogs budget used; showing cached collaborators only. Resets 00:00 UTC')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0); await expect(page.locator('canvas').first()).toBeVisible();
+  quiet = true; await page.reload(); await expect(page.locator('canvas').first()).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Some results are unavailable' })).toHaveCount(0); expect(fixture.invalid).toEqual([]);
+});

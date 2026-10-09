@@ -67,7 +67,7 @@ export function resolveCreditSource(
  * touches settings + the connections table); the selection logic it delegates to
  * is covered by {@link resolveCreditSource}'s tests.
  */
-export async function resolveConfiguredCreditSource(userId?: number): Promise<CreditSource> {
+export async function resolveConfiguredCreditSource(userId?: number, options: { budgetShare?: number } = {}): Promise<CreditSource> {
   const { SettingsService } = await import('../settings.service.js');
   const settings = await SettingsService.getConstellationSettings();
 
@@ -75,7 +75,7 @@ export async function resolveConfiguredCreditSource(userId?: number): Promise<Cr
     return resolveCreditSource(settings);
   }
 
-  const discogs = await resolveDiscogsBackend(userId, settings.dailyApiBudget);
+  const discogs = await resolveDiscogsBackend(userId, settings.dailyApiBudget, options.budgetShare);
   return resolveCreditSource(settings, { discogs });
 }
 
@@ -93,6 +93,7 @@ export async function resolveConfiguredCreditSource(userId?: number): Promise<Cr
 async function resolveDiscogsBackend(
   userId: number | undefined,
   dailyApiBudget: number,
+  budgetShare = 1,
 ): Promise<DiscogsCreditBackend> {
   const { default: prisma } = await import('../../lib/db.js');
   const { DiscogsService } = await import('../discogs.js');
@@ -110,7 +111,7 @@ async function resolveDiscogsBackend(
   });
 
   const token = (conn?.config as { token?: string } | null | undefined)?.token;
-  const budget = new DailyApiBudget(dailyApiBudget, redis);
+  const budget = new DailyApiBudget(dailyApiBudget, redis, undefined, budgetShare);
   // token may be undefined -> tokenless public Discogs API.
   return new DiscogsService(token, { onRequest: () => budget.take() });
 }

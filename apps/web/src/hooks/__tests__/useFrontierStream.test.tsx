@@ -92,11 +92,11 @@ describe('useFrontierStream', () => {
     renderHook(() => useFrontierStream(token('tok-1', 4), onNodes));
 
     act(() => {
-      MockEventSource.latest().emit({ generation: 4, personId: 99 });
+      MockEventSource.latest().emit({ generation: 4, personId: 99, nodes: [], edges: [] });
     });
 
     expect(onNodes).toHaveBeenCalledTimes(1);
-    expect(onNodes).toHaveBeenCalledWith({ generation: 4, personId: 99 });
+    expect(onNodes).toHaveBeenCalledWith({ generation: 4, personId: 99, nodes: [], edges: [] });
   });
 
   it('DISCARDS an event from a stale generation (re-center race guard)', () => {
@@ -149,9 +149,9 @@ describe('useFrontierStream', () => {
     expect(onNodes).not.toHaveBeenCalled();
     // A following well-formed frame is still processed.
     act(() => {
-      MockEventSource.latest().emit({ generation: 1, personId: 7 });
+      MockEventSource.latest().emit({ generation: 1, personId: 7, nodes: [], edges: [] });
     });
-    expect(onNodes).toHaveBeenCalledWith({ generation: 1, personId: 7 });
+    expect(onNodes).toHaveBeenCalledWith({ generation: 1, personId: 7, nodes: [], edges: [] });
     expect(result.current.error).toBeNull();
   });
 
@@ -209,7 +209,7 @@ it('ignores callbacks retained by a closed source even when their generation mat
   const callback = vi.fn();
   const { rerender, result, unmount } = renderHook(({ id }) => useFrontierStream(token(id, 1), callback), { initialProps: { id: 'old' } });
   const old = MockEventSource.latest(); rerender({ id: 'new' });
-  act(() => { old.open(); old.emit({ generation: 1, nodes: [{ personId: 99 }] }); old.fail(); });
+  act(() => { old.open(); old.emit({ generation: 1, nodes: [{ personId: 99, nodes: [], edges: [] }] }); old.fail(); });
   expect(callback).not.toHaveBeenCalled(); expect(result.current.connected).toBe(false);
   const current = MockEventSource.latest(); unmount();
   act(() => { current.open(); current.emit({ generation: 1 }); }); expect(callback).not.toHaveBeenCalled();
@@ -218,4 +218,21 @@ it('resets stream status when the token is removed', () => {
   const { result, rerender } = renderHook(({ handle }) => useFrontierStream(handle, vi.fn()), { initialProps: { handle: token('old', 1) as StreamToken | null } });
   act(() => MockEventSource.latest().open()); expect(result.current.connected).toBe(true);
   rerender({ handle: null }); expect(result.current).toEqual({ connected: false, error: null }); expect(MockEventSource.latest().closed).toBe(true);
+});
+
+it('routes recognized availability separately, ignores null and malformed frames, and retires status callbacks', () => {
+  const graph = vi.fn(); const status = vi.fn();
+  const { rerender } = renderHook(({ generation }) => useFrontierStream(token('t', generation), graph, status), { initialProps: { generation: 1 } });
+  const source = MockEventSource.latest();
+  act(() => {
+    for (const frame of [null, 5, 'text', [], {}, { generation: 1, nodes: [null], edges: [] }, { generation: 1, nodes: [], edges: [null] }, { generation: 1, nodes: [{ personId: 'bad' }], edges: [] }, { generation: 1, status: 'unknown', nodes: [], edges: [] }, { generation: 1, status: 'source-unavailable', focusId: 4 }]) source.emit(frame);
+    source.emit({ generation: 1, focusId: 4, status: 'source-unavailable', detail: 'secret token=abc', nodes: [], edges: [] });
+  });
+  expect(graph).not.toHaveBeenCalled(); expect(status).toHaveBeenCalledTimes(1);
+  expect(status).toHaveBeenCalledWith({ generation: 1, focusId: 4, status: 'source-unavailable', detail: 'Collaborator source is unavailable. Please retry.' });
+  rerender({ generation: 2 });
+  act(() => { source.emit({ generation: 1, focusId: 4, status: 'budget-exhausted', nodes: [], edges: [] }); MockEventSource.latest().emit({ generation: 1, focusId: 4, status: 'budget-exhausted', nodes: [], edges: [] }); });
+  expect(status).toHaveBeenCalledTimes(1);
+  act(() => MockEventSource.latest().emit({ generation: 2, focusId: 4, status: 'budget-exhausted', nodes: [], edges: [] }));
+  expect(status).toHaveBeenLastCalledWith({ generation: 2, focusId: 4, status: 'budget-exhausted' });
 });

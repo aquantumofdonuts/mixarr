@@ -107,11 +107,11 @@ export async function registerConstellationExpandWorker(io?: SocketIOServer): Pr
 
       // Resolve the configured backend (index or live Discogs). This job is not
       // user-scoped, so the live path uses the global Discogs connection.
-      const creditSource = await resolveConfiguredCreditSource();
-      const expansionService = new ExpansionService(creditSource);
-      const graph = new GraphService();
-
+      let creditSource: Awaited<ReturnType<typeof resolveConfiguredCreditSource>> | undefined;
       try {
+        creditSource = await resolveConfiguredCreditSource();
+        const expansionService = new ExpansionService(creditSource, { strict: true });
+        const graph = new GraphService();
         const result = await runExpandJob({
           artistId,
           tokenId,
@@ -126,23 +126,28 @@ export async function registerConstellationExpandWorker(io?: SocketIOServer): Pr
           publish: publishToStream,
         });
 
-        void job.updateProgress({ phase: 'expanded', ...result });
+        try { await job.updateProgress({ phase: 'expanded', ...result }); }
+        catch (error) { logger.warn('Expand progress update failed', { error }); }
         return result;
       } catch (err) {
-        if (!isApiBudgetExhausted(err)) throw err;
-        // The day's live-API budget is spent. Retrying cannot help until the
-        // counter rolls over, so complete the job with an explicit result rather
-        // than burning BullMQ attempts; the client keeps the cached subgraph it
-        // already received from the route.
-        logger.warn(`Constellation expand for ${artistId} skipped: ${err.message}`);
-        const result = { artistId, published: false, budgetExhausted: true };
-        void job.updateProgress({ phase: 'budget-exhausted', ...result });
+        const budgetExhausted = isApiBudgetExhausted(err);
+        const status = budgetExhausted ? 'budget-exhausted' : 'source-unavailable';
+        logger.warn(`Constellation expand for ${artistId} failed`, { error: err });
+        const published = Boolean(tokenId);
+        if (tokenId) publishToStream(tokenId, generation ?? 1, {
+          focusId: artistId, nodes: [], edges: [], status,
+          ...(budgetExhausted ? {} : { detail: 'Collaborator source is unavailable. Please retry.' }),
+        });
+        const result = { artistId, published, budgetExhausted, status };
+        try { await job.updateProgress({ phase: status, ...result }); }
+        catch (error) { logger.warn('Expand progress update failed', { error }); }
         return result;
       } finally {
         // The DumpIndexService (Setting-ON) opens a SQLite handle; release it when
         // we own one, even if expand/read throws. The live adapter is a no-op.
-        const closable = creditSource as { close?: () => void };
-        if (typeof closable.close === 'function') closable.close();
+        const closable = creditSource as { close?: () => void } | undefined;
+        try { closable?.close?.(); }
+        catch (error) { logger.warn('Expand source cleanup failed', { error }); }
       }
     },
     {

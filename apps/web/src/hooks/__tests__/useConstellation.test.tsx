@@ -12,6 +12,7 @@ import {
   mergeEdges,
   mergeSubgraph,
   edgeKey,
+  boundField, MAX_FIELD_NODES, ANCHOR_BREADCRUMBS,
 } from '../useConstellation';
 import type { GraphNode, GraphEdge, Subgraph, SeedResponse, ExpandResponse } from '@/types/constellation';
 
@@ -125,8 +126,8 @@ describe('useConstellation', () => {
       '/api/constellation/seed?type=artist&id=20&token=tok-1', { signal: expect.any(AbortSignal) },
     );
     expect(result.current.focusId).toBe(20);
-    // Graph is REPLACED, not merged.
-    expect(result.current.nodes.map((n) => n.personId).sort()).toEqual([20, 21]);
+    // Re-center preserves the known original seed anchor.
+    expect(result.current.nodes.map((n) => n.personId).sort()).toEqual([10, 20, 21]);
     expect(result.current.streamToken).toEqual({ id: 'tok-1', generation: 2 });
   });
 
@@ -292,4 +293,54 @@ describe('request retirement', () => {
     expect(result.current.loading).toBe(true); rerender({ seed: null });
     await waitFor(() => expect(result.current.loading).toBe(false)); expect(result.current.error).toBeNull(); unmount();
   });
+});
+
+describe('bounded wander field', () => {
+  it('uses actual merge order, prioritizes anchor neighbours, and caps protected overflow', () => {
+    expect(MAX_FIELD_NODES).toBe(300); expect(ANCHOR_BREADCRUMBS).toBe(5);
+    const ids = [900, 800, 700, ...Array.from({ length: 300 }, (_, i) => i + 1)];
+    const bounded = boundField({ nodes: ids.map(id => node(id)), edges: [edge(900, 800), edge(700, 1)] }, [900, 700]);
+    expect(bounded.nodes).toHaveLength(300); expect(bounded.nodes.map(n => n.personId)).toContain(800);
+    expect(bounded.nodes.map(n => n.personId)).not.toContain(2); expect(bounded.nodes.map(n => n.personId)).not.toContain(3);
+    const overflow = boundField({ nodes: [node(900), ...Array.from({ length: 300 }, (_, i) => node(i + 1))], edges: Array.from({ length: 300 }, (_, i) => edge(900, i + 1)) }, [900]);
+    expect(overflow.nodes).toHaveLength(300); expect(overflow.nodes[0].personId).toBe(900);
+    expect(overflow.nodes.some(n => n.personId === 1)).toBe(false); expect(overflow.edges).toHaveLength(299);
+  });
+  it('bounds repeated HTTP and SSE merges, retains walking anchors, and reexpands pruned breadcrumbs', async () => {
+    const seedResponse = { focusId: 900, creditSource: 'index', streamToken: { id: 't', generation: 1 }, subgraph: subgraph(900, [node(900), node(800)], [edge(900, 800)]) };
+    vi.mocked(api.get).mockImplementation(async endpoint => endpoint.includes('/seed') ? ok(seedResponse) : ok({ personId: 800, creditSource: 'live', enqueued: true, subgraph: subgraph(800, [node(800), node(700)], [edge(800, 700)]) }));
+    const { result, rerender } = renderHook(({ walkingFocus, breadcrumbIds }) => useConstellation({ type: 'artist', id: '900' }, { walkingFocus, breadcrumbIds }), { initialProps: { walkingFocus: 800, breadcrumbIds: [11, 12, 13, 14, 15, 16] } });
+    await waitFor(() => expect(result.current.focusId).toBe(900));
+    act(() => { result.current.onFrame({ generation: 1, focusId: 800, nodes: [11,12,13,14,15,16].map(id => node(id)), edges: [] }); });
+    for (let batch = 0; batch < 5; batch++) {
+      act(() => result.current.onFrame({ generation: 1, focusId: 800, nodes: Array.from({ length: 100 }, (_, i) => node(1000 + batch * 100 + i)), edges: [] }));
+      expect(result.current.nodes.length).toBeLessThanOrEqual(300);
+    }
+    const ids = result.current.nodes.map(n => n.personId);
+    for (const id of [900,800,12,13,14,15,16]) expect(ids).toContain(id);
+    expect(ids).not.toContain(11);
+    rerender({ walkingFocus: 11, breadcrumbIds: [11,12,13,14,15,16,11] });
+    vi.mocked(api.get).mockResolvedValueOnce(ok({ personId: 11, creditSource: 'live', enqueued: true, subgraph: subgraph(11, [node(11), node(6000)], [edge(11, 6000)]) }));
+    await act(async () => { await result.current.expandMore(11); });
+    expect(result.current.nodes.map(n => n.personId)).toContain(11); expect(result.current.nodes.length).toBe(300); expect(result.current.creditSource).toBe('live');
+    act(() => result.current.onStatus({ generation: 1, focusId: 11, status: 'source-unavailable' }));
+    const before = result.current.nodes;
+    expect(result.current.availability?.status).toBe('source-unavailable'); expect(result.current.nodes).toBe(before);
+    await act(async () => { await result.current.expandMore(11); });
+    expect(result.current.availability).toBeNull();
+    expect(vi.mocked(api.get).mock.calls.filter(([url]) => url.includes('/expand/11'))).toHaveLength(2);
+  });
+});
+
+it('preserves known mandatory identities on role and recenter responses without fabricating unresolved anchors', async () => {
+  vi.mocked(api.get).mockResolvedValueOnce(ok({ focusId: 900, creditSource: 'index', streamToken: { id: 't', generation: 1 }, subgraph: subgraph(900, [900,800,700,600,500,400,300,200].map(id => node(id)), []) }));
+  const { result, rerender } = renderHook(({ roleMask }) => useConstellation({ type: 'artist', id: '900' }, { roleMask, walkingFocus: 800, breadcrumbIds: [700,600,500,400,300,999] }), { initialProps: { roleMask: undefined as number | undefined } });
+  await waitFor(() => expect(result.current.focusId).toBe(900));
+  vi.mocked(api.get).mockResolvedValueOnce(ok({ focusId: 900, creditSource: 'index', streamToken: { id: 't2', generation: 1 }, subgraph: subgraph(900, [node(900)], []) }));
+  rerender({ roleMask: 2 }); await waitFor(() => expect(result.current.streamToken?.id).toBe('t2'));
+  expect(result.current.nodes.map(n => n.personId)).toEqual([900,800,600,500,400,300]);
+  vi.mocked(api.get).mockResolvedValueOnce(ok({ focusId: 100, creditSource: 'index', streamToken: { id: 't2', generation: 2 }, subgraph: subgraph(100, [node(100)], []) }));
+  await act(async () => { await result.current.recenter(100); });
+  expect(result.current.nodes.map(n => n.personId)).toEqual([900,800,600,500,400,300,100]);
+  expect(result.current.nodes.some(n => n.personId === 999)).toBe(false);
 });

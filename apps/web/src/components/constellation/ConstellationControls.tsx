@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ROLE_FILTER_OPTIONS,
   ROLE_LABELS,
@@ -25,6 +25,7 @@ import { GENRE_LEGEND } from './encoding';
  *    palette so the highlighted hue is recognisable.
  */
 export interface ConstellationControlsProps {
+  creditSource?: 'index' | 'live' | null;
   /** Selected role bitmask, or `undefined` for "all roles / no filter". */
   onRoleMaskChange: (mask: number | undefined) => void;
   /** Whether the prominence (size) channel is hidden (uniform node size). */
@@ -37,6 +38,7 @@ export interface ConstellationControlsProps {
 const ALL_GENRES = '__all__';
 
 export function ConstellationControls({
+  creditSource,
   onRoleMaskChange,
   onHideHotnessChange,
   onGenreHighlightChange,
@@ -79,6 +81,10 @@ export function ConstellationControls({
     [onGenreHighlightChange],
   );
 
+  useEffect(() => {
+    if (creditSource === 'live') { setGenre(ALL_GENRES); onGenreHighlightChange(null); }
+  }, [creditSource, onGenreHighlightChange]);
+
   const legend = useMemo(() => GENRE_LEGEND, []);
 
   return (
@@ -113,6 +119,8 @@ export function ConstellationControls({
           Highlight genre
           <select
             id="genre-highlight"
+            disabled={creditSource === 'live'}
+            aria-describedby={creditSource === 'live' ? 'live-genre-reason' : undefined}
             value={genre}
             onChange={onGenre}
             className="rounded border border-border bg-background px-2 py-1"
@@ -126,7 +134,9 @@ export function ConstellationControls({
           </select>
         </label>
 
+        {creditSource === 'live' && <p id="live-genre-reason">Genre colour unavailable on the live Discogs source</p>}
         <ul
+          hidden={creditSource === 'live'}
           data-testid="genre-legend"
           className="flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground"
         >

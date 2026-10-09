@@ -9,6 +9,7 @@ import type {
   StreamToken,
   SeedResponse,
   ExpandResponse,
+  StreamPayload, ExpansionStatus, CreditSource,
 } from '@/types/constellation';
 
 /** Seed the graph is centred on. `null` means "no graph loaded". */
@@ -22,11 +23,17 @@ export type ConstellationSeed = { type: 'artist'; id: string } | null;
 export interface UseConstellationOptions {
   roleMask?: number;
   actorId?: number;
+  walkingFocus?: number | null;
+  breadcrumbIds?: number[];
 }
 
 export interface UseConstellationResult {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  creditSource: CreditSource | null;
+  availability: ExpansionStatus | null;
+  onFrame: (payload: StreamPayload) => void;
+  onStatus: (payload: ExpansionStatus) => void;
   focusId: number | null;
   streamToken: StreamToken | null;
   loading: boolean;
@@ -76,6 +83,29 @@ export function mergeSubgraph(
   };
 }
 
+export const MAX_FIELD_NODES = 300;
+export const ANCHOR_BREADCRUMBS = 5;
+
+/** Oldest merged nodes leave first, with anchor neighbourhoods receiving priority. */
+export function boundField(graph: { nodes: GraphNode[]; edges: GraphEdge[] }, mandatoryIds: number[]) {
+  const mandatory = new Set(mandatoryIds);
+  const neighbours = new Set<number>();
+  for (const edge of graph.edges) {
+    if (mandatory.has(edge.source)) neighbours.add(edge.target);
+    if (mandatory.has(edge.target)) neighbours.add(edge.source);
+  }
+  const retained = new Set(graph.nodes.map(node => node.personId));
+  for (const preferOutside of [true, false]) {
+    for (const node of graph.nodes) {
+      if (retained.size <= MAX_FIELD_NODES) break;
+      if (mandatory.has(node.personId) || (preferOutside && neighbours.has(node.personId))) continue;
+      retained.delete(node.personId);
+    }
+  }
+  return { nodes: graph.nodes.filter(node => retained.has(node.personId)),
+    edges: graph.edges.filter(edge => retained.has(edge.source) && retained.has(edge.target)) };
+}
+
 // ---------------------------------------------------------------------------
 // Endpoint builders
 // ---------------------------------------------------------------------------
@@ -120,6 +150,16 @@ export function useConstellation(
     nodes: [],
     edges: [],
   });
+  const [creditSource, setCreditSource] = useState<CreditSource | null>(null);
+  const [availability, setAvailability] = useState<ExpansionStatus | null>(null);
+  const originalSeed = useRef<number | null>(null);
+  const currentCenter = useRef<number | null>(null);
+  const walk = useRef({ focus: options.walkingFocus, breadcrumbs: options.breadcrumbIds ?? [] });
+  walk.current = { focus: options.walkingFocus, breadcrumbs: options.breadcrumbIds ?? [] };
+  const anchors = useCallback(() => {
+    const distinct = [...new Set([...walk.current.breadcrumbs].reverse())].slice(0, ANCHOR_BREADCRUMBS);
+    return [originalSeed.current, walk.current.focus ?? currentCenter.current, ...distinct].filter((id): id is number => id != null);
+  }, []);
   const [focusId, setFocusId] = useState<number | null>(null);
   const [streamToken, setStreamToken] = useState<StreamToken | null>(null);
   const [loading, setLoading] = useState(false);
@@ -139,17 +179,31 @@ export function useConstellation(
   }, []);
   const applySeed = useCallback((data: SeedResponse) => {
     tokenRef.current = data.streamToken;
+    if (originalSeed.current === null) originalSeed.current = data.focusId;
+    currentCenter.current = data.focusId;
     setFocusId(data.focusId);
-    setGraph({ nodes: data.subgraph.nodes, edges: data.subgraph.edges });
+    setCreditSource(data.creditSource ?? null);
+    setAvailability(null);
+    setGraph(previous => {
+      const mandatory = new Set(anchors());
+      return boundField({ nodes: mergeNodes(previous.nodes.filter(node => mandatory.has(node.personId)), data.subgraph.nodes), edges: data.subgraph.edges }, anchors());
+    });
     setStreamToken(data.streamToken);
-  }, []);
+  }, [anchors]);
   const seedType = seed?.type ?? null;
   const seedId = seed?.id ?? null;
+  const seedIdentity = `${options.actorId ?? ''}:${seedType}:${seedId}`;
+  const previousSeed = useRef<string | null>(null);
   useEffect(() => {
     active.current = true;
     const generation = retire();
     tokenRef.current = null; setStreamToken(null);
-    setGraph({ nodes: [], edges: [] }); setFocusId(null); setError(null); setLoading(false);
+    if (previousSeed.current !== seedIdentity) {
+      originalSeed.current = null; currentCenter.current = null;
+      setGraph({ nodes: [], edges: [] }); setFocusId(null);
+      previousSeed.current = seedIdentity;
+    }
+    setAvailability(null); setCreditSource(null); setError(null); setLoading(false);
     if (seedType !== null && seedId !== null) {
       const controller = new AbortController(); controllers.current.add(controller);
       setLoading(true);
@@ -166,7 +220,7 @@ export function useConstellation(
         });
     }
     return () => { active.current = false; retire(); };
-  }, [seedType, seedId, roleMask, options.actorId, applySeed, retire]);
+  }, [seedType, seedId, seedIdentity, roleMask, options.actorId, applySeed, retire]);
 
   const recenter = useCallback(async (personId: number) => {
     if (!active.current || !Number.isSafeInteger(personId) || personId <= 0) return;
@@ -191,21 +245,34 @@ export function useConstellation(
   const expandMore = useCallback(async (personId: number) => {
     if (!active.current || !tokenRef.current || !Number.isSafeInteger(personId) || personId <= 0) return;
     const generation = epoch.current;
+    setAvailability(null);
     expansions.current.get(personId)?.abort();
     const controller = new AbortController();
     expansions.current.set(personId, controller); controllers.current.add(controller);
     try {
       const { data, error: err } = await api.get<ExpandResponse>(expandUrl(personId, tokenRef.current, roleMaskRef.current), { signal: controller.signal });
       if (controller.signal.aborted || epoch.current !== generation) return;
-      if (err || !data) { setError(err ?? 'Failed to expand node'); return; }
-      setGraph(prev => mergeSubgraph(prev, data.subgraph));
+      if (err || !data) { setAvailability({ generation: tokenRef.current!.generation, focusId: personId, status: 'source-unavailable', detail: 'Collaborator source is unavailable. Please retry.' }); return; }
+      setCreditSource(data.creditSource ?? null);
+      setGraph(prev => boundField(mergeSubgraph(prev, data.subgraph), anchors()));
     } catch {
-      if (!controller.signal.aborted && epoch.current === generation) setError('Failed to expand node');
+      if (!controller.signal.aborted && epoch.current === generation) setAvailability({ generation: tokenRef.current!.generation, focusId: personId, status: 'source-unavailable', detail: 'Collaborator source is unavailable. Please retry.' });
     } finally {
       controllers.current.delete(controller);
       if (expansions.current.get(personId) === controller) expansions.current.delete(personId);
     }
-  }, []);
+  }, [anchors]);
 
-  return { nodes: graph.nodes, edges: graph.edges, focusId, streamToken, loading, error, recenter, expandMore };
+  const onStatus = useCallback((payload: ExpansionStatus) => {
+    if (!active.current || tokenRef.current?.generation !== payload.generation) return;
+    setAvailability(payload);
+  }, []);
+  const onFrame = useCallback((payload: StreamPayload) => {
+    if (!active.current || tokenRef.current?.generation !== payload.generation) return;
+    if (!Array.isArray(payload.nodes) || !Array.isArray(payload.edges)) return;
+    setGraph(prev => boundField(mergeSubgraph(prev, { focusId: Number(payload.focusId), nodes: payload.nodes as GraphNode[], edges: payload.edges as GraphEdge[] }), anchors()));
+    setAvailability(previous => previous?.focusId === payload.focusId ? null : previous);
+  }, [anchors]);
+
+  return { creditSource, availability, onFrame, onStatus, nodes: graph.nodes, edges: graph.edges, focusId, streamToken, loading, error, recenter, expandMore };
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { StreamToken, StreamPayload } from '@/types/constellation';
+import type { StreamToken, StreamPayload, ExpansionStatus } from '@/types/constellation';
 
 /**
  * Base path for the constellation SSE endpoint. Relative URL so the browser
@@ -56,12 +56,15 @@ export function isCurrentGeneration(
 export function useFrontierStream(
   token: StreamToken | null,
   onNodes: (payload: StreamPayload) => void,
+  onStatus?: (payload: ExpansionStatus) => void,
 ): FrontierStreamStatus {
   // Keep the latest callback in a ref so an inline `onNodes` doesn't tear down
   // and reopen the EventSource on every render (matches useWebSocket).
   const onNodesRef = useRef(onNodes);
+  const onStatusRef = useRef(onStatus);
   useEffect(() => {
     onNodesRef.current = onNodes;
+    onStatusRef.current = onStatus;
   });
 
   const [connected, setConnected] = useState(false);
@@ -102,7 +105,24 @@ export function useFrontierStream(
         return;
       }
       // Discard events from a superseded generation (the re-center race guard).
-      if (!isCurrentGeneration(payload, generation)) return;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !isCurrentGeneration(payload, generation)) return;
+      if ('status' in payload) {
+        if ((payload.status !== 'budget-exhausted' && payload.status !== 'source-unavailable') ||
+            !Number.isSafeInteger(payload.focusId) || Number(payload.focusId) <= 0 ||
+            !Array.isArray(payload.nodes) || payload.nodes.length !== 0 || !Array.isArray(payload.edges) || payload.edges.length !== 0) return;
+        onStatusRef.current?.({ generation, focusId: Number(payload.focusId), status: payload.status,
+          ...(payload.status === 'source-unavailable' ? { detail: 'Collaborator source is unavailable. Please retry.' } : {}) });
+        return;
+      }
+      if (!Array.isArray(payload.nodes) || !Array.isArray(payload.edges)) return;
+      const validNodes = payload.nodes.every(node => node && typeof node === 'object' &&
+        Number.isSafeInteger(node.personId) && node.personId > 0 && typeof node.displayName === 'string' &&
+        (node.genre === null || typeof node.genre === 'string') && Number.isFinite(node.size) && typeof node.owned === 'boolean');
+      const validEdges = payload.edges.every(edge => edge && typeof edge === 'object' &&
+        Number.isSafeInteger(edge.source) && edge.source > 0 && Number.isSafeInteger(edge.target) && edge.target > 0 &&
+        Number.isFinite(edge.weight) && (edge.bridge === null || Number.isFinite(edge.bridge)) &&
+        typeof edge.bridgeConfident === 'boolean' && Number.isSafeInteger(edge.roleBitmask));
+      if (!validNodes || !validEdges) return;
       onNodesRef.current(payload);
     };
 

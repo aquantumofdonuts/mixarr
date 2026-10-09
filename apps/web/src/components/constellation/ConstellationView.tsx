@@ -7,12 +7,10 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import type { ForceGraphProps, NodeObject } from 'react-force-graph-2d';
 import {
   useConstellation,
-  mergeNodes,
-  mergeEdges,
   type ConstellationSeed,
 } from '@/hooks/useConstellation';
+import { ResultState } from '@/components/ui/result-state';
 import { useFrontierStream } from '@/hooks/useFrontierStream';
-import type { GraphNode, GraphEdge, StreamPayload } from '@/types/constellation';
 import {
   genreColor,
   genreHighlightAlpha,
@@ -81,8 +79,6 @@ export interface ConstellationViewProps {
   onPathChange?: (from: number, to: number, mode: 'shortest' | 'interesting') => void;
 }
 
-const EMPTY_STREAM: { nodes: GraphNode[]; edges: GraphEdge[] } = { nodes: [], edges: [] };
-
 /**
  * The dense collaboration field. Node color = genre, radius = prominence, gold
  * ring = owned, edge width = tie strength, warm edge glow = confident bridge.
@@ -123,42 +119,17 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
   const [hideHotness, setHideHotness] = useState(false);
   const [genreHighlight, setGenreHighlight] = useState<string | null>(null);
 
-  const { nodes, edges, focusId, streamToken, loading, error, expandMore } =
-    useConstellation(seed, { roleMask, actorId });
-
-  // Nodes/edges pushed by the background-expand SSE stream, merged locally on top
-  // of the hook's seed subgraph. Reset whenever the stream token (generation)
-  // changes (a role-filter re-seed), since that supersedes any streamed frontier.
-  const [streamed, setStreamed] = useState(EMPTY_STREAM);
-  const streamKey = streamToken ? `${streamToken.id}:${streamToken.generation}` : null;
-  useEffect(() => {
-    setStreamed(EMPTY_STREAM);
-  }, [streamKey]);
-
-  // The breadcrumb trail of visited persons (the wander).
+  // The full trail stays in view state even when its older graph nodes leave the field.
   const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
-
-  // The person whose acquisition panel is open. Selecting a node opens this (the
-  // acquisition grain: the node action lands the user in the panel where they
-  // pick artist-vs-album, rather than blind-subscribing).
-  const [selectedPerson, setSelectedPerson] = useState<
-    (Breadcrumb & { owned: boolean }) | null
-  >(null);
-
-  const onFrame = useCallback((payload: StreamPayload) => {
-    const incomingNodes = Array.isArray(payload.nodes) ? (payload.nodes as GraphNode[]) : [];
-    const incomingEdges = Array.isArray(payload.edges) ? (payload.edges as GraphEdge[]) : [];
-    if (incomingNodes.length === 0 && incomingEdges.length === 0) return;
-    setStreamed((prev) => ({
-      nodes: mergeNodes(prev.nodes, incomingNodes),
-      edges: mergeEdges(prev.edges, incomingEdges),
-    }));
-  }, []);
-
-  useFrontierStream(streamToken, onFrame);
-
-  const mergedNodes = useMemo(() => mergeNodes(nodes, streamed.nodes), [nodes, streamed.nodes]);
-  const mergedEdges = useMemo(() => mergeEdges(edges, streamed.edges), [edges, streamed.edges]);
+  const [selectedPerson, setSelectedPerson] = useState<(Breadcrumb & { owned: boolean }) | null>(null);
+  const { nodes: mergedNodes, edges: mergedEdges, focusId, streamToken, loading, error, expandMore,
+    onFrame, onStatus, availability, creditSource } = useConstellation(seed, {
+      roleMask, actorId, walkingFocus: requestedFocus ?? selectedPerson?.personId,
+      breadcrumbIds: breadcrumbs.map(crumb => crumb.personId),
+    });
+  const streamKey = streamToken ? `${streamToken.id}:${streamToken.generation}` : null;
+  useFrontierStream(streamToken, onFrame, onStatus);
+  useEffect(() => { if (creditSource === 'live') setGenreHighlight(null); }, [creditSource]);
 
   const names = useMemo(() => new Map(mergedNodes.map(node => [node.personId, node.displayName])), [mergedNodes]);
   const restored = useRef<string | null>(null);
@@ -190,6 +161,8 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
   const nodeObjs = useRef<Map<number, CanvasNode>>(new Map());
   const graphData = useMemo(() => {
     const map = nodeObjs.current;
+    const retained = new Set(mergedNodes.map(node => node.personId));
+    for (const id of map.keys()) if (!retained.has(id)) map.delete(id);
     for (const n of mergedNodes) {
       const existing = map.get(n.personId);
       if (existing) {
@@ -273,7 +246,7 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
       // Genre highlight dims every node whose genre != the highlighted one, so a
       // single genre can be traced across the dense field (client-side only).
       ctx.save();
-      ctx.globalAlpha = genreHighlightAlpha(node.genre, genreHighlight);
+      ctx.globalAlpha = genreHighlightAlpha(node.genre, creditSource === 'live' ? null : genreHighlight);
 
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, 2 * Math.PI);
@@ -310,7 +283,7 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
 
       ctx.restore();
     },
-    [hideHotness, genreHighlight, labelColor],
+    [hideHotness, genreHighlight, labelColor, creditSource],
   );
 
   return (
@@ -319,6 +292,7 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
         <details className="border bg-background" open><summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 p-3 text-sm font-medium"><ChevronRight className="disclosure-chevron h-4 w-4 shrink-0" aria-hidden="true" />Graph controls and legend</summary>
         <div className="pointer-events-auto">
           <ConstellationControls
+            creditSource={creditSource}
             onRoleMaskChange={setRoleMask}
             onHideHotnessChange={setHideHotness}
             onGenreHighlightChange={setGenreHighlight}
@@ -351,6 +325,13 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
           ))}
         </nav>
       )}
+
+      {availability && <div className="absolute bottom-2 left-2 right-2 z-10 bg-background/95 px-3 text-sm">
+        <ResultState kind="partial-results" message={availability.status === 'budget-exhausted'
+          ? 'Daily Discogs budget used; showing cached collaborators only. Resets 00:00 UTC'
+          : availability.detail || 'Collaborator source is unavailable. Please retry.'}
+          action={availability.status === 'source-unavailable' ? <button type="button" className="min-h-11 text-link underline" onClick={() => void expandMore(availability.focusId)}>Retry</button> : undefined} />
+      </div>}
 
       {error && (
         <div

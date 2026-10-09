@@ -115,11 +115,16 @@ interface TokenState {
  * Tokens are USER-SCOPED: a token remembers the userId that minted it, and
  * `bump`/`ownerOf` let the route layer reject cross-user access (IDOR/DoS guard).
  */
+export const STREAM_STATUS_TTL_MS = 5 * 60 * 1000;
+export const MAX_STREAM_STATUSES = 256;
 export class StreamRegistry {
   private readonly emitter = new EventEmitter();
   private readonly tokens = new Map<string, TokenState>();
 
-  constructor() {
+  private readonly statuses = new Map<string, { frame: Record<string, unknown>; expiresAt: number; timer: ReturnType<typeof setTimeout> }>();
+
+  constructor(private readonly statusTtlMs = STREAM_STATUS_TTL_MS, private readonly statusLimit = MAX_STREAM_STATUSES) {
+    if (!Number.isFinite(statusTtlMs) || statusTtlMs <= 0 || !Number.isSafeInteger(statusLimit) || statusLimit <= 0) throw new RangeError('Stream status bounds must be positive and finite');
     // SSE fan-out can attach many short-lived listeners; lift the warn ceiling.
     this.emitter.setMaxListeners(0);
   }
@@ -144,6 +149,7 @@ export class StreamRegistry {
       return this.mint(userId);
     }
     if (existing.userId !== userId) throw new StreamTokenForbiddenError(id);
+    this.clearStatus(id);
     existing.generation += 1;
     return { id, generation: existing.generation };
   }
@@ -161,6 +167,11 @@ export class StreamRegistry {
   /** Subscribe to a token's events; returns an unsubscribe function. */
   subscribe(id: string, listener: (data: unknown) => void): () => void {
     this.emitter.on(id, listener);
+    const status = this.statuses.get(id);
+    if (status) {
+      if (status.expiresAt <= Date.now() || status.frame.generation !== this.currentGeneration(id)) this.clearStatus(id);
+      else listener(status.frame);
+    }
     return () => {
       this.emitter.off(id, listener);
     };
@@ -173,8 +184,32 @@ export class StreamRegistry {
 
   /** Publish a payload to a token's subscribers, stamping the generation. */
   publish(id: string, generation: number, payload: Record<string, unknown>): void {
-    this.emitter.emit(id, { generation, ...payload });
+    if (!this.tokens.has(id) || this.currentGeneration(id) !== generation) return;
+    let frame: Record<string, unknown> = { ...payload, generation };
+    if (payload.status === 'budget-exhausted' || payload.status === 'source-unavailable') {
+      if (!Number.isSafeInteger(payload.focusId) || Number(payload.focusId) <= 0) return;
+      frame = { focusId: payload.focusId, status: payload.status, nodes: [], edges: [],
+        ...(payload.status === 'source-unavailable' ? { detail: 'Collaborator source is unavailable. Please retry.' } : {}), generation };
+      this.clearStatus(id);
+      while (this.statuses.size >= this.statusLimit && this.statuses.size > 0) this.clearStatus(this.statuses.keys().next().value!);
+      const timer = setTimeout(() => this.clearStatus(id), this.statusTtlMs);
+      timer.unref?.();
+      this.statuses.set(id, { frame, timer, expiresAt: Date.now() + this.statusTtlMs });
+    } else {
+      if ('status' in payload) return;
+      if (this.statuses.get(id)?.frame.focusId === payload.focusId) this.clearStatus(id);
+    }
+    this.emitter.emit(id, frame);
   }
+  /** Clear an obsolete expansion failure on retry, success, or generation change. */
+  clearStatus(id: string): void {
+    const previous = this.statuses.get(id);
+    if (previous) clearTimeout(previous.timer);
+    this.statuses.delete(id);
+  }
+
+  get statusCount(): number { return this.statuses.size; }
+
 }
 
 /** Process-wide default registry backing the exported {@link publishToStream}. */
@@ -556,6 +591,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
             await expandQueue.add(CONSTELLATION_QUEUE_NAMES.EXPAND, jobData);
           }
         } catch (error) {
+          streams.publish(streamToken.id, streamToken.generation, { focusId, nodes: [], edges: [], status: 'source-unavailable', detail: 'Collaborator source is unavailable. Please retry.' });
           log.warn('seed expand enqueue failed (returning seed subgraph only)', {
             focusId,
             error: error instanceof Error ? error.message : String(error),
@@ -575,7 +611,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           });
         }
 
-        res.json({ focusId, subgraph, streamToken });
+        res.json({ focusId, subgraph, streamToken, creditSource: settings.constellationIndexEnabled ? 'index' : 'live' });
       } catch (error) {
         log.error('seed failed', { error: error instanceof Error ? error.message : String(error) });
         res.status(500).json({ error: error instanceof Error ? error.message : 'seed failed' });
@@ -599,9 +635,16 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         }
 
         const tokenId = typeof req.query.token === 'string' ? req.query.token : undefined;
-        const generation =
-          parseIntParam(typeof req.query.generation === 'string' ? req.query.generation : undefined) ??
-          undefined;
+        const generation = typeof req.query.generation === 'string' && /^[1-9]\d*$/.test(req.query.generation)
+          ? Number(req.query.generation) : undefined;
+        if (req.query.token !== undefined || req.query.generation !== undefined) {
+          if (!tokenId || !Number.isSafeInteger(generation)) { res.status(400).json({ error: 'invalid stream correlation' }); return; }
+          const owner = streams.ownerOf(tokenId);
+          if (owner === undefined) { res.status(404).json({ error: 'unknown stream token' }); return; }
+          if (owner !== userId) { res.status(403).json({ error: 'stream token belongs to another user' }); return; }
+          if (streams.currentGeneration(tokenId) !== generation) { res.status(409).json({ error: 'stale stream generation' }); return; }
+          streams.clearStatus(tokenId);
+        }
         // Optional server-side role filter (see /seed) — absent (or 0) means all roles.
         const roleMask = parsePositiveRoleMask(req.query.roleMask);
 
@@ -617,6 +660,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
           enqueued = true;
         } catch (error) {
           // Redis down / queue unavailable must not fail the optimistic read.
+          if (tokenId && generation !== undefined) streams.publish(tokenId, generation, { focusId: personId, nodes: [], edges: [], status: 'source-unavailable', detail: 'Collaborator source is unavailable. Please retry.' });
           log.warn('expand enqueue failed (returning cached subgraph only)', {
             personId,
             error: error instanceof Error ? error.message : String(error),
@@ -625,7 +669,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
 
         const settings = await SettingsService.getConstellationSettings();
         const subgraph = await graph.subgraph(personId, { userId, roleMask, topN: Math.min(settings.fanoutN, 49), maxNodes: 50 });
-        res.json({ personId, enqueued, subgraph });
+        res.json({ personId, enqueued, subgraph, creditSource: settings.constellationIndexEnabled ? 'index' : 'live' });
       } catch (error) {
         log.error('expand failed', { error: error instanceof Error ? error.message : String(error) });
         res.status(500).json({ error: error instanceof Error ? error.message : 'expand failed' });

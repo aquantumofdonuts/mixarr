@@ -1,3 +1,4 @@
+import { isApiBudgetExhausted } from './DailyApiBudget.js';
 import prisma from '../../lib/db.js';
 import { createLogger } from '../../lib/logger.js';
 import type { BaseRole } from './RoleTaxonomy.js';
@@ -31,6 +32,8 @@ export interface ExpansionOptions {
   isPersonFull?: (personId: number) => Promise<boolean>;
   /** Reference year for recency decay. Defaults to the current UTC year. */
   nowYear?: number;
+  /** Interactive expansions must report source failures instead of claiming completion. */
+  strict?: boolean;
 }
 
 // Discogs non-person entities that must never become nodes/edges.
@@ -83,7 +86,7 @@ export class ExpansionService {
   private readonly isPersonFull: (personId: number) => Promise<boolean>;
   private readonly nowYear: number;
 
-  constructor(private source: CreditSource, options: ExpansionOptions = {}) {
+  constructor(private source: CreditSource, private options: ExpansionOptions = {}) {
     this.isPersonFull =
       options.isPersonFull ??
       (async (id: number) =>
@@ -106,6 +109,7 @@ export class ExpansionService {
     try {
       releases = await this.source.getArtistReleases(personId);
     } catch (err) {
+      if (isApiBudgetExhausted(err) || this.options.strict) throw err;
       logger.warn(
         `Skipping expansion of person ${personId}: getArtistReleases failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -134,6 +138,7 @@ export class ExpansionService {
       try {
         credits = await this.source.getReleaseCredits(release.releaseId);
       } catch (err) {
+        if (isApiBudgetExhausted(err) || this.options.strict) throw err;
         // A single failing/malformed release must not abort the whole expansion
         // (nor leave P without fullyExpanded=true). Log and skip it.
         logger.warn(

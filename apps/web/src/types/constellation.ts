@@ -59,7 +59,16 @@ export interface PathResult {
 // ---------------------------------------------------------------------------
 
 /** `GET /api/constellation/seed` response. */
+export type CreditSource = 'index' | 'live';
+export interface ExpansionStatus {
+  generation: number;
+  focusId: number;
+  status: 'budget-exhausted' | 'source-unavailable';
+  detail?: string;
+}
+
 export interface SeedResponse {
+  creditSource?: CreditSource;
   focusId: number;
   subgraph: Subgraph;
   streamToken: StreamToken;
@@ -67,6 +76,7 @@ export interface SeedResponse {
 
 /** `GET /api/constellation/expand/:personId` response. */
 export interface ExpandResponse {
+  creditSource?: CreditSource;
   personId: number;
   enqueued: boolean;
   subgraph: Subgraph;

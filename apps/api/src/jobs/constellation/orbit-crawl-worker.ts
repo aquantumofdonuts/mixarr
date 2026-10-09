@@ -464,7 +464,7 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
       // layer per the user's "Setting-ON/OFF" configuration (SQLite dump index or
       // live Discogs adapter). The live path uses the user's (else global) Discogs
       // connection.
-      const creditSource = await resolveConfiguredCreditSource(userId);
+      const creditSource = await resolveConfiguredCreditSource(userId, { budgetShare: 0.8 });
       const expansionService = new ExpansionService(creditSource);
       const identity = new IdentityService();
       const { orbitEdgeBudget } = await SettingsService.getConstellationSettings();

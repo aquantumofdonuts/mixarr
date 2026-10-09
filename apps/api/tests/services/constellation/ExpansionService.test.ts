@@ -264,3 +264,25 @@ describe('ExpansionService.expandPerson', () => {
     expect(pw.create.weight).toBeLessThan(1);
   });
 });
+
+describe('actual source failures remain observable', () => {
+  it.each(['listing', 'credits'])('interactive %s failure rejects without fullyExpanded writes', async phase => {
+    vi.clearAllMocks();
+    const failure = new Error('Discogs unavailable');
+    const source: CreditSource = {
+      getArtistReleases: async () => { if (phase === 'listing') throw failure; return [{ releaseId: 1, masterId: null, year: null, genres: [] }]; },
+      getReleaseCredits: async () => { throw failure; },
+    };
+    await expect(new ExpansionService(source, { strict: true }).expandPerson(42)).rejects.toBe(failure);
+    expect(prisma.constellationPerson.upsert).not.toHaveBeenCalled();
+  });
+  it.each(['listing', 'credits'])('budget exhaustion in %s propagates even during a resilient crawl', async phase => {
+    const { ApiBudgetExhaustedError } = await import('../../../src/services/constellation/DailyApiBudget.js');
+    const failure = new ApiBudgetExhaustedError(80, '2026-10-09');
+    const source: CreditSource = {
+      getArtistReleases: async () => { if (phase === 'listing') throw failure; return [{ releaseId: 1, masterId: null, year: null, genres: [] }]; },
+      getReleaseCredits: async () => { throw failure; },
+    };
+    await expect(new ExpansionService(source).expandPerson(42)).rejects.toBe(failure);
+  });
+});

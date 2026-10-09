@@ -182,7 +182,7 @@ A settled orbit is left alone; it is re-walked once a week (daily 04:00 UTC chec
 
 ### Settings
 
-Admins configure all seven constellation preferences under **Settings → Constellation**, with a separate Save button and today's charged API reservations (`used / limit`, resetting at `00:00 UTC`). Counts include failed and rejected reservations; lowering the limit does not reduce the recorded count. Fan-out takes effect up to 49 neighbors per node within a 50-person graph. Shortest paths use the configured degree bound capped at 10; interesting paths may use up to two extra hops.
+Admins configure all seven constellation preferences under **Settings → Constellation**, with a separate Save button and today's charged API reservations (`used / limit`, resetting at `00:00 UTC`). Admitted requests remain charged if they fail; denied reservations are not charged; lowering the limit does not reduce the recorded count. Fan-out takes effect up to 49 neighbors per node within a 50-person graph. Shortest paths use the configured degree bound capped at 10; interesting paths may use up to two extra hops.
 
 Automatic index refresh is unavailable; saving this preference does not start or stop an import.
 

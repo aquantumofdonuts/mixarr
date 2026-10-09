@@ -15,7 +15,7 @@ type Draft = Omit<Settings, 'orbitEdgeBudget' | 'dailyApiBudget' | 'fanoutN' | '
 };
 const budgets = [
   ['orbitEdgeBudget', 'Orbit edge budget', 'Bounds the edges materialized during each taste-orbit warm.'],
-  ['dailyApiBudget', 'Daily API budget', 'Bounds charged live Discogs request reservations per UTC day, including failed and rejected requests.'],
+  ['dailyApiBudget', 'Daily API budget', 'Bounds charged live Discogs request reservations per UTC day, including admitted requests that fail; denied reservations are not charged.'],
   ['fanoutN', 'Fan-out', 'Bounds neighbors kept per node; exploration uses at most 49 neighbors within a 50-person graph.'],
   ['pathMaxDegrees', 'Path max degrees', 'Shortest paths use this degree bound capped at 10; interesting paths may use up to two extra hops.'],
 ] as const;
