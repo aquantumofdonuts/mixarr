@@ -258,13 +258,16 @@ export function useDismissFeedItem() {
 export function useRestoreDecision(kind: 'feed' | 'review') {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
     mutationFn: async (undoToken: string) => {
       const endpoint = kind === 'feed' ? '/api/feed/restore' : '/api/imports/review/restore';
       const { data, error } = await api.post<{ restoredIds: number[] }>(endpoint, { undoToken });
       if (error) throw new Error(error);
       return data!;
     },
-    onSuccess: () => {
+    onSuccess: (_data, _input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
       queryClient.invalidateQueries({ queryKey: kind === 'feed' ? queryKeys.feed : ['review'] });
       if (kind === 'feed') queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });

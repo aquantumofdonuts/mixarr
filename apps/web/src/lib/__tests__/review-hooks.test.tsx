@@ -6,7 +6,7 @@ const actor = vi.hoisted(() => ({ id: 1 as number | null, role: 'user' }));
 vi.mock('../auth', () => ({ useAuth: () => ({ user: actor.id === null ? null : { id: actor.id, role: actor.role } }) }));
 vi.mock('../api', () => ({ api: { get: vi.fn(), put: vi.fn(), post: vi.fn() } }));
 import { api } from '../api';
-import { queryKeys, ReviewAcquisitionError, useReviewQueue, useUpdateReviewItem, useBulkUpdateReview } from '../hooks';
+import { queryKeys, ReviewAcquisitionError, useReviewQueue, useUpdateReviewItem, useBulkUpdateReview, useRestoreDecision } from '../hooks';
 let client: QueryClient;
 const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 beforeEach(() => {
@@ -79,5 +79,24 @@ it.each(['single', 'bulk'] as const)('reconciles %s error decisions only for the
   await act(async () => { pending = send().catch(error => error); await Promise.resolve(); });
   client.setQueryData(['auth'], { user: { id: 2 } });
   await act(async () => { finish({ data: null, error: 'Decision conflict', status: 409 }); await pending; });
+  expect(invalidate).not.toHaveBeenCalled();
+});
+
+it('never retries signed restoration even when the global mutation policy retries', async () => {
+  vi.mocked(api.post).mockResolvedValue({ data: null, error: 'Restoration failed', status: 503 });
+  const { result } = renderHook(() => useRestoreDecision('review'), { wrapper });
+  await act(async () => { await expect(result.current.mutateAsync('signed-token')).rejects.toThrow('Restoration failed'); });
+  expect(api.post).toHaveBeenCalledTimes(1);
+});
+it('does not invalidate another actor when a signed restoration completes late', async () => {
+  client.setQueryData(['auth'], { user: { id: 1 } });
+  const invalidate = vi.spyOn(client, 'invalidateQueries');
+  let finish!: (value: { data: { restoredIds: number[] }; error: null; status: number }) => void;
+  vi.mocked(api.post).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const { result } = renderHook(() => useRestoreDecision('review'), { wrapper });
+  let pending!: Promise<unknown>;
+  await act(async () => { pending = result.current.mutateAsync('signed-token'); await Promise.resolve(); });
+  client.setQueryData(['auth'], { user: { id: 2 } });
+  await act(async () => { finish({ data: { restoredIds: [7] }, error: null, status: 200 }); await pending; });
   expect(invalidate).not.toHaveBeenCalled();
 });
