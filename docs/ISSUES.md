@@ -34,7 +34,7 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ## UI/UX catalog redesign (in progress)
 
-**Status:** T01–T15 implemented and independently reviewed on local branch `feat/music-catalog-ux`. Dashboard summaries now state owner/record scope; subscription rows have separate run/schedule/overflow actions; result and run URLs, explicit artist identity selection, and acquisition reconciliation are wired. T16 search interactions is next. The complete redesign, remaining page adoption, completion audit, and final full review remain pending. See the execution checkpoint for fresh verification and its limits.
+**Status:** T01–T18 implemented and independently reviewed on local branch `feat/music-catalog-ux`. Search preserves committed URLs, results and stable selections; action-time effective add options and explicit canonical identity choices reach acquisition paths; label traversal reports release/loaded-artist scope, retains same-offset Retry, and supports native disclosure keyboard traversal. T19 similar-artist discovery is next. The complete redesign, remaining page adoption, completion audit, and final full review remain pending. See the execution checkpoint for fresh verification and its limits.
 **Scope:** All 25 UI/UX review recommendations and a distinctive music-catalog identity; compact artwork-thumbnail feed confirmed by the user.
 
 - [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
