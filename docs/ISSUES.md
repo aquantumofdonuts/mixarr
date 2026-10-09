@@ -12,13 +12,13 @@
 
 ## 🔴 OPEN SECURITY FINDINGS (from the 2026-07-04 adversarial review)
 
-Six merge-blocking items from [plans/2026-07-04-adversarial-code-review.md](plans/2026-07-04-adversarial-code-review.md) are still open as of 2026-10-07 (verified in code; no commit has touched the affected files since):
+The 2026-10-07 snapshot identified six merge-blocking items from [plans/2026-07-04-adversarial-code-review.md](plans/2026-07-04-adversarial-code-review.md). Item 5 is now repaired and verified on the local `feat/music-catalog-ux` branch; it has not been integrated or released. The other findings remain open:
 
 1. SAML accepts unsigned assertions and an empty IdP certificate — `apps/api/src/auth/strategies/saml.ts`
 2. Plex `restrictToServerId` is declared but never enforced — `apps/api/src/auth/strategies/plex.ts`
 3. No session regeneration on login (session fixation) — `apps/api/src/auth/passport.ts` and every `logIn` path
 4. Connection config is an open record (`z.record(z.unknown())`), bypassing per-type schemas; SSRF surface on test endpoints — `apps/api/src/schemas/connection.ts`, `apps/api/src/routes/connections.ts`
-5. Result reject is not scoped to the subscription (IDOR) — `apps/api/src/routes/subscriptions.ts` (approve is scoped correctly; mirror it)
+5. **Resolved locally:** Result rejection reads by result ID, subscription ID, and owner, then conditionally writes with that ownership scope and the expected status/revision — `apps/api/src/routes/subscriptions.ts`. T07 implemented the fix; T15 reverified foreign owners (including admins), foreign result bindings, active claims, and competing decisions in `tests/api/subscription-decisions.test.ts`. Approval uses the same ownership boundary.
 6. slskd routes have no user scoping and the webhook sits behind session auth — `apps/api/src/routes/slskd.ts`
 
 Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from that review have shipped.
@@ -34,7 +34,7 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ## UI/UX catalog redesign (in progress)
 
-**Status:** T01–T12 implemented and verified on local branch `feat/music-catalog-ux`; authenticated detail, shared inspector, and compact feed with signed Undo are wired. T13 dashboard summaries/count audit is next. The complete redesign, page adoption of the new foundations, completion audit, and final full review remain pending.
+**Status:** T01–T15 implemented and independently reviewed on local branch `feat/music-catalog-ux`. Dashboard summaries now state owner/record scope; subscription rows have separate run/schedule/overflow actions; result and run URLs, explicit artist identity selection, and acquisition reconciliation are wired. T16 search interactions is next. The complete redesign, remaining page adoption, completion audit, and final full review remain pending. See the execution checkpoint for fresh verification and its limits.
 **Scope:** All 25 UI/UX review recommendations and a distinctive music-catalog identity; compact artwork-thumbnail feed confirmed by the user.
 
 - [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
@@ -57,12 +57,12 @@ Artists can be added to Lidarr through multiple paths, each tracking the additio
 - **Subscriptions/Feed** → `SubscriptionResult` with `status: 'added'`
 - **Review Queue** → `ReviewItem` with `status: 'approved'`
 
-The dashboard stats counter currently sums both tables to get an accurate count, but this is fragile. If a new add path is introduced, the counter must be updated to include it.
+The local catalog implementation no longer sums these decision records as confirmed distinct additions. Its owner-scoped dashboard explicitly counts subscription result records marked added in the last 30 days; repeated artist identities and legacy evidence remain possible. A cross-path ledger of confirmed distinct acquisitions is still a separate backlog item.
 
 **Proposed fix:** Create a unified `artist_additions` audit table (or similar) that all add paths write to, so dashboard stats only need one query. This also enables better analytics (e.g., "added via subscription" vs "added via review queue").
 
 **Files involved:**
-- `apps/api/src/routes/dashboard.ts` — current dual-query workaround
+- `apps/api/src/routes/dashboard.ts` — explicit owner-scoped record counts
 - `apps/api/src/routes/imports.ts` — review queue approval (lines ~305-390)
 - `apps/api/src/services/FeedService.ts` — feed approval
 - `apps/api/src/jobs/subscription-worker.ts` — auto-add
