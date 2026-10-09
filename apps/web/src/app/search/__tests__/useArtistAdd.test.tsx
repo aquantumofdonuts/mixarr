@@ -238,8 +238,8 @@ describe('useArtistAdd', () => {
       vi.mocked(api.post).mockResolvedValueOnce({
         data: {
           candidates: [
-            { id: 'mbid-a', name: 'New Artist', disambiguation: 'UK band' },
-            { id: 'mbid-b', name: 'New Artist', disambiguation: 'US rapper' },
+            { id: '11111111-1111-4111-8111-111111111111', name: 'New Artist', disambiguation: 'UK band' },
+            { id: '22222222-2222-4222-8222-222222222222', name: 'New Artist', disambiguation: 'US rapper' },
           ],
         },
         error: null,
@@ -278,7 +278,7 @@ describe('useArtistAdd', () => {
       vi.mocked(api.post).mockResolvedValueOnce({
         data: {
           candidates: [
-            { id: 'mbid-a', name: 'Ambiguous', disambiguation: 'option A' },
+            { id: '11111111-1111-4111-8111-111111111111', name: 'Ambiguous', disambiguation: 'option A' },
           ],
         },
         error: null,
@@ -298,18 +298,18 @@ describe('useArtistAdd', () => {
 
       // Step 2: select MBID
       vi.mocked(api.post).mockResolvedValueOnce({
-        data: { success: true, artist: { foreignArtistId: 'mbid-a' } },
+        data: { success: true, artist: { foreignArtistId: '11111111-1111-4111-8111-111111111111' } },
         error: null,
         status: 200,
       });
 
       await act(async () => {
-        await result.current.handleAddWithMbid('mbid-a');
+        await result.current.handleAddWithMbid('11111111-1111-4111-8111-111111111111');
       });
 
       expect(api.post).toHaveBeenLastCalledWith('/api/search/discover/add', {
         artistName: 'Ambiguous',
-        mbid: 'mbid-a',
+        mbid: '11111111-1111-4111-8111-111111111111',
       });
 
       expect(mockAddToast).toHaveBeenCalledWith(
@@ -323,7 +323,7 @@ describe('useArtistAdd', () => {
     it('shows error toast when MBID add fails', async () => {
       // Step 1: trigger disambiguation
       vi.mocked(api.post).mockResolvedValueOnce({
-        data: { candidates: [{ id: 'mbid-x', name: 'X' }] },
+        data: { candidates: [{ id: '33333333-3333-4333-8333-333333333333', name: 'X' }] },
         error: null,
         status: 200,
       });
@@ -342,7 +342,7 @@ describe('useArtistAdd', () => {
       });
 
       await act(async () => {
-        await result.current.handleAddWithMbid('mbid-x');
+        await result.current.handleAddWithMbid('33333333-3333-4333-8333-333333333333');
       });
 
       expect(mockAddToast).toHaveBeenCalledWith(
@@ -477,7 +477,7 @@ describe('useArtistAdd', () => {
       // Trigger disambiguation to populate modal state
       vi.mocked(api.post).mockResolvedValueOnce({
         data: {
-          candidates: [{ id: 'mbid-1', name: 'Artist' }],
+          candidates: [{ id: '11111111-1111-4111-8111-111111111111', name: 'Artist' }],
         },
         error: null,
         status: 200,

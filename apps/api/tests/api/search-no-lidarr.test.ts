@@ -139,7 +139,9 @@ vi.mock('../../src/routes/logs.js', () => ({
 
 // Import after mocks are set up
 import { searchRouter } from '../../src/routes/search.js';
-import { multiSourceSearch } from '../../src/services/multi-search.js';
+import prisma from '../../src/lib/db.js';
+import { LidarrService } from '../../src/services/lidarr.js';
+import { multiSourceSearch, resolveMbid } from '../../src/services/multi-search.js';
 
 const app = express();
 app.use(express.json());
@@ -241,6 +243,27 @@ describe('Search API - No Lidarr Mode', () => {
     expect(response.status).toBe(200);
     expect(response.body.results).toHaveLength(1);
     expect(response.body.errors).toEqual(['Spotify search unavailable. Check the connection and retry.']);
+  });
+
+  it('returns structured identity-required candidates before any provider acquisition', async () => {
+    const candidates = [{ id: '11111111-1111-4111-8111-111111111111', name: 'Same name', disambiguation: 'Original band' }, { id: '22222222-2222-4222-8222-222222222222', name: 'Same name', disambiguation: 'Other artist' }];
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never).mockResolvedValueOnce(connection as never);
+    vi.mocked(resolveMbid).mockResolvedValueOnce({ mbid: null, candidates });
+    const providerAdd = vi.fn().mockResolvedValue({ artist: { foreignArtistId: candidates[1].id, artistName: 'Same name' } });
+    const createProvider = function () { return { addArtistWithCacheWarm: providerAdd } as unknown as LidarrService; };
+    vi.mocked(LidarrService).mockImplementationOnce(createProvider).mockImplementationOnce(createProvider);
+    const response = await request(app).post('/api/search/discover/add').send({ artistName: 'Same name' });
+    expect(response.status).toBe(422);
+    expect(response.body).toMatchObject({ code: 'IDENTITY_REQUIRED', details: { candidates, artistName: 'Same name' }, candidates, artistName: 'Same name' });
+    expect(providerAdd).not.toHaveBeenCalled();
+    const selected = await request(app).post('/api/search/discover/add').send({ artistName: 'Same name', mbid: candidates[1].id });
+    expect(selected.body.error).toBeUndefined();
+    expect(selected.status).toBe(200);
+    expect(selected.body.success).toBe(true);
+    expect(providerAdd).toHaveBeenCalledTimes(1);
+    expect(providerAdd.mock.calls[0][0]).toBe(candidates[1].id);
+    expect(resolveMbid).toHaveBeenCalledTimes(1);
   });
 
   describe('POST /api/search/artists/add', () => {

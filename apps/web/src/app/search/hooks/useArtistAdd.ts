@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { api } from '@/lib/api';
+import { canonicalArtistMbid } from '@/components/artists/ArtistLink';
 import { useToast } from '@/components/ui/toast';
 import { artistResultKey, type ArtistResult, type MbidCandidate } from './useSearch';
 
@@ -42,13 +43,16 @@ export function useArtistAdd(setResults: (updater: (prev: any[]) => any[]) => vo
     markPending(key, true); updateArtist(key, { acquisitionError: undefined });
     try {
       const discovery = !artist.foreignArtistId;
-      const { data, error } = await api.post<{ success?: boolean; artist?: { foreignArtistId?: string }; candidates?: MbidCandidate[] }>(
+      const { data, error, code, details } = await api.post<{ success?: boolean; artist?: { foreignArtistId?: string }; candidates?: MbidCandidate[] }>(
         discovery ? '/api/search/discover/add' : '/api/search/artists/add',
         discovery ? { artistName: artist.artistName, ...(mbid ? { mbid } : {}) } : { foreignArtistId: artist.foreignArtistId },
       );
       if (!current(owner)) return;
-      if (error) reportError(key, error);
-      else if (data?.candidates?.length && !mbid) { setMbidCandidates(data.candidates); setSelectingArtist(artist); }
+      const rawCandidates = code === 'IDENTITY_REQUIRED' && details && typeof details === 'object' && 'candidates' in details ? details.candidates : data?.candidates;
+      const candidates: MbidCandidate[] = Array.isArray(rawCandidates) ? rawCandidates.filter(candidate => candidate && typeof candidate === 'object' && typeof candidate.name === 'string' && typeof candidate.id === 'string' && canonicalArtistMbid(candidate.id)
+        && (candidate.country === undefined || typeof candidate.country === 'string') && (candidate.disambiguation === undefined || typeof candidate.disambiguation === 'string')) : [];
+      if (!mbid && candidates.length) { setMbidCandidates(candidates); setSelectingArtist(artist); }
+      else if (error) reportError(key, error);
       else if (data?.success === true) {
         updateArtist(key, { inLibrary: true, foreignArtistId: mbid || data.artist?.foreignArtistId || artist.foreignArtistId, acquisitionError: undefined });
         addToast({ type: 'success', title: 'Artist added', message: `${artist.artistName} added to Lidarr` });
@@ -59,10 +63,11 @@ export function useArtistAdd(setResults: (updater: (prev: any[]) => any[]) => vo
   }, [markPending, updateArtist, current, reportError, addToast]);
   const handleAddArtist = useCallback(async (artist: ArtistResult) => { await add(artist); }, [add]);
   const handleAddWithMbid = useCallback(async (mbid: string) => {
-    if (!selectingArtist) return;
+    const identity = canonicalArtistMbid(mbid);
+    if (!selectingArtist || !identity || !mbidCandidates?.some(candidate => canonicalArtistMbid(candidate.id) === identity)) return;
     const artist = selectingArtist; setMbidCandidates(null); setSelectingArtist(null);
-    await add(artist, mbid);
-  }, [selectingArtist, add]);
+    await add(artist, identity);
+  }, [selectingArtist, mbidCandidates, add]);
 
   const handleBatchAdd = useCallback(async (ids: Set<string>) => {
     if (!ids.size || isBulkAdding || [...ids].some(id => pending.current.has(id))) return null;

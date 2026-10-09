@@ -368,6 +368,8 @@ searchRouter.post('/discover/add', async (req, res) => {
         // Return candidates for manual selection
         res.status(422).json({
           error: 'Could not automatically match artist in MusicBrainz',
+          code: 'IDENTITY_REQUIRED',
+          details: { candidates: resolution.candidates || [], artistName },
           candidates: resolution.candidates,
           artistName,
         });
