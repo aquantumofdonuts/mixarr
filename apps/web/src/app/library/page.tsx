@@ -6,6 +6,7 @@ import { ArtistLink } from '@/components/artists/ArtistLink';
 import { useListContext } from '@/hooks/useListContext';
 import { readPage, retainSelection, updateQuery } from '@/lib/list-state';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmDialog, Tabs, Tab, TabPanel, Skeleton } from '@/components/ui';
 import { Input } from '@/components/ui/input';
@@ -596,7 +597,9 @@ export default function LibraryPage() {
                 <thead>
                   <tr className="border-b bg-muted font-mono text-xs uppercase text-muted-foreground">
                     <th scope="col" className="px-2 py-3 w-11">
-                      <input type="checkbox" aria-label="Select shown library artists" className="h-5 w-5" checked={visibleArtists.length > 0 && visibleArtists.every(artist => context.selected.has(String(artist.id)))} onChange={event => setSelected(event.target.checked ? new Set(visibleArtists.map(artist => String(artist.id))) : new Set())} />
+                      <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                        <Checkbox aria-label="Select shown library artists" checked={visibleArtists.length > 0 && visibleArtists.every(artist => context.selected.has(String(artist.id)))} indeterminate={visibleArtists.some(artist => context.selected.has(String(artist.id))) && !visibleArtists.every(artist => context.selected.has(String(artist.id)))} onCheckedChange={checked => setSelected(checked ? new Set(visibleArtists.map(artist => String(artist.id))) : new Set())} />
+                      </label>
                     </th>
                     <th scope="col" aria-sort={sortField === 'name' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="text-left px-2">
                       <button type="button" className="min-h-11 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort('name')}>Artist <SortIcon field="name" /></button>
@@ -614,7 +617,7 @@ export default function LibraryPage() {
                 <tbody>
                   {visibleArtists.map((artist) => (
                     <tr key={artist.id} className="border-b hover:bg-muted/50">
-                      <td className="py-3 px-2"><input type="checkbox" aria-label={`Select library artist ${artist.id}`} className="h-5 w-5" checked={context.selected.has(String(artist.id))} onChange={event => setSelected(previous => { const next = new Set(previous); if (event.target.checked) next.add(String(artist.id)); else next.delete(String(artist.id)); return next; })} /></td>
+                      <td className="py-1 px-2"><label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center"><Checkbox aria-label={`Select library artist ${artist.id}`} checked={context.selected.has(String(artist.id))} onCheckedChange={checked => setSelected(previous => { const next = new Set(previous); if (checked) next.add(String(artist.id)); else next.delete(String(artist.id)); return next; })} /></label></td>
                       <td className="py-3 px-2">
                         <ArtistLink mbid={artist.foreignArtistId} onOpen={context.remember} className="font-medium">{artist.name}</ArtistLink>
                         <div className="text-xs font-mono text-muted-foreground">

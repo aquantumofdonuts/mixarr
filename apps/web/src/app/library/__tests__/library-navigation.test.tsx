@@ -39,11 +39,13 @@ it('sorts with native keyboard buttons, announces aria-sort, and preserves unrel
   const table = screen.getByRole('table'); expect(within(table).getAllByRole('row').slice(1).map(row => within(row).getAllByRole('cell')[1].textContent)).toEqual(['Alpha5 / 10 tracks', 'Zulu5 / 10 tracks', 'Unknown5 / 10 tracks']);
   expect(healthCalls()).toHaveLength(1);
 });
-it('restores URL search, filter, sort, tab and incremental row window without fetching more pages', async () => {
-  rows = Array.from({ length: 520 }, (_, index) => artist(index + 1, `Artist ${index + 1}`)); navigation.query = 'q=Artist&filter=complete&sort=name&dir=asc&page=2'; const view = mount();
-  await screen.findByText('500 of 520 matching artists shown · 0 selected'); expect(view.container.querySelectorAll('table input[type=checkbox]')).toHaveLength(501);
+it('restores URL filters and sorting, preserving selection across the 250-row boundary without extra fetches', async () => {
+  rows = Array.from({ length: 251 }, (_, index) => artist(index + 1, `Artist ${index + 1}`)); navigation.query = 'q=Artist&filter=complete&sort=name&dir=asc'; const view = mount();
+  await screen.findByText('250 of 251 matching artists shown · 0 selected'); expect(view.container.querySelectorAll('table input[type=checkbox]')).toHaveLength(251);
+  expect(screen.getByRole('textbox', { name: 'Search library snapshot' })).toHaveValue('Artist'); expect(screen.getByRole('combobox', { name: 'Filter library snapshot' })).toHaveValue('complete'); expect(within(view.container.querySelector('thead')!).getByRole('columnheader', { name: 'Artist' })).toHaveAttribute('aria-sort', 'ascending');
   const first = view.container.querySelector<HTMLInputElement>('input[aria-label="Select library artist 1"]')!; fireEvent.click(first);
-  fireEvent.click(screen.getByRole('button', { name: 'Show more (20 remaining)' })); await screen.findByText('520 of 520 matching artists shown · 1 selected'); expect(first).toBeChecked(); expect(new URLSearchParams(navigation.query).get('page')).toBe('3'); expect(healthCalls()).toHaveLength(1);
+  const showMore = Array.from(view.container.querySelectorAll('button')).find(button => button.textContent?.startsWith('Show more'))!; fireEvent.click(showMore);
+  await screen.findByText('251 of 251 matching artists shown · 1 selected'); expect(view.container.querySelectorAll('table input[type=checkbox]')).toHaveLength(252); expect(first).toBeChecked(); expect(new URLSearchParams(navigation.query).get('page')).toBe('2'); expect(healthCalls()).toHaveLength(1);
 });
 it('restores native selection, main scroll and artist link focus after inspector closure or Back', async () => {
   navigation.query = 'q=Alpha&sort=name&dir=asc&keep=value'; mount(); const link = await screen.findByRole('link', { name: 'Alpha' });
@@ -79,4 +81,9 @@ it('restores the saved selection when Back returns from a filter that removed it
 it('restores the duplicates tab from URL and retains health filters while changing tabs', async () => {
   navigation.query = 'tab=duplicates&q=Alpha&filter=complete&sort=name&dir=asc&page=2'; mount(); expect(screen.getByText('Duplicate tools')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('tab', { name: 'Health Issues' })); await screen.findByRole('link', { name: 'Alpha' }); expect(new URLSearchParams(navigation.query).get('q')).toBe('Alpha'); expect(new URLSearchParams(navigation.query).get('page')).toBe('2'); expect(new URLSearchParams(navigation.query).get('sort')).toBe('name');
+});
+it('activates native checkbox labels and exposes mixed selection before selecting every shown row', async () => {
+  mount(); const first = await screen.findByRole('checkbox', { name: 'Select library artist 1' }); fireEvent.click(first.closest('label')!); expect(first).toBeChecked();
+  const all = screen.getByRole('checkbox', { name: 'Select shown library artists' }) as HTMLInputElement; expect(all.indeterminate).toBe(true); expect(all).not.toBeChecked();
+  fireEvent.click(all.closest('label')!); expect(all).toBeChecked(); expect(all.indeterminate).toBe(false); expect(screen.getByRole('checkbox', { name: 'Select library artist 3' })).toBeChecked();
 });

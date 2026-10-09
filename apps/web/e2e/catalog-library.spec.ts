@@ -62,3 +62,16 @@ test('library narrow table provides labeled horizontal scrolling without page ov
   await region.focus(); await page.keyboard.press('ArrowRight');
   if (process.env.CATALOG_EVIDENCE_DIR) { await mkdir(process.env.CATALOG_EVIDENCE_DIR, { recursive: true }); await page.screenshot({ path: `${process.env.CATALOG_EVIDENCE_DIR}/library-mobile.png` }); }
 });
+
+test('library native checkbox labels activate across a 44px target and expose partial selection', async ({ catalogPage: page }) => {
+  await page.setViewportSize({ width: 320, height: 844 }); await page.goto('/library?q=Library+Artist+00');
+  const checkbox = page.getByRole('checkbox', { name: 'Select library artist 2', exact: true }); await checkbox.scrollIntoViewIfNeeded();
+  const box = (await checkbox.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height + 6); await expect(checkbox).toBeChecked();
+  const labels = await checkbox.evaluate(input => Array.from((input as HTMLInputElement).labels || []).map(label => ({ width: label.getBoundingClientRect().width, height: label.getBoundingClientRect().height })));
+  expect(labels.some(label => label.width >= 44 && label.height >= 44)).toBe(true);
+  const all = page.getByRole('checkbox', { name: 'Select shown library artists' }); expect(await all.evaluate(input => (input as HTMLInputElement).indeterminate)).toBe(true);
+  await all.scrollIntoViewIfNeeded(); const allBox = (await all.boundingBox())!; await page.mouse.click(allBox.x + allBox.width / 2, allBox.y + allBox.height + 6);
+  await expect(all).toBeChecked(); expect(await all.evaluate(input => (input as HTMLInputElement).indeterminate)).toBe(false);
+  await expect(page.getByRole('checkbox', { name: 'Select library artist 9', exact: true })).toBeChecked();
+});
