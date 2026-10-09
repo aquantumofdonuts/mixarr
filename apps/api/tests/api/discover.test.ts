@@ -632,3 +632,37 @@ describe('Discover API', () => {
     });
   });
 });
+
+
+describe('actual similar route provider availability', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+  it('reports failed seeds without disclosing provider errors and preserves partial recommendations/counts', async () => {
+    const { getLastfmService, getLidarrService } = await import('../../src/lib/connection-resolver.js');
+    const { LidarrCache } = await import('../../src/services/lidarr.js');
+    const { fetchDeezerArtistImage } = await import('../../src/services/deezer.js');
+    const similar = vi.fn().mockRejectedValueOnce(new Error('secret provider credential')).mockResolvedValueOnce([{ name: 'New Artist', mbid: '11111111-1111-4111-8111-111111111111', match: 0.8 }]);
+    vi.mocked(getLastfmService).mockResolvedValue({ getSimilarArtists: similar } as any);
+    vi.mocked(getLidarrService).mockResolvedValue({} as any);
+    vi.mocked(LidarrCache).mockImplementation(function () { return { refresh: vi.fn().mockResolvedValue(undefined), exists: vi.fn().mockResolvedValue(false) } as any; });
+    vi.mocked(fetchDeezerArtistImage).mockResolvedValue(null);
+    const response = await request(app).post('/api/discover/similar').send({ artistNames: ['Unavailable seed', 'Available seed'], limit: 100 });
+    expect(response.status).toBe(200);
+    expect(response.body.failedSeedArtists).toEqual(['Unavailable seed']);
+    expect(response.body.recommendations).toMatchObject([{ name: 'New Artist', matchCount: 1, matchedFrom: ['Available seed'] }]);
+    expect(JSON.stringify(response.body)).not.toContain('secret provider credential');
+    expect(similar.mock.calls).toEqual([['Unavailable seed', 100], ['Available seed', 100]]);
+  });
+  it('distinguishes every seed failing from successful empty matches', async () => {
+    const { getLastfmService, getLidarrService } = await import('../../src/lib/connection-resolver.js');
+    const { LidarrCache } = await import('../../src/services/lidarr.js');
+    const similar = vi.fn().mockRejectedValue(new Error('Unavailable'));
+    vi.mocked(getLastfmService).mockResolvedValue({ getSimilarArtists: similar } as any);
+    vi.mocked(getLidarrService).mockResolvedValue({} as any);
+    vi.mocked(LidarrCache).mockImplementation(function () { return { refresh: vi.fn().mockResolvedValue(undefined), exists: vi.fn().mockResolvedValue(false) } as any; });
+    const failed = await request(app).post('/api/discover/similar').send({ artistNames: ['Seed'] });
+    expect(failed.status).toBe(200); expect(failed.body.failedSeedArtists).toEqual(['Seed']); expect(failed.body.total).toBe(0);
+    similar.mockResolvedValue([]);
+    const empty = await request(app).post('/api/discover/similar').send({ artistNames: ['Seed'] });
+    expect(empty.status).toBe(200); expect(empty.body.failedSeedArtists).toEqual([]); expect(empty.body.total).toBe(0);
+  });
+});

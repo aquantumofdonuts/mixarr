@@ -155,6 +155,7 @@ discoverRouter.post('/similar', validateBody(discoverSimilarSchema), async (req,
 
     // Use all seed artists for better results
     const seedArtists = artistNames;
+    const failedSeedArtists: string[] = [];
 
     for (const artistName of seedArtists) {
       try {
@@ -182,7 +183,8 @@ discoverRouter.post('/similar', validateBody(discoverSimilarSchema), async (req,
           }
         }
       } catch {
-        // Skip artists that fail
+        // Report source availability without returning provider error text.
+        failedSeedArtists.push(artistName);
       }
     }
 
@@ -229,6 +231,7 @@ discoverRouter.post('/similar', validateBody(discoverSimilarSchema), async (req,
     res.json({
       recommendations: recsWithImages,
       seedArtists,
+      failedSeedArtists,
       total: recsWithImages.length,
     });
   } catch (error) {
