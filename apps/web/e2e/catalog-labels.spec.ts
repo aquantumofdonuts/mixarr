@@ -77,3 +77,46 @@ test('mobile label filters collapse independently and keep bulk actions outside 
   await mkdir(`${evidence}/labels`, { recursive: true });
   await page.screenshot({ path: `${evidence}/labels/mobile.png`, animations: 'disabled' });
 });
+
+test('label keyboard traversal reaches fields and footer with open and collapsed filters', async ({ catalogPage: page }) => {
+  await page.route('**/api/search/label/*/artists?**', route => route.fulfill({ json: {
+    artists: [artist(ARTIST_IDS[0], 'Alpha artist')], releasesProcessed: 50,
+    totalReleases: 100, nextReleaseOffset: 50,
+  } }));
+  const dialog = await openLabel(page);
+  const checkbox = dialog.getByRole('checkbox', { name: 'Select Alpha artist' });
+  await checkbox.check();
+  const close = dialog.getByRole('button', { name: 'Close', exact: true });
+  const searchSummary = dialog.locator('summary').filter({ hasText: /^Search$/ });
+  const sortSummary = dialog.locator('summary').filter({ hasText: /^Sort$/ });
+  const field = dialog.getByRole('textbox', { name: 'Search loaded artists' });
+  const sort = dialog.getByRole('combobox', { name: 'Sort loaded artists' });
+  const add = dialog.getByRole('button', { name: 'Add 1 selected artists' });
+  const visibleControls = [searchSummary, field, sortSummary, sort, checkbox,
+    dialog.getByRole('link', { name: 'Open on Last.fm' }), dialog.getByRole('link', { name: 'Open on MusicBrainz' }),
+    dialog.getByRole('button', { name: 'Select all loaded artists' }),
+    dialog.getByRole('button', { name: 'Clear selection' }), dialog.getByRole('button', { name: 'Load more' }), add, close];
+  await close.focus();
+  for (const control of visibleControls) {
+    await page.keyboard.press('Tab');
+    await expect(control).toBeFocused();
+  }
+  await page.keyboard.press('Shift+Tab');
+  await expect(add).toBeFocused();
+  await searchSummary.focus();
+  await page.keyboard.press('Enter');
+  await sortSummary.focus();
+  await page.keyboard.press('Enter');
+  await expect(field).toBeHidden();
+  await expect(sort).toBeHidden();
+  await close.focus();
+  for (const control of [searchSummary, sortSummary, ...visibleControls.slice(4)]) {
+    await page.keyboard.press('Tab');
+    await expect(control).toBeFocused();
+  }
+  await page.keyboard.press('Shift+Tab');
+  await expect(add).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'View Artists', exact: true })).toBeFocused();
+});
