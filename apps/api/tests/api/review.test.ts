@@ -95,6 +95,22 @@ describe('review acquisitions through the actual Express router', () => {
     expect(response.body.outcomes[0]).toMatchObject({ id: 1, state: 'uncertain' });
     expect(rows[0].status).toBe('pending'); expect(updates).toHaveLength(0);
   });
+  it.each(['single', 'bulk'])('keeps %s album HTTP 400 acquisition outcomes uncertain after a possible provider effect', async kind => {
+    rows[0].itemType = 'album'; rows[0].albumMbid = mbid;
+    if (kind === 'single') rows[0].mbid = null as never;
+    mocks.addAlbum.mockRejectedValue(Object.assign(new Error('Search command rejected after monitoring changed'), { status: 400 }));
+    const response = kind === 'single'
+      ? await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid })
+      : await bulk([1], 'approved');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ success: false, added: 0, failed: 1, failedIds: [1] });
+    expect(response.body.outcomes[0]).toMatchObject({ id: 1, state: 'uncertain' });
+    expect(response.body.outcomes[0].message).toContain('Check the library');
+    expect(response.body.outcomes[0].message).not.toContain('did not accept');
+    expect(rows[0]).toMatchObject({ status: 'pending', mbid });
+    expect(mocks.addAlbum).toHaveBeenCalledTimes(1); expect(mocks.addArtist).not.toHaveBeenCalled();
+    expect(updates.every(update => update.data.status !== 'approved')).toBe(true);
+  });
   it('requires a single explicit artist choice and rejects a conflicting identity', async () => {
     rows[0].mbid = null as never;
     let response = await request(app).put('/api/imports/review/1').send({ status: 'approved' });

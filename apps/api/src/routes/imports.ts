@@ -292,13 +292,13 @@ function reviewSummary(outcomes: ReviewOutcome[]) {
     alreadyInLibrary: outcomes.filter(o => o.state === 'already-in-library').length,
     failed: failedIds.length, addedIds, failedIds, success: failedIds.length === 0 };
 }
-function reviewFailure(id: number, error: unknown): ReviewOutcome {
+function reviewFailure(id: number, error: unknown, possibleEffect = false): ReviewOutcome {
   if (error instanceof DecisionError && error.code === 'IDENTITY_REQUIRED') {
     return { id, state: 'identity-required', message: error.message };
   }
   const status = (error as { status?: unknown } | null)?.status;
-  const definite = error instanceof DecisionError ? error.code !== 'DECISION_CONFLICT' :
-    typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
+  const definite = !possibleEffect && (error instanceof DecisionError ? error.code !== 'DECISION_CONFLICT' :
+    typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429);
   return { id, state: definite ? 'failed' : 'uncertain', message: definite
     ? 'Lidarr did not accept this review item. It remains available for retry.'
     : 'Lidarr confirmation is unavailable. Check the library before retrying this review item.' };
@@ -320,8 +320,14 @@ async function approveReview(item: ReviewItem, lidarr: LidarrService, cache: Lid
   }
   let alreadyInLibrary = false;
   if (item.itemType === 'album') {
-    await lidarr.addAlbumWithCacheWarm(mbid, item.albumMbid!, options.qualityProfileId,
-      options.metadataProfileId, options.rootFolderPath, undefined, options.searchOnAdd);
+    try {
+      await lidarr.addAlbumWithCacheWarm(mbid, item.albumMbid!, options.qualityProfileId,
+        options.metadataProfileId, options.rootFolderPath, undefined, options.searchOnAdd);
+    } catch (error) {
+      // Album monitoring can succeed before its subsequent search command rejects.
+      log.warn('Album acquisition was not confirmed', { reviewId: item.id });
+      return reviewFailure(item.id, error, true);
+    }
   } else {
     const result = await lidarr.addArtistWithCacheWarm(mbid, options.qualityProfileId, options.metadataProfileId,
       options.rootFolderPath, true, options.searchOnAdd, false, options.monitorOption, options.monitorNewItems);
