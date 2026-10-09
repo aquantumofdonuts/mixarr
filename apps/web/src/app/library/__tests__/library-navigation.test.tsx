@@ -41,11 +41,13 @@ it('sorts with native keyboard buttons, announces aria-sort, and preserves unrel
 });
 it('restores URL filters and sorting, preserving selection across the 250-row boundary without extra fetches', async () => {
   rows = Array.from({ length: 251 }, (_, index) => artist(index + 1, `Artist ${index + 1}`)); navigation.query = 'q=Artist&filter=complete&sort=name&dir=asc'; const view = mount();
-  await screen.findByText('250 of 251 matching artists shown · 0 selected'); expect(view.container.querySelectorAll('table input[type=checkbox]')).toHaveLength(251);
-  expect(screen.getByRole('textbox', { name: 'Search library snapshot' })).toHaveValue('Artist'); expect(screen.getByRole('combobox', { name: 'Filter library snapshot' })).toHaveValue('complete'); expect(within(view.container.querySelector('thead')!).getByRole('columnheader', { name: 'Artist' })).toHaveAttribute('aria-sort', 'ascending');
+  const controls = within(view.container.querySelector('details')!.parentElement!);
+  const count = view.container.querySelector('p.font-mono')!;
+  await waitFor(() => expect(count).toHaveTextContent('250 of 251 matching artists shown · 0 selected')); expect(view.container.querySelectorAll('table input[type=checkbox]')).toHaveLength(251);
+  expect(controls.getByRole('textbox', { name: 'Search library snapshot' })).toHaveValue('Artist'); expect(controls.getByRole('combobox', { name: 'Filter library snapshot' })).toHaveValue('complete'); expect(within(view.container.querySelector('thead')!).getByRole('columnheader', { name: 'Artist' })).toHaveAttribute('aria-sort', 'ascending');
   const first = view.container.querySelector<HTMLInputElement>('input[aria-label="Select library artist 1"]')!; fireEvent.click(first);
   const showMore = Array.from(view.container.querySelectorAll('button')).find(button => button.textContent?.startsWith('Show more'))!; fireEvent.click(showMore);
-  await screen.findByText('251 of 251 matching artists shown · 1 selected'); expect(view.container.querySelectorAll('table input[type=checkbox]')).toHaveLength(252); expect(first).toBeChecked(); expect(new URLSearchParams(navigation.query).get('page')).toBe('2'); expect(healthCalls()).toHaveLength(1);
+  await waitFor(() => expect(count).toHaveTextContent('251 of 251 matching artists shown · 1 selected')); expect(view.container.querySelectorAll('table input[type=checkbox]')).toHaveLength(252); expect(first).toBeChecked(); expect(new URLSearchParams(navigation.query).get('page')).toBe('2'); expect(healthCalls()).toHaveLength(1);
 });
 it('restores native selection, main scroll and artist link focus after inspector closure or Back', async () => {
   navigation.query = 'q=Alpha&sort=name&dir=asc&keep=value'; mount(); const link = await screen.findByRole('link', { name: 'Alpha' });
