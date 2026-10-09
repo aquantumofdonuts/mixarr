@@ -633,7 +633,9 @@ export class LidarrService {
     // Step 5: Trigger search for that album only (if not already downloaded)
     const percentComplete = updatedAlbum.statistics?.percentOfTracks ?? 0;
     if (!searchOnAdd || percentComplete >= 100) {
-      log.debug(`Album "${updatedAlbum.title}" already fully downloaded (${percentComplete}%), skipping search`);
+      log.debug(searchOnAdd
+        ? `Album "${updatedAlbum.title}" already fully downloaded (${percentComplete}%), skipping search`
+        : `Album "${updatedAlbum.title}" search on add is disabled, skipping search`);
     } else {
       log.debug(`Album "${updatedAlbum.title}" at ${percentComplete}% - triggering search`);
       await this.searchAlbumCommand([updatedAlbum.id], signal);
