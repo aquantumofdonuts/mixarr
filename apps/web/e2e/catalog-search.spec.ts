@@ -83,3 +83,20 @@ test('mobile search places the input before controls without horizontal overflow
   await mkdir('/tmp/mixarr-catalog-evidence/search', { recursive: true });
   await page.screenshot({ path: '/tmp/mixarr-catalog-evidence/search/mobile.png' });
 });
+
+test('replacing the query keeps selected identities still present in the new results', async ({ catalogPage: page }) => {
+  await page.route('**/api/search/discover?**', async route => {
+    if (new URL(route.request().url()).searchParams.get('q') !== 'Replacement') return route.fallback();
+    return route.fulfill({ json: { results: [{ mbid: ARTIST_IDS[1], name: 'Common Name', inLibrary: false, sources: ['deezer'] }] } });
+  });
+  await page.goto('/search?q=Common+Name&tab=artist');
+  const selections = page.getByRole('checkbox', { name: 'Select Common Name', exact: true });
+  await expect(selections).toHaveCount(2);
+  await selections.nth(0).check();
+  await selections.nth(1).check();
+  await page.getByRole('textbox', { name: 'Search query', exact: true }).fill('Replacement');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(selections).toHaveCount(1);
+  await expect(selections).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Add selected artists', exact: true })).toBeVisible();
+});

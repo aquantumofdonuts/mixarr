@@ -30,7 +30,7 @@ test('an artist action targets only the selected stable identity', async ({ cata
   await page.getByPlaceholder('Search for artist...').fill('Common Name');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByText('Common Name', { exact: true })).toHaveCount(2);
-  await page.getByRole('button', { name: /add to lidarr/i }).first().click();
+  await page.getByRole('button', { name: 'Add artist Common Name', exact: true }).first().click();
   await expect(page.getByText('Artist added', { exact: true })).toBeVisible();
   await expect(page.getByText('In Lidarr', { exact: true })).toHaveCount(1);
 });
