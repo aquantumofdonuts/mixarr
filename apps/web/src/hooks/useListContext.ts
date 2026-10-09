@@ -18,17 +18,19 @@ function save(key: string, url: string, snapshot: Snapshot) {
   if (snapshots.size > MAX_CONTEXTS) snapshots.delete(snapshots.keys().next().value!);
 }
 
-export function useListContext({ ready, selectionOwner = true, restore: restoreScroll = true }: { ready: boolean; selectionOwner?: boolean; restore?: boolean }) {
+export function useListContext({ ready, selectionOwner = true, restore: restoreScroll = true, retainSelectionOnScopeChange = false }: { ready: boolean; selectionOwner?: boolean; restore?: boolean; retainSelectionOnScopeChange?: boolean }) {
   const pathname = usePathname(), params = useSearchParams(), router = useRouter();
   const { user } = useAuth();
   const scrollElement = useContext(ListScrollContext);
   const parentUrl = `${pathname}${updateQuery(new URLSearchParams(params.toString()), { artist: null })}`;
   const key = `${user?.id}:${parentUrl}`;
+  const selectionScope = `${user?.id}:${pathname}`;
   const inspectorOpen = params.has('artist');
   const [selected, setSelection] = useState<Set<string>>(() => new Set(snapshots.get(key)?.selected));
   const selectionRef = useRef(selected);
   const triggerRef = useRef<HTMLElement | null>(null);
   const scopeRef = useRef(key);
+  const selectionScopeRef = useRef(selectionScope);
   const pendingTop = useRef<number | null>(snapshots.get(key)?.top ?? null);
   const wasOpen = useRef(inspectorOpen);
 
@@ -60,10 +62,13 @@ export function useListContext({ ready, selectionOwner = true, restore: restoreS
 
   useLayoutEffect(() => {
     if (scopeRef.current !== key) {
+      const sameSelectionOwner = selectionScopeRef.current === selectionScope;
       scopeRef.current = key;
+      selectionScopeRef.current = selectionScope;
       triggerRef.current = null;
       pendingTop.current = snapshots.get(key)?.top ?? null;
-      setSelected(new Set(snapshots.get(key)?.selected));
+      // Search retains current selection until successful replacement results prune it.
+      if (!retainSelectionOnScopeChange || !sameSelectionOwner) setSelected(new Set(snapshots.get(key)?.selected));
     } else if (wasOpen.current && !inspectorOpen) {
       pendingTop.current = snapshots.get(key)?.top ?? null;
     }
@@ -102,7 +107,7 @@ export function useListContext({ ready, selectionOwner = true, restore: restoreS
     for (const child of scrollElement.children) observer.observe(child);
     frame = requestAnimationFrame(restore);
     return cleanup;
-  }, [key, inspectorOpen, ready, scrollElement, setSelected, restoreScroll]);
+  }, [key, selectionScope, inspectorOpen, ready, scrollElement, setSelected, restoreScroll, retainSelectionOnScopeChange]);
 
   return { selected, setSelected, remember, closeInspector, parentUrl };
 }

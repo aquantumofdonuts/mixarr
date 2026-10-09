@@ -124,4 +124,24 @@ describe('search actions', () => {
     expect(within(rows[1]).getByRole('button', { name: 'Add artist Same name' })).toBeEnabled();
   });
 
+  it('retains selected identities through a query replacement and prunes only absent results after success', async () => {
+    let finish!: (response: Response) => void;
+    request.mockImplementation(async url => {
+      const path = String(url);
+      if (path.includes('q=replacement')) return new Promise(resolve => { finish = resolve; });
+      return path.includes('/discover?') ? json({ results: ids.map(mbid => ({ mbid, name: 'Same name' })) }) : json({ available: false });
+    });
+    render(<SearchPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select this page' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search query' }), { target: { value: 'replacement' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => expect(request.mock.calls.some(([url]) => String(url).includes('q=replacement'))).toBe(true));
+    expect(screen.getByRole('region', { name: 'Bulk actions' })).toHaveTextContent('2 selected');
+    expect(screen.getByRole('button', { name: 'Add selected artists' })).toBeDisabled();
+    await act(async () => { finish(json({ results: [{ mbid: ids[1], name: 'Same name' }] })); });
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+    expect(screen.getByRole('checkbox', { name: 'Select Same name' })).toBeChecked();
+    expect(screen.getByRole('region', { name: 'Bulk actions' })).toHaveTextContent('1 selected');
+  });
+
 });

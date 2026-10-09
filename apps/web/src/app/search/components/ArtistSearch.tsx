@@ -21,7 +21,7 @@ export interface ArtistSearchProps {
 }
 
 export function ArtistSearch({ results, addingArtistId, pendingIds, isBulkAdding, disabled = false, onAddArtist, onBatchAdd, onSearchSlskd }: ArtistSearchProps) {
-  const { selected: selectedIds, setSelected, remember } = useListContext({ ready: !disabled });
+  const { selected: selectedIds, setSelected, remember } = useListContext({ ready: !disabled, retainSelectionOnScopeChange: true });
   useEffect(() => {
     if (disabled) return;
     const available = new Set(results.filter(row => !row.inLibrary && row.foreignArtistId).map(artistResultKey));

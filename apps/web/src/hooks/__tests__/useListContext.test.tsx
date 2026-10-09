@@ -67,6 +67,19 @@ describe('list inspector context', () => {
     params = new URLSearchParams('q=other'); rerender(); flushFrame();
     expect(pane.scrollTop).toBe(0); expect(result.current.selected.size).toBe(0);
   });
+
+  it.each(['q', 'sources', 'page'])('can retain live selection when the %s parameter changes without resetting scroll policy', parameter => {
+    const { result, rerender } = renderHook(() => useListContext({ ready: false, retainSelectionOnScopeChange: true }), { wrapper });
+    act(() => result.current.setSelected(new Set(['mbid:one', 'mbid:two'])));
+    params.set(parameter, parameter === 'page' ? '2' : 'replacement'); rerender();
+    expect(result.current.selected).toEqual(new Set(['mbid:one', 'mbid:two']));
+  });
+  it('clears retained live selection when the actor changes', () => {
+    const { result, rerender } = renderHook(() => useListContext({ ready: false, retainSelectionOnScopeChange: true }), { wrapper });
+    act(() => result.current.setSelected(new Set(['mbid:one'])));
+    userId++; rerender();
+    expect(result.current.selected.size).toBe(0);
+  });
   it('cancels frames and observers on unmount', () => {
     const first = renderHook(() => useListContext({ ready: true }), { wrapper });
     pane.scrollTop = 600; act(() => first.result.current.remember(trigger)); first.unmount();
