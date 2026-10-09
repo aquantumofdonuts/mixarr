@@ -51,6 +51,7 @@ beforeEach(() => {
     (where.id === undefined || typeof where.id === 'number' && where.id === row.id || where.id?.in?.includes(row.id)) &&
     (where.userId === undefined || where.userId === row.userId) &&
     (where.status === undefined || where.status === row.status) &&
+    (where.mbid === undefined || where.mbid === row.mbid) &&
     (where.updatedAt === undefined || where.updatedAt.getTime() === row.updatedAt.getTime());
   mocks.findFirst.mockImplementation(async ({ where }) => {
     const row = rows.find(row => matches(row, where)); return row ? { ...row } : null;

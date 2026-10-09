@@ -116,4 +116,30 @@ describe.skipIf(!process.env.CATALOG_REVIEW_TEST_DATABASE_URL)('review queue aga
       expect(second.body.items[0].createdAt).toBe(at.toISOString()); expect(second.body.total).toBe(528);
     } finally { await prisma.reviewItem.delete({ where: { id: newer.id } }); }
   });
+  it('persists the owned canonical choice in MySQL before acquisition and retains it on uncertain failure', async () => {
+    const mbid = '11111111-1111-4111-8111-111111111111';
+    const row = await prisma.reviewItem.create({ data: { userId: actor, artistName: 'Chosen Artist', source: 'catalog-test' } });
+    const connection = await prisma.connection.create({ data: { userId: actor, type: 'lidarr', name: 'Test Lidarr',
+      config: { url: 'http://lidarr.test', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 1, rootFolderPath: '/music' } } });
+    mocks.exists.mockResolvedValue(false); mocks.log.mockResolvedValue(undefined); mocks.notify.mockResolvedValue(undefined);
+    mocks.addArtist.mockImplementationOnce(async () => {
+      const persisted = await prisma.reviewItem.findUniqueOrThrow({ where: { id: row.id } });
+      expect(persisted.mbid).toBe(mbid); expect(persisted.status).toBe('pending');
+      expect(persisted.updatedAt.getTime()).toBeGreaterThan(row.updatedAt.getTime());
+      throw new Error('connection lost');
+    }).mockResolvedValueOnce({});
+    const approve = (body: object) => request(app).put(`/api/imports/review/${row.id}`).set('x-user', String(actor)).send({ status: 'approved', ...body });
+    try {
+      const first = await approve({ mbid }); expect(first.body.outcomes[0].state).toBe('uncertain');
+      const saved = await prisma.reviewItem.findUniqueOrThrow({ where: { id: row.id } });
+      expect(saved).toMatchObject({ mbid, status: 'pending' });
+      const second = await approve({}); expect(second.body.outcomes[0].state).toBe('added');
+      const approved = await prisma.reviewItem.findUniqueOrThrow({ where: { id: row.id } });
+      expect(approved.status).toBe('approved'); expect(approved.updatedAt.getTime()).toBeGreaterThan(saved.updatedAt.getTime());
+      expect(mocks.addArtist.mock.calls[1][0]).toBe(mbid);
+    } finally {
+      await prisma.reviewItem.delete({ where: { id: row.id } });
+      await prisma.connection.delete({ where: { id: connection.id } });
+    }
+  });
 });

@@ -50,6 +50,7 @@ beforeEach(() => {
     (where.id === undefined || typeof where.id === 'number' && where.id === row.id || where.id?.in?.includes(row.id)) &&
     (where.userId === undefined || where.userId === row.userId) &&
     (where.status === undefined || where.status === row.status) &&
+    (where.mbid === undefined || where.mbid === row.mbid) &&
     (where.updatedAt === undefined || where.updatedAt.getTime() === row.updatedAt.getTime());
   mocks.findFirst.mockImplementation(async ({ where }) => {
     const row = rows.find(row => matches(row, where)); return row ? { ...row } : null;
@@ -102,6 +103,41 @@ describe('review acquisitions through the actual Express router', () => {
     expect(response.body.outcomes[0].state).toBe('added'); expect(rows[0].mbid).toBe(mbid);
     response = await request(app).put('/api/imports/review/2').send({ status: 'approved', mbid: '22222222-2222-4222-8222-222222222222' });
     expect(response.status).toBe(409); expect(response.body.code).toBe('IDENTITY_CONFLICT'); expect(rows[1].status).toBe('pending');
+  });
+  it('persists an explicit owned identity before acquisition and reuses it after an uncertain failure', async () => {
+    rows[0].mbid = null as never;
+    mocks.addArtist.mockImplementationOnce(async () => {
+      expect(rows[0].mbid).toBe(mbid); expect(rows[0].status).toBe('pending');
+      expect(rows[0].updatedAt.getTime()).toBe(now + 1);
+      throw new Error('connection lost');
+    }).mockResolvedValueOnce({});
+    const first = await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid });
+    expect(first.body.outcomes[0].state).toBe('uncertain');
+    expect(rows[0]).toMatchObject({ mbid, status: 'pending' });
+    const retry = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
+    expect(retry.body.outcomes[0].state).toBe('added');
+    expect(rows[0].updatedAt.getTime()).toBe(now + 2); expect(mocks.addArtist).toHaveBeenCalledTimes(2);
+    expect(mocks.addArtist.mock.calls[1][0]).toBe(mbid);
+  });
+  it('uses the persisted identity revision when finalizing an explicit choice', async () => {
+    rows[0].mbid = null as never;
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid });
+    expect(response.body.outcomes[0].state).toBe('added'); expect(updates).toHaveLength(2);
+    expect(updates[0].where).toMatchObject({ id: 1, userId: 1, status: 'pending', mbid: null });
+    expect(updates[0].data).toMatchObject({ mbid, updatedAt: new Date(now + 1) });
+    expect(updates[1].where.updatedAt.getTime()).toBe(now + 1);
+    expect(rows[0].updatedAt.getTime()).toBe(now + 2);
+  });
+  it.each([false, true])('stops membership and acquisition for a competing identity with revision advanced=%s', async advanced => {
+    rows[0].mbid = null as never;
+    const other = '22222222-2222-4222-8222-222222222222';
+    mocks.profiles.mockImplementation(async () => {
+      rows[0].mbid = other; if (advanced) rows[0].updatedAt = new Date(now + 10); return [{ id: 1 }];
+    });
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid });
+    expect(response.status).toBe(409); expect(response.body.code).toBe('DECISION_CONFLICT');
+    expect(rows[0].mbid).toBe(other); expect(rows[0].updatedAt.getTime()).toBe(advanced ? now + 10 : now);
+    expect(mocks.exists).not.toHaveBeenCalled(); expect(mocks.addArtist).not.toHaveBeenCalled();
   });
   it('refuses foreign single and bulk acquisitions even for administrators', async () => {
     rows[1].userId = 2;

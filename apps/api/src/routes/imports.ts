@@ -258,14 +258,16 @@ importsRouter.get('/review/queue', validateQuery(reviewQueueQuerySchema), async 
 });
 
 // A provider response can race a reject/restore; never overwrite its revision.
-async function updateReviewDecision(item: ReviewItem, data: Prisma.ReviewItemUpdateManyMutationInput): Promise<void> {
+async function updateReviewDecision(item: ReviewItem, data: Prisma.ReviewItemUpdateManyMutationInput): Promise<Date> {
+  const updatedAt = nextRevision([item.updatedAt]);
   await prisma.$transaction(async tx => {
     const changed = await tx.reviewItem.updateMany({
-      where: { id: item.id, userId: item.userId, status: item.status, updatedAt: item.updatedAt },
-      data: { ...data, updatedAt: nextRevision([item.updatedAt]) },
+      where: { id: item.id, userId: item.userId, status: item.status, mbid: item.mbid, updatedAt: item.updatedAt },
+      data: { ...data, updatedAt },
     });
     if (changed.count !== 1) throw new DecisionError(409, 'DECISION_CONFLICT', 'Review item changed');
   }, { timeout: 5_000 });
+  return updatedAt;
 }
 
 // Static restoration route precedes dynamic review IDs.
@@ -308,6 +310,10 @@ async function approveReview(item: ReviewItem, lidarr: LidarrService, cache: Lid
   if (!mbid || !z.string().uuid().safeParse(mbid).success) throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a MusicBrainz artist before adding');
   if (item.mbid && selectedMbid && item.mbid.toLowerCase() !== selectedMbid.toLowerCase()) throw new DecisionError(409, 'IDENTITY_CONFLICT', 'Review already has an artist identity');
   if (item.itemType === 'album' && !z.string().uuid().safeParse(item.albumMbid).success) throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a valid album identity before adding');
+  if (!item.mbid) {
+    const updatedAt = await updateReviewDecision(item, { mbid });
+    item = { ...item, mbid, updatedAt };
+  }
   if (item.itemType !== 'album' && await cache.exists({ mbid })) {
     await updateReviewDecision(item, { status: 'approved', mbid });
     return { id: item.id, state: 'already-in-library', message: 'Artist is already in the library.' };
