@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth';
 import { useConstellationSettings, useConstellationUsage, useUpdateConstellationSettings, type ConstellationSettings as Settings } from '@/lib/hooks';
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,7 +17,7 @@ const budgets = [
   ['orbitEdgeBudget', 'Orbit edge budget', 'Bounds the edges materialized during each taste-orbit warm.'],
   ['dailyApiBudget', 'Daily API budget', 'Bounds charged live Discogs request reservations per UTC day, including failed and rejected requests.'],
   ['fanoutN', 'Fan-out', 'Bounds neighbors kept per node; exploration uses at most 49 neighbors within a 50-person graph.'],
-  ['pathMaxDegrees', 'Path max degrees', 'Bounds path traversal; the server also limits paths to 10 degrees.'],
+  ['pathMaxDegrees', 'Path max degrees', 'Shortest paths use this degree bound capped at 10; interesting paths may use up to two extra hops.'],
 ] as const;
 function toDraft(settings: Settings): Draft {
   return { ...settings, orbitEdgeBudget: String(settings.orbitEdgeBudget), dailyApiBudget: String(settings.dailyApiBudget), fanoutN: String(settings.fanoutN), pathMaxDegrees: String(settings.pathMaxDegrees) };
@@ -92,9 +93,9 @@ function AdminConstellationSettings() {
       {query.error && <div><p role="alert">{query.error.message}</p><Button variant="outline" onClick={() => void query.refetch()}>Retry loading constellation settings</Button></div>}
       {query.isPending && <p role="status">Loading constellation settings…</p>}
       {draft && <fieldset className="space-y-4">
-        <div className="flex items-start justify-between gap-4 border-b pb-3">
-          <div><label htmlFor="constellation-constellationIndexEnabled" className="font-medium">Local credit index</label><p className="text-sm text-muted-foreground">Building the index downloads and parses the full Discogs releases dump (~10GB compressed, ~100GB+ uncompressed): hours of parsing and a real disk-and-time commitment.</p></div>
-          <input type="checkbox" id="constellation-constellationIndexEnabled" checked={draft.constellationIndexEnabled} onChange={event => edit('constellationIndexEnabled', event.target.checked)} className="mt-1 accent-current" />
+        <div className="border-b pb-3">
+          <Checkbox label="Local credit index" id="constellation-constellationIndexEnabled" checked={draft.constellationIndexEnabled} onCheckedChange={checked => edit('constellationIndexEnabled', checked)} aria-describedby="constellation-index-cost" className="accent-current" />
+          <p id="constellation-index-cost" className="text-sm text-muted-foreground">Building the index downloads and parses the full Discogs releases dump (~10GB compressed, ~100GB+ uncompressed): hours of parsing and a real disk-and-time commitment.</p>
         </div>
         <Input label="Index path" id="constellation-constellationIndexPath" value={draft.constellationIndexPath} onChange={event => edit('constellationIndexPath', event.target.value)} aria-invalid={invalid === 'constellationIndexPath'} className="font-mono" />
         {budgets.map(([key, label, help]) => <div key={key}>

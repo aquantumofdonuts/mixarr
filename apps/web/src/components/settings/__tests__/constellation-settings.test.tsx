@@ -30,6 +30,7 @@ describe('Constellation settings', () => {
     expect(screen.getByLabelText('Fan-out')).toHaveValue(8); expect(screen.getByLabelText('Path max degrees')).toHaveValue(6);
     expect(screen.getByLabelText('Index refresh preference')).toHaveValue('monthly'); expect(screen.getByLabelText('Local credit index')).not.toBeChecked();
     expect(await screen.findByText('17 / 5000')).toBeVisible(); expect(screen.getByText('00:00 UTC')).toBeVisible();
+    expect(screen.getByText('Shortest paths use this degree bound capped at 10; interesting paths may use up to two extra hops.')).toBeVisible();
     expect(screen.getByText(/~100GB\+ uncompressed/)).toBeVisible(); expect(screen.getByText(/Automatic index refresh is unavailable/)).toBeVisible();
     expect(screen.queryByText('Constellation settings saved')).toBeNull();
   });

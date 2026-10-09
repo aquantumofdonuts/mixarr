@@ -60,3 +60,24 @@ test.describe('regular actor', () => {
     await expect(page.getByRole('region', { name: 'Constellation settings' })).toHaveCount(0); expect(reads).toEqual([]);
   });
 });
+
+
+test.describe('320px touch access', () => {
+  test.use({ viewport: { width: 320, height: 900 }, hasTouch: true });
+  test('the labeled index control has a 44px hit target with cost help and accurate path wording', async ({ catalogPage: page }) => {
+    await page.goto('/settings');
+    const section = page.getByRole('region', { name: 'Constellation settings' });
+    const checkbox = section.getByRole('checkbox', { name: 'Local credit index' });
+    await checkbox.scrollIntoViewIfNeeded();
+    const input = await checkbox.boundingBox();
+    const label = await section.locator('label[for="constellation-constellationIndexEnabled"]').boundingBox();
+    expect(input).not.toBeNull(); expect(label).not.toBeNull();
+    expect(Math.max(input!.height, label!.height)).toBeGreaterThanOrEqual(44);
+    await page.touchscreen.tap(input!.x + input!.width / 2, input!.y + input!.height / 2 + 15);
+    await expect(checkbox).toBeChecked();
+    await checkbox.focus(); await page.keyboard.press('Space'); await expect(checkbox).not.toBeChecked(); await expect(checkbox).toBeFocused();
+    await expect(checkbox).toHaveAttribute('aria-describedby', 'constellation-index-cost');
+    await expect(section.locator('#constellation-index-cost')).toContainText('~100GB+ uncompressed');
+    await expect(section.locator('#constellation-pathMaxDegrees-help')).toHaveText('Shortest paths use this degree bound capped at 10; interesting paths may use up to two extra hops.');
+  });
+});
