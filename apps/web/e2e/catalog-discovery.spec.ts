@@ -193,3 +193,26 @@ test('replacement recommendations preserve prior rows and selection through fail
   await expect(row.getByRole('button', { name: 'Add artist Common Name', exact: true })).toBeEnabled();
   expect(requests).toEqual([['Seed Alpha'], ['Seed Alpha', 'Seed Beta'], ['Seed Alpha', 'Seed Beta']]);
 });
+
+test('a direct-linked seed remains resolved when library filtering moves it off-page', async ({ catalogPage: page }) => {
+  await library(page);
+  const requests: string[][] = [];
+  await page.route('**/api/discover/similar', route => {
+    const names = route.request().postDataJSON().artistNames as string[]; requests.push(names);
+    return route.fulfill({ json: { recommendations, seedArtists: names, total: 2, failedSeedArtists: [] } });
+  });
+  await page.goto(`/discover?seed=${seedIds[0]}`);
+  await expect(page.getByRole('link', { name: 'Common Name', exact: true })).toHaveCount(2);
+  const selected = page.getByRole('list', { name: 'Selected seeds', exact: true });
+  await expect(selected.getByText('Seed Alpha', { exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Search library seeds', exact: true }).fill('Beta');
+  await page.getByRole('button', { name: 'Search library', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'Use Seed Alpha as seed', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'Use Seed Beta as seed', exact: true })).toBeVisible();
+  await expect(selected.getByText('Seed Alpha', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Find similar artists', exact: true })).toBeEnabled();
+  await page.reload();
+  await expect(selected.getByText('Seed Alpha', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Common Name', exact: true })).toHaveCount(2);
+  expect(requests).toEqual([['Seed Alpha'], ['Seed Alpha']]);
+});
