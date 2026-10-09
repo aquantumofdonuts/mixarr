@@ -219,104 +219,96 @@ export async function multiSourceSearch(
   query: string,
   userId: number,
   enabledSources: SearchSource[],
-  limit: number = 25
+  limit: number = 25,
+  errors?: { source: SearchSource; message: string }[]
 ): Promise<UnifiedArtistResult[]> {
   const searchPromises: Promise<SourceResult[]>[] = [];
   const sourceOrder: SearchSource[] = [];
-  
+
   // Query each enabled source in parallel
   for (const source of SOURCE_PRIORITY) {
     if (!enabledSources.includes(source)) continue;
-    
+
     sourceOrder.push(source);
-    
+
     switch (source) {
       case 'spotify':
         searchPromises.push(
           (async () => {
             const spotify = await getSpotifyService(userId);
-            if (!spotify) return [];
-            try {
-              const results = await spotify.searchArtists(query, limit);
-              return results.map(r => ({
-                name: r.name,
-                imageUrl: r.imageUrl,
-                source: 'spotify' as SearchSource,
-                sourceId: r.id,
-                popularity: r.popularity,
-                genres: r.genres,
-                followers: r.followers,
-              }));
-            } catch (err) {
-              logger.warn('Spotify artist search failed', { query, error: err instanceof Error ? err.message : String(err) });
-              return [];
-            }
+            if (!spotify) throw new Error('Spotify connection unavailable');
+            const results = await spotify.searchArtists(query, limit);
+            return results.map(r => ({
+              name: r.name,
+              imageUrl: r.imageUrl,
+              source: 'spotify' as SearchSource,
+              sourceId: r.id,
+              popularity: r.popularity,
+              genres: r.genres,
+              followers: r.followers,
+            }));
           })()
         );
         break;
-        
+
       case 'deezer':
         searchPromises.push(
           (async () => {
-            try {
-              const results = await searchDeezerArtists(query, limit);
-              return results.map(r => ({
-                name: r.name,
-                imageUrl: r.picture_medium || r.picture || null,
-                source: 'deezer' as SearchSource,
-                sourceId: r.id,
-              }));
-            } catch {
-              return [];
-            }
+            const results = await searchDeezerArtists(query, limit);
+            return results.map(r => ({
+              name: r.name,
+              imageUrl: r.picture_medium || r.picture || null,
+              source: 'deezer' as SearchSource,
+              sourceId: r.id,
+            }));
           })()
         );
         break;
-        
+
       case 'tidal':
         searchPromises.push(
           (async () => {
             const tidal = await getTidalService(userId);
-            if (!tidal) return [];
-            try {
-              const results = await tidal.searchArtists(query, limit);
-              return results.map(r => ({
-                name: r.name,
-                imageUrl: null, // Tidal doesn't return images in basic search
-                source: 'tidal' as SearchSource,
-                sourceId: r.id,
-                popularity: r.popularity,
-              }));
-            } catch {
-              return [];
-            }
+            if (!tidal) throw new Error('Tidal connection unavailable');
+            const results = await tidal.searchArtists(query, limit);
+            return results.map(r => ({
+              name: r.name,
+              imageUrl: null, // Tidal doesn't return images in basic search
+              source: 'tidal' as SearchSource,
+              sourceId: r.id,
+              popularity: r.popularity,
+            }));
           })()
         );
         break;
-        
+
       case 'bandcamp':
         searchPromises.push(
           (async () => {
-            try {
-              const service = new BandcampService();
-              const response = await service.searchArtists(query);
-              return response.artists.map(r => ({
-                name: r.name,
-                imageUrl: r.imageUrl,
-                source: 'bandcamp' as SearchSource,
-                sourceId: r.id,
-                genres: r.genre ? [r.genre] : undefined,
-              }));
-            } catch {
-              return [];
-            }
+            const service = new BandcampService();
+            const response = await service.searchArtists(query);
+            return response.artists.map(r => ({
+              name: r.name,
+              imageUrl: r.imageUrl,
+              source: 'bandcamp' as SearchSource,
+              sourceId: r.id,
+              genres: r.genre ? [r.genre] : undefined,
+            }));
           })()
         );
         break;
     }
   }
-  
-  const resultsBySource = await Promise.all(searchPromises);
+
+  const outcomes = await Promise.allSettled(searchPromises);
+  const resultsBySource = outcomes.map((outcome, index) => {
+    if (outcome.status === 'fulfilled') return outcome.value;
+    const source = sourceOrder[index];
+    const label = source.charAt(0).toUpperCase() + source.slice(1);
+    errors?.push({ source, message: `${label} search unavailable. Check the connection and retry.` });
+    logger.warn('Artist search source unavailable', { source });
+    return [];
+  });
   return mergeSearchResults(resultsBySource, sourceOrder);
 }
 

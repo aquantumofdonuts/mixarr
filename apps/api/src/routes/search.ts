@@ -149,7 +149,8 @@ searchRouter.get('/discover', async (req, res) => {
     }
     
     // Search across enabled sources
-    const results = await multiSourceSearch(q, req.user!.id, enabledSources, 25);
+    const sourceErrors: { source: SearchSource; message: string }[] = [];
+    const results = await multiSourceSearch(q, req.user!.id, enabledSources, 25, sourceErrors);
     
     // Skip MBID lookup during search - too slow with rate limits
     // MBID resolution happens when user clicks "Add" via /resolve-mbid endpoint
@@ -157,6 +158,7 @@ searchRouter.get('/discover', async (req, res) => {
     res.json({ 
       results,
       sources: enabledSources,
+      errors: sourceErrors.map(error => error.message),
     });
   } catch (error) {
     log.error('Multi-source search error:', error);
@@ -204,12 +206,13 @@ searchRouter.post('/ai', async (req, res) => {
     log.debug(`Processing prompt: "${truncated}"`);
     const effectiveLimit = Math.min(limit, 10); // Cap at 10 to avoid timeouts
     const { artists: artistNames, providers, errors: aiErrors } = await aiService.searchByPrompt(prompt.trim(), effectiveLimit);
+    const searchErrors = (aiErrors || []).map(error => `${error.startsWith('OpenAI:') ? 'OpenAI' : error.startsWith('Anthropic:') ? 'Anthropic' : 'AI provider'} search unavailable. Retry the search.`);
 
     if (artistNames.length === 0) {
       // If we have errors but no results, indicate the failure
       const hasProviderErrors = aiErrors && aiErrors.length > 0;
       const message = hasProviderErrors
-        ? `AI providers encountered errors: ${aiErrors.join('; ')}. Please try again.`
+        ? `AI providers encountered errors: ${searchErrors.join('; ')}`
         : 'No recommendations found. Try rephrasing your query.';
       
       res.json({
@@ -217,7 +220,7 @@ searchRouter.post('/ai', async (req, res) => {
         results: [],
         aiProviders: providers,
         message,
-        errors: aiErrors,
+        errors: searchErrors,
       });
       return;
     }
@@ -313,6 +316,7 @@ searchRouter.post('/ai', async (req, res) => {
       prompt: prompt.trim(),
       results: finalResults,
       aiProviders: providers,
+      errors: searchErrors,
     });
   } catch (error) {
     log.error('Error:', error);

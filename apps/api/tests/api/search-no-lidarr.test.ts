@@ -139,6 +139,7 @@ vi.mock('../../src/routes/logs.js', () => ({
 
 // Import after mocks are set up
 import { searchRouter } from '../../src/routes/search.js';
+import { multiSourceSearch } from '../../src/services/multi-search.js';
 
 const app = express();
 app.use(express.json());
@@ -229,6 +230,17 @@ describe('Search API - No Lidarr Mode', () => {
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('results');
     });
+  });
+
+  it('returns successful rows with sanitized provider diagnostics from the real discover route', async () => {
+    vi.mocked(multiSourceSearch).mockImplementationOnce(async (_query, _userId, _sources, _limit, errors) => {
+      errors?.push({ source: 'spotify', message: 'Spotify search unavailable. Check the connection and retry.' });
+      return [{ name: 'Artist', imageUrl: null, sources: ['deezer'], deezerId: 7 }];
+    });
+    const response = await request(app).get('/api/search/discover').query({ q: 'Artist', sources: 'spotify,deezer' });
+    expect(response.status).toBe(200);
+    expect(response.body.results).toHaveLength(1);
+    expect(response.body.errors).toEqual(['Spotify search unavailable. Check the connection and retry.']);
   });
 
   describe('POST /api/search/artists/add', () => {

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import { useToast } from '@/components/ui/toast';
+import { readPage, updateQuery } from '@/lib/list-state';
 
 export type SearchType = 'artist' | 'album' | 'label' | 'year' | 'ai';
 export type SearchSource = 'spotify' | 'deezer' | 'tidal' | 'bandcamp';
@@ -16,6 +17,10 @@ export interface ArtistResult {
   sources?: SearchSource[];
   spotifyId?: string;
   deezerId?: number;
+  tidalId?: string;
+  bandcampId?: number;
+  resultKey?: string;
+  acquisitionError?: string;
   popularity?: number;
   followers?: number;
   fans?: number;
@@ -48,188 +53,112 @@ export interface LabelResult {
 }
 
 const PAGE_SIZE = 25;
+const SOURCES: SearchSource[] = ['spotify', 'deezer', 'tidal', 'bandcamp'];
+const TYPES: SearchType[] = ['artist', 'album', 'label', 'year', 'ai'];
+// ponytail: name-only identities last only as long as their request's result objects.
+const unidentifiedKeys = new WeakMap<ArtistResult, string>();
+let unidentifiedSequence = 0;
+export function artistResultKey(artist: ArtistResult): string {
+  const stable = artist.resultKey || artist.foreignArtistId || [artist.spotifyId && `spotify:${artist.spotifyId}`, artist.deezerId && `deezer:${artist.deezerId}`, artist.tidalId && `tidal:${artist.tidalId}`, artist.bandcampId && `bandcamp:${artist.bandcampId}`].filter(Boolean).join('|');
+  if (stable) return stable;
+  let key = unidentifiedKeys.get(artist);
+  if (!key) { key = `unidentified:${++unidentifiedSequence}`; unidentifiedKeys.set(artist, key); }
+  return key;
+}
 
-/**
- * Hook that owns all search state and logic for the search page.
- *
- * Manages query, search type, results, pagination, source toggles (artist search),
- * and AI availability/prompt state.
- */
 export function useSearch() {
-  const [searchType, setSearchTypeRaw] = useState<SearchType>('artist');
-  const [query, setQuery] = useState('');
+  const params = useSearchParams(), router = useRouter(), pathname = usePathname();
+  const committedQuery = params.get('q')?.trim() || '';
+  const searchType = TYPES.includes(params.get('tab') as SearchType) ? params.get('tab') as SearchType : 'artist';
+  const sources = SOURCES.filter(source => (params.get('sources') || SOURCES.join(',')).split(',').includes(source));
+  const sourcesKey = (sources.length ? sources : SOURCES).join(',');
+  const enabledSources = new Set(sourcesKey.split(',') as SearchSource[]);
+  const page = readPage(params.get('page'));
+  const scope = JSON.stringify([committedQuery, searchType, sourcesKey, page]);
+  const [query, setQuery] = useState(committedQuery);
   const [results, setResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [page, setPage] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+  const [partialErrors, setPartialErrors] = useState<string[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  const { addToast } = useToast();
-
-  // Source toggles for artist search
-  const [enabledSources, setEnabledSources] = useState<Set<SearchSource>>(
-    new Set(['spotify', 'deezer', 'tidal', 'bandcamp']),
-  );
-
-  // AI search state
+  const [resultScope, setResultScope] = useState<string | null>(null);
+  const [resultType, setResultType] = useState<SearchType>(searchType);
+  const [resultQuery, setResultQuery] = useState('');
+  const [resultPage, setResultPage] = useState(page);
+  const [retry, setRetry] = useState(0);
   const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiProviders, setAiProviders] = useState<string[]>([]);
+  const paramsRef = useRef(params.toString()); paramsRef.current = params.toString();
 
-  // Check AI availability on mount
+  useEffect(() => setQuery(committedQuery), [committedQuery]);
   useEffect(() => {
-    const checkAiStatus = async () => {
-      const { data } = await api.get<{ available: boolean }>('/api/search/ai/status');
-      setAiAvailable(data?.available ?? false);
-    };
-    checkAiStatus();
+    const controller = new AbortController();
+    api.get<{ available: boolean }>('/api/search/ai/status', { signal: controller.signal })
+      .then(({ data }) => { if (!controller.signal.aborted) setAiAvailable(data?.available ?? false); }).catch(() => {});
+    return () => controller.abort();
   }, []);
 
+  const navigate = useCallback((patch: Record<string, string | null>) => {
+    router.push(`${pathname}${updateQuery(new URLSearchParams(paramsRef.current), patch)}`, { scroll: false });
+  }, [pathname, router]);
+  const setSearchType = useCallback((type: SearchType) => navigate({ tab: type, page: null }), [navigate]);
   const toggleSource = useCallback((source: SearchSource) => {
-    setEnabledSources((prev) => {
-      const next = new Set(prev);
-      if (next.has(source)) {
-        next.delete(source);
-      } else {
-        next.add(source);
-      }
-      // Ensure at least one source remains enabled
-      return next.size > 0 ? next : prev;
-    });
-  }, []);
+    const next = new Set(sourcesKey.split(',') as SearchSource[]);
+    if (next.has(source)) next.delete(source); else next.add(source);
+    if (next.size) navigate({ sources: SOURCES.filter(item => next.has(item)).join(','), page: null });
+  }, [navigate, sourcesKey]);
+  const performSearch = useCallback(async (pageNum = 1) => {
+    if (!query.trim()) return;
+    if (query.trim() === committedQuery && pageNum === page) setRetry(value => value + 1);
+    else navigate({ q: query.trim(), tab: searchType, page: pageNum > 1 ? String(pageNum) : null });
+  }, [query, committedQuery, page, searchType, navigate]);
+  const goToPage = useCallback((next: number) => navigate({ page: next > 1 ? String(next) : null }), [navigate]);
 
-  const performSearch = useCallback(
-    async (pageNum = 1) => {
-      if (!query.trim()) return;
-
-      setIsSearching(true);
-      setResults([]);
-      setPage(pageNum);
-
+  useEffect(() => {
+    const controller = new AbortController();
+    if (!committedQuery) {
+      setResults([]); setResultScope(null); setTotalCount(0); setError(null); setPartialErrors([]); setIsSearching(false);
+      return () => controller.abort();
+    }
+    setIsSearching(true); setError(null); setPartialErrors([]);
+    async function load() {
       try {
-      // ---------- AI search ----------
-      if (searchType === 'ai') {
-        const { data, error } = await api.post<{
-          prompt: string;
-          results: ArtistResult[];
-          aiProviders: string[];
-          message?: string;
-          errors?: string[];
-        }>('/api/search/ai', { prompt: query.trim() });
-
-        if (error) {
-          addToast({ type: 'error', title: 'AI Search failed', message: error });
-        } else if (data) {
-          setAiPrompt(data.prompt);
-          setAiProviders(data.aiProviders);
-          setResults(data.results);
-          setTotalCount(data.results.length);
-
-          if (data.results.length === 0) {
-            const hasErrors = data.errors && data.errors.length > 0;
-            addToast({
-              type: hasErrors ? 'error' : 'info',
-              title: hasErrors ? 'AI Search Error' : 'No results found',
-              message: data.message || 'No recommendations found',
-            });
-          }
-        }
-        return;
-      }
-
-      // ---------- Standard searches ----------
-      const offset = (pageNum - 1) * PAGE_SIZE;
-      let endpoint = '';
-
-      switch (searchType) {
-        case 'artist': {
-          const sourcesParam = Array.from(enabledSources).join(',');
-          endpoint = `/api/search/discover?q=${encodeURIComponent(query)}&sources=${sourcesParam}`;
-          break;
-        }
-        case 'album':
-          endpoint = `/api/search/album?q=${encodeURIComponent(query)}&limit=${PAGE_SIZE}&offset=${offset}`;
-          break;
-        case 'label':
-          endpoint = `/api/search/label?q=${encodeURIComponent(query)}&limit=${PAGE_SIZE}&offset=${offset}`;
-          break;
-        case 'year':
-          endpoint = `/api/search/year?year=${encodeURIComponent(query)}&limit=${PAGE_SIZE}&offset=${offset}`;
-          break;
-      }
-
-      const { data, error } = await api.get<any>(endpoint);
-
-      if (error) {
-        addToast({ type: 'error', title: 'Search failed', message: error });
-      } else if (data) {
+        const offset = (page - 1) * PAGE_SIZE;
+        const endpoint = searchType === 'artist' ? `/api/search/discover?q=${encodeURIComponent(committedQuery)}&sources=${sourcesKey}`
+          : searchType === 'year' ? `/api/search/year?year=${encodeURIComponent(committedQuery)}&limit=${PAGE_SIZE}&offset=${offset}`
+          : `/api/search/${searchType}?q=${encodeURIComponent(committedQuery)}&limit=${PAGE_SIZE}&offset=${offset}`;
+        const response = searchType === 'ai'
+          ? await api.post<any>('/api/search/ai', { prompt: committedQuery }, { signal: controller.signal })
+          : await api.get<any>(endpoint, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        if (response.error || !response.data) { setError(response.error || 'The provider returned no response. Retry the search.'); return; }
+        const data = response.data;
+        let next;
         if (searchType === 'artist') {
-          const artistResults = (data.results || []).map((r: any) => ({
-            foreignArtistId: r.mbid || '',
-            artistName: r.name,
-            overview: r.genres?.join(', ') || '',
-            imageUrl: r.imageUrl,
-            inLibrary: r.inLibrary,
-            sources: r.sources || [],
-            spotifyId: r.spotifyId,
-            deezerId: r.deezerId,
-            popularity: r.popularity,
-            followers: r.followers,
-            fans: r.fans,
-          }));
-          setResults(artistResults);
-          setTotalCount(artistResults.length);
-        } else if (searchType === 'album') {
-          setResults(data.releases || []);
-          setTotalCount(data.count || 0);
-        } else if (searchType === 'label') {
-          setResults(data.labels || []);
-          setTotalCount(data.count || 0);
-        } else if (searchType === 'year') {
-          setResults(data.releaseGroups || []);
-          setTotalCount(data.count || 0);
+          next = (data.results || []).map((r: any) => {
+            const artist: ArtistResult = { foreignArtistId: r.mbid || '', artistName: r.name, overview: r.genres?.join(', ') || '', imageUrl: r.imageUrl, inLibrary: r.inLibrary, sources: r.sources || [], spotifyId: r.spotifyId, deezerId: r.deezerId, tidalId: r.tidalId, bandcampId: r.bandcampId, popularity: r.popularity, followers: r.followers, fans: r.fans };
+            return { ...artist, resultKey: artistResultKey(artist) };
+          });
+        } else {
+          next = data.results || data.releases || data.labels || data.releaseGroups || [];
+          if (searchType === 'ai') next = next.map((artist: ArtistResult) => ({ ...artist, resultKey: artistResultKey(artist) }));
         }
+        if (!next.length && data.errors?.length) { setError(data.message || data.errors.join('; ')); return; }
+        setResults(next); setTotalCount(['artist', 'ai'].includes(searchType) ? next.length : data.count || 0);
+        setPartialErrors(data.errors || []);
+        setAiPrompt(data.prompt || ''); setAiProviders(data.aiProviders || []);
+        setResultScope(scope); setResultType(searchType); setResultQuery(committedQuery); setResultPage(page);
+      } catch (cause) {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Search failed');
+      } finally { if (!controller.signal.aborted) setIsSearching(false); }
+    }
+    void load();
+    return () => controller.abort();
+  }, [scope, retry, committedQuery, searchType, sourcesKey, page]);
 
-        if (
-          (data.results || data.releases || data.labels || data.releaseGroups || []).length === 0
-        ) {
-          addToast({ type: 'info', title: 'No results found' });
-        }
-      }
-      } finally {
-        setIsSearching(false);
-      }
-    },
-    [query, searchType, enabledSources, addToast],
-  );
-
-  /** Change the active search type, clearing previous results. */
-  const setSearchType = useCallback((type: SearchType) => {
-    setSearchTypeRaw(type);
-    setResults([]);
-  }, []);
-
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-
-  return {
-    // State
-    searchType,
-    query,
-    results,
-    isSearching,
-    page,
-    totalCount,
-    totalPages,
-    pageSize: PAGE_SIZE,
-    enabledSources,
-    aiAvailable,
-    aiPrompt,
-    aiProviders,
-
-    // Actions
-    setQuery,
-    setSearchType,
-    setPage,
-    setResults,
-    toggleSource,
-    performSearch,
-  };
+  return { searchType, query, committedQuery, results, isSearching, page, totalCount, totalPages: Math.ceil(totalCount / PAGE_SIZE), pageSize: PAGE_SIZE,
+    enabledSources, aiAvailable, aiPrompt, aiProviders, error, partialErrors, scope, resultScope, resultType, resultQuery, resultPage,
+    hasSearched: resultScope !== null, isStale: resultScope !== null && resultScope !== scope,
+    setQuery, setSearchType, setResults, toggleSource, performSearch, goToPage, retrySearch: () => setRetry(value => value + 1) };
 }

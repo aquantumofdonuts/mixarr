@@ -92,8 +92,7 @@ describe('useArtistAdd', () => {
       expect(mockSetResults).toHaveBeenCalledWith(expect.any(Function));
 
       // Verify the updater function marks the artist as inLibrary
-      const updater = mockSetResults.mock.calls[0][0];
-      const updated = updater([
+      const updated = mockSetResults.mock.calls.reduce((rows, [updater]) => updater(rows), [
         { foreignArtistId: 'mbid-123', artistName: 'Radiohead', inLibrary: false },
         { foreignArtistId: 'other', artistName: 'Other', inLibrary: false },
       ]);
@@ -101,7 +100,7 @@ describe('useArtistAdd', () => {
       expect(updated[1].inLibrary).toBe(false);
     });
 
-    it('shows "Already in Library" toast for exists errors', async () => {
+    it('keeps duplicate-provider error recoverable until membership is confirmed', async () => {
       vi.mocked(api.post).mockResolvedValueOnce({
         data: null,
         error: 'ArtistExistsValidator: artist already exists',
@@ -115,7 +114,7 @@ describe('useArtistAdd', () => {
       });
 
       expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'info', title: 'Already in Library' }),
+        expect.objectContaining({ type: 'error', title: 'Failed to add artist' }),
       );
     });
 
@@ -168,6 +167,7 @@ describe('useArtistAdd', () => {
     const artistWithoutMbid: ArtistResult = {
       foreignArtistId: '',
       artistName: 'New Artist',
+      resultKey: 'unidentified:one',
     };
 
     it('calls POST /api/search/discover/add with artistName', async () => {
@@ -188,7 +188,7 @@ describe('useArtistAdd', () => {
       });
     });
 
-    it('sets addingArtistId to the artistName for discovery add', async () => {
+    it('tracks discovery pending state by original result key', async () => {
       let resolvePost!: (value: any) => void;
       vi.mocked(api.post).mockImplementationOnce(
         () => new Promise((resolve) => { resolvePost = resolve; }),
@@ -201,7 +201,7 @@ describe('useArtistAdd', () => {
         addPromise = result.current.handleAddArtist(artistWithoutMbid);
       });
 
-      expect(result.current.addingArtistId).toBe('New Artist');
+      expect(result.current.addingArtistId).toBe('unidentified:one');
 
       await act(async () => {
         resolvePost({ data: { success: true, artist: {} }, error: null, status: 200 });
@@ -254,8 +254,9 @@ describe('useArtistAdd', () => {
 
       expect(result.current.mbidCandidates).toHaveLength(2);
       expect(result.current.selectingArtist?.artistName).toBe('New Artist');
-      // Results should NOT be updated yet
-      expect(mockSetResults).not.toHaveBeenCalled();
+      // Clearing old errors must not fabricate membership.
+      const updated = mockSetResults.mock.calls.reduce((rows, [updater]) => updater(rows), [artistWithoutMbid]);
+      expect(updated[0].inLibrary).not.toBe(true);
     });
   });
 
@@ -417,8 +418,7 @@ describe('useArtistAdd', () => {
       });
 
       expect(mockSetResults).toHaveBeenCalledWith(expect.any(Function));
-      const updater = mockSetResults.mock.calls[0][0];
-      const updated = updater([
+      const updated = mockSetResults.mock.calls.reduce((rows, [updater]) => updater(rows), [
         { foreignArtistId: 'id-1', inLibrary: false },
         { foreignArtistId: 'id-2', inLibrary: false },
         { foreignArtistId: 'id-3', inLibrary: false },

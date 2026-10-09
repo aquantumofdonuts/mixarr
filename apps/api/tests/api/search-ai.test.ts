@@ -215,6 +215,18 @@ describe('POST /api/search/ai', () => {
     expect(res.body.results[1].foreignArtistId).toBe('mbid-2');
   });
 
+  it('reports a failed AI provider alongside successful recommendations without leaking raw provider errors', async () => {
+    vi.mocked(aiService.isAvailable).mockResolvedValue(true);
+    vi.mocked(aiService.searchByPrompt).mockResolvedValue({ artists: ['Known'], providers: ['openai'], errors: ['Anthropic: https://secret@provider.invalid?token=private'] });
+    vi.mocked(prisma.connection.findFirst).mockResolvedValue({ id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test' } } as any);
+    mockSearchArtist.mockResolvedValue([{ foreignArtistId: 'mbid-1', artistName: 'Known' }]);
+    mockLidarrCacheExists.mockResolvedValue(false);
+    const response = await request(app).post('/api/search/ai').send({ prompt: 'Known' });
+    expect(response.status).toBe(200);
+    expect(response.body.results).toHaveLength(1);
+    expect(response.body.errors).toEqual(['Anthropic search unavailable. Retry the search.']);
+  });
+
   it('should filter out artists that cannot be resolved via Lidarr', async () => {
     vi.mocked(aiService.isAvailable).mockResolvedValue(true);
     vi.mocked(aiService.searchByPrompt).mockResolvedValue({
