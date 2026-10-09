@@ -159,3 +159,44 @@ test('notification missing channels and malformed events require explicit valid 
   await page.goto('/settings/notifications'); await expect(page.getByRole('alert').filter({ hasText: 'Failed to load channels: invalid response.' })).toBeVisible(); await expect(page.getByRole('alert').filter({ hasText: 'Failed to load events: invalid response.' })).toBeVisible(); await expect(page.getByText('No Notification Channels', { exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: 'Add Channel', exact: true })).toBeDisabled();
   validChannels = true; validEvents = true; await page.getByRole('button', { name: 'Retry loading channels' }).click(); await page.getByRole('button', { name: 'Retry loading events' }).click(); await expect(page.getByRole('button', { name: 'Add Channel', exact: true })).toBeEnabled(); await page.getByRole('button', { name: 'Add Channel', exact: true }).click(); await expect(page.getByText('Channel draft unchanged', { exact: true })).toBeVisible();
 });
+
+test('native pending-create controls lock and a failed edit retry retains one created channel', async ({ catalogPage: page }) => {
+  await settingsApi(page); let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve; });
+  let saved: Record<string, any> | null = null, failEdit = true;
+  const writes: { method: string; body: Record<string, any> }[] = [];
+  await page.route(/\/api\/notifications\/channels(?:\/101)?$/, async route => {
+    const request = route.request();
+    if (request.method() === 'GET') return route.fulfill({ json: saved ? [{ ...saved, config: { ...saved.config, headers: '••••••••' } }] : [] });
+    const body = request.postDataJSON(); writes.push({ method: request.method(), body });
+    if (request.method() === 'POST') { await pending; saved = { id: 101, ...body, createdAt: '2026-10-09T00:00:00Z' }; return route.fulfill({ status: 201, json: saved }); }
+    if (failEdit) return route.fulfill({ status: 503, json: { error: 'Channel temporarily unavailable' } });
+    saved = { ...saved, ...body }; return route.fulfill({ json: saved });
+  });
+  await page.goto('/settings/notifications'); await page.getByRole('button', { name: 'Add Channel', exact: true }).click(); await page.getByLabel('Channel Type').selectOption('webhook');
+  await page.getByLabel('Name', { exact: true }).fill('New channel'); await page.getByLabel('URL', { exact: true }).fill('https://hook.example'); await page.getByLabel('Headers (JSON, optional)').fill('{"X-Fixture":"test"}'); await page.getByRole('checkbox', { name: 'job.completed', exact: true }).check();
+  await page.getByRole('button', { name: 'Create Channel', exact: true }).click();
+  try {
+    await expect(page.getByText('Saving channel…', { exact: true })).toBeVisible(); await expect(page.getByLabel('Name', { exact: true })).toBeDisabled(); await expect(page.getByLabel('Channel Type')).toBeDisabled(); await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
+    expect(await page.getByRole('dialog').locator('input, select, textarea').evaluateAll(controls => controls.length > 0 && controls.every(control => control.matches(':disabled')))).toBe(true);
+  } finally { release(); }
+  await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page.getByRole('heading', { name: 'New channel', exact: true })).toBeVisible(); expect(writes.map(write => write.method)).toEqual(['POST']);
+  await page.locator('.rounded-card').filter({ has: page.getByRole('heading', { name: 'New channel', exact: true }) }).getByRole('button').nth(1).click(); await page.getByLabel('Name', { exact: true }).fill('Retry rename'); await page.getByRole('button', { name: 'Save channel changes', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Channel temporarily unavailable' })).toBeVisible(); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Retry rename');
+  failEdit = false; await page.getByRole('button', { name: 'Save channel changes', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page.getByRole('heading', { name: 'Retry rename', exact: true })).toBeVisible(); expect(writes.map(write => write.method)).toEqual(['POST', 'PUT', 'PUT']);
+});
+
+test('saved webhook header masks survive rename; replacement JSON is validated and invalid edits stay focused', async ({ catalogPage: page }) => {
+  await settingsApi(page);
+  const saved = { id: 101, type: 'webhook', name: 'Stored webhook', config: { url: 'https://hook.example', method: 'POST', headers: '••••••••' }, events: ['job.completed'], isActive: true, createdAt: '2026-10-09T00:00:00Z' };
+  const writes: Record<string, any>[] = [];
+  await page.route(/\/api\/notifications\/channels(?:\/101)?$/, route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: [saved] });
+    writes.push(route.request().postDataJSON()); return route.fulfill({ json: saved });
+  });
+  await page.goto('/settings/notifications');
+  const edit = () => page.locator('.rounded-card').filter({ has: page.getByRole('heading', { name: 'Stored webhook', exact: true }) }).getByRole('button').nth(1).click();
+  await edit(); await expect(page.getByLabel('Headers (JSON, optional)')).toHaveValue('••••••••'); await page.getByLabel('Name', { exact: true }).fill('Renamed webhook'); await page.getByRole('button', { name: 'Save channel changes', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(writes).toHaveLength(1); expect(writes[0].config.headers).toBe('••••••••');
+  await edit(); await page.getByLabel('Headers (JSON, optional)').fill('{"X-Fixture":"replacement"}'); await page.getByRole('button', { name: 'Save channel changes', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0); expect(writes[1].config.headers).toEqual({ 'X-Fixture': 'replacement' });
+  await edit(); await page.getByLabel('Headers (JSON, optional)').fill('"arbitrary string"'); await page.getByRole('button', { name: 'Save channel changes', exact: true }).click(); await expect(page.getByRole('alert').filter({ hasText: 'Headers must be a JSON object with string values.' })).toBeVisible(); await expect(page.getByLabel('Headers (JSON, optional)')).toBeFocused(); expect(writes).toHaveLength(2);
+});

@@ -35,6 +35,8 @@ interface NotificationChannel {
   createdAt: string;
 }
 
+const SECRET_MASK = '••••••••';
+
 const channelTypeIcons: Record<string, React.ElementType> = {
   discord: MessageCircle,
   webhook: Webhook,
@@ -91,7 +93,6 @@ export default function NotificationsSettingsPage() {
     isActive: true,
   });
 
-  const latestForm = useRef(form); latestForm.current = form;
   const [baseline, setBaseline] = useState(form);
   const [saving, setSaving] = useState(false);
   const [errorField, setErrorField] = useState<string | null>(null);
@@ -163,7 +164,7 @@ export default function NotificationsSettingsPage() {
       username: channel.config.username || '',
       url: channel.config.url || '',
       method: channel.config.method || 'POST',
-      headers: channel.config.headers ? JSON.stringify(channel.config.headers) : '',
+      headers: channel.config.headers === SECRET_MASK ? SECRET_MASK : channel.config.headers ? JSON.stringify(channel.config.headers) : '',
       events: channel.events,
       isActive: channel.isActive,
     };
@@ -193,7 +194,9 @@ export default function NotificationsSettingsPage() {
         return;
       }
       let headers;
-      if (form.headers) {
+      if (editingChannel?.config.headers === SECRET_MASK && form.headers === SECRET_MASK && form.headers === baseline.headers) {
+        headers = SECRET_MASK;
+      } else if (form.headers) {
         try { headers = JSON.parse(form.headers); if (!headers || Array.isArray(headers) || typeof headers !== 'object' || Object.values(headers).some(value => typeof value !== 'string')) throw new Error(); }
         catch { invalid('Headers must be a JSON object with string values.', 'channel-headers'); return; }
       }
@@ -231,8 +234,7 @@ export default function NotificationsSettingsPage() {
     } else {
       addToast({ type: 'success', title: editingChannel ? 'Channel updated' : 'Channel created' });
       setBaseline(submitted);
-      // Keep the dialog open if the user edited while this save was in flight.
-      if (JSON.stringify(latestForm.current) === JSON.stringify(submitted)) setShowModal(false);
+      setShowModal(false);
       fetchChannels();
     }
   };
@@ -406,7 +408,7 @@ export default function NotificationsSettingsPage() {
 
       {/* Add/Edit Modal */}
       <Modal isOpen={showModal} onClose={closeModal} title={editingChannel ? 'Edit Channel' : 'Add Notification Channel'}>
-        <div className="space-y-4">
+        <fieldset disabled={saving} className="space-y-4">
           <p role={error ? "alert" : "status"} className={error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>{error || (saving ? "Saving channel…" : dirty ? "Unsaved channel changes" : "Channel draft unchanged")}</p>
           {/* Channel Type */}
           {!editingChannel && (
@@ -522,14 +524,14 @@ export default function NotificationsSettingsPage() {
 
           {/* Actions */}
           <ModalFooter>
-            <Button variant="outline" onClick={closeModal}>
+            <Button variant="outline" onClick={closeModal} disabled={saving}>
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={saving || !eventsReady}>
               {saving ? 'Saving…' : editingChannel ? 'Save channel changes' : 'Create Channel'}
             </Button>
           </ModalFooter>
-        </div>
+        </fieldset>
       </Modal>
     </>
   );
