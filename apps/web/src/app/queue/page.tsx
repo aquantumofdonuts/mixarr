@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAddArtistOptions, type ArtistAddOptions } from '@/components/artists/AddArtistOptions';
 import { ArtistLink, canonicalArtistMbid } from '@/components/artists/ArtistLink';
@@ -22,7 +23,7 @@ const confirmed = (outcome: ReviewAcquisitionOutcome) => outcome.state === 'adde
 
 export default function QueuePage() {
   const router = useRouter(), pathname = usePathname(), params = useSearchParams();
-  const { user } = useAuth(), { addToast } = useToast();
+  const { user } = useAuth(), { addToast, isCurrent: notificationIsCurrent } = useToast();
   const actor = `${user?.id}:${user?.role}`;
   const actorOwner = useRef({ actor });
   if (actorOwner.current.actor !== actor) actorOwner.current = { actor };
@@ -93,7 +94,7 @@ export default function QueuePage() {
   }
   function offerUndo(response: ReviewAcquisitionResponse | null | undefined) {
     const capturedActor = actorOwner.current;
-    const actorIsCurrent = () => mounted.current && actorOwner.current === capturedActor;
+    const actorIsCurrent = () => notificationIsCurrent() && actorOwner.current === capturedActor;
     if (!response?.undoToken || !response.undoExpiresAt) return;
     const expires = Math.min(Date.now() + 10_000, Date.parse(response.undoExpiresAt));
     let pending = false, used = false;
@@ -158,11 +159,11 @@ export default function QueuePage() {
       <label className="text-sm">Review status<select aria-label="Review status" value={status} className="block min-h-11 border bg-background px-2" onChange={event => { setSearch(q); navigate({ status: event.target.value, cursor: null }); }}><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></label>
       <label className="text-sm">Item type<select aria-label="Review item type" value={itemType || ''} className="block min-h-11 border bg-background px-2" onChange={event => { setSearch(q); navigate({ itemType: event.target.value || null, cursor: null }); }}><option value="">All items</option><option value="artist">Artists</option><option value="album">Albums</option></select></label>
     </div>
-    <p className="text-sm"><span className="font-mono">{data?.total ?? 0}</span> matching review items · <span className="font-mono">{items.length}</span> on this page</p>
+    {data ? <p className="text-sm"><span className="font-mono">{data.total}</span> matching review items · <span className="font-mono">{items.length}</span> on this page</p> : <p className="text-sm">Matching review count is {queue.error ? 'unavailable' : 'loading'}.</p>}
     {queue.isFetching && <p role="status">Loading review queue…</p>}
     {showingPrevious && <p role="status">Previous queue results. Actions are unavailable until the current page loads.</p>}
     {queue.error && <div role="alert"><p>Review queue unavailable: {queue.error.message}</p><Button variant="outline" onClick={() => void queue.refetch()}>Retry queue</Button></div>}
-    {!queue.isFetching && !queue.error && !items.length && <p>No {status} review items match these filters.</p>}
+    {queue.data && !queue.isFetching && !queue.error && !items.length && <div className="space-y-2">{q || itemType ? <><p>No review items match your search or item type.</p><Button variant="outline" onClick={() => { setSearch(''); navigate({ q: null, itemType: null, cursor: null }); }}>Clear queue filters</Button></> : <><p>No {status} review items.</p>{status === 'pending' ? <p className="text-sm text-muted-foreground">Review items appear when subscriptions use queue result handling. <Link href="/subscriptions" prefetch={false} className="text-link underline">Review subscriptions</Link></p> : <Button variant="outline" onClick={() => navigate({ status: 'pending', cursor: null })}>View pending items</Button>}</>}</div>}
     <section aria-label="Review items" className="divide-y border-y">
       {status === 'pending' && eligible.length > 0 && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" aria-label="Select loaded page" disabled={busy} checked={eligible.every(item => context.selected.has(String(item.id)))} onChange={event => setSelected(event.target.checked ? new Set(eligible.map(item => String(item.id))) : new Set())} />Select loaded page · your pending items only</label>}
       {items.map(item => <article key={item.id} aria-label={`Review item ${item.id}`} className="flex flex-wrap items-center gap-3 py-3">

@@ -22,6 +22,7 @@ interface ToastContextValue {
   toasts: Toast[];
   addToast: (toast: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
+  isCurrent: () => boolean;
 }
 const ToastContext = React.createContext<ToastContextValue | null>(null);
 export function useToast() {
@@ -34,6 +35,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = React.useState<Toast[]>([]);
   const nextId = React.useRef(0);
   const mounted = React.useRef(true);
+  const isCurrent = React.useCallback(() => mounted.current, []);
   const timers = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const removeToast = React.useCallback((id: string) => {
     clearTimeout(timers.current.get(id));
@@ -54,7 +56,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     return () => { mounted.current = false; activeTimers.forEach(clearTimeout); activeTimers.clear(); };
   }, []);
 
-  return <ToastContext.Provider value={{ toasts, addToast, removeToast }}>
+  return <ToastContext.Provider value={{ toasts, addToast, removeToast, isCurrent }}>
     {children}
     <div aria-label="Notifications" role="region" className="fixed bottom-4 left-3 right-3 z-50 flex flex-col gap-2 sm:left-auto sm:w-[25rem] sm:max-w-[calc(100vw-1.5rem)]">
       {toasts.map(toast => {

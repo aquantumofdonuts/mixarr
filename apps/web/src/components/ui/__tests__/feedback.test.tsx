@@ -90,3 +90,15 @@ it('ignores a retained async notification callback after provider teardown', () 
   act(() => late({ type: 'info', title: 'Late private outcome' }));
   expect(vi.getTimerCount()).toBe(0);
 });
+it('keeps notification ownership alive across child navigation and detaches it after provider replacement', () => {
+  let first!: ReturnType<typeof useToast>['isCurrent'];
+  let latest!: ReturnType<typeof useToast>['isCurrent'];
+  function Capture() { latest = useToast().isCurrent; first ??= latest; return null; }
+  const view = render(<ToastProvider key="first"><Capture /></ToastProvider>);
+  expect(first()).toBe(true);
+  view.rerender(<ToastProvider key="first"><p>Another route</p></ToastProvider>);
+  expect(first()).toBe(true);
+  view.rerender(<ToastProvider key="second"><Capture /></ToastProvider>);
+  expect(first()).toBe(false); expect(latest()).toBe(true);
+  view.unmount(); expect(latest()).toBe(false);
+});

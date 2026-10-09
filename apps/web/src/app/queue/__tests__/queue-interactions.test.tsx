@@ -9,7 +9,7 @@ const session = vi.hoisted(() => ({ actor: 7 }));
 vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: session.actor, role: 'admin' } }) }));
 vi.mock('@/components/slskd/SearchModal', () => ({ SlskdSearchModal: () => null }));
 const toast = vi.hoisted(() => vi.fn());
-vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: toast }) }));
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: toast, isCurrent: () => true }) }));
 const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
 const row = (id: number, userId = 7) => ({ id, userId, mbid: ids[id % 2], artistName: 'Same name', source: 'Weekly discoveries', status: 'pending', itemType: 'artist', albumName: null, createdAt: '2026-10-07T12:00:00.000Z' });
 let rows: ReturnType<typeof row>[], clients: QueryClient[];
@@ -114,4 +114,12 @@ it('does not resurrect prior-session outcomes when an actor leaves and returns',
 it('does not post an offered Undo token after the account changes', async () => {
   const view = mount(); await screen.findByRole('checkbox', { name: 'Select review item 2' }); await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Select review item 2' })).toBeEnabled()); fireEvent.click(within(screen.getByRole('article', { name: 'Review item 2' })).getByRole('button', { name: 'Reject' })); await waitFor(() => expect(toast).toHaveBeenCalled()); const undo = toast.mock.calls.at(-1)![0];
   session.actor = 8; view.client.setQueryData(['auth'], { user: { id: 8 } }); view.rerender(<QueryClientProvider client={view.client}><QueuePage /></QueryClientProvider>); await act(async () => undo.action.onClick()); expect(calls('/api/imports/review/restore')).toHaveLength(0);
+});
+it('distinguishes an empty pending queue from no matches and offers filter recovery', async () => {
+  rows = []; const view = mount(); await screen.findByText('No pending review items.'); expect(screen.getByRole('link', {name:'Review subscriptions'})).toHaveAttribute('href','/subscriptions'); expect(screen.queryByRole('button', {name:'Clear queue filters'})).toBeNull();
+  await act(async () => navigate('/queue?q=Not+present&itemType=album&keep=value')); await screen.findByText('No review items match your search or item type.'); fireEvent.click(screen.getByRole('button', {name:'Clear queue filters'})); expect(new URLSearchParams(navigation.query).get('q')).toBeNull(); expect(new URLSearchParams(navigation.query).get('itemType')).toBeNull(); expect(new URLSearchParams(navigation.query).get('keep')).toBe('value'); view.unmount();
+});
+it('does not report zero matching records before the first queue response', async () => {
+  const original = request.getMockImplementation()!; let finish!: (value: Response) => void;
+  request.mockImplementation(async (url,options) => String(url).startsWith('/api/imports/review/queue?') ? new Promise(resolve=>{finish=resolve;}) : original(url,options)); mount(); await waitFor(()=>expect(request).toHaveBeenCalled()); expect(screen.queryByText(/matching review items/)).toBeNull(); expect(screen.getByText('Matching review count is loading.')).toBeInTheDocument(); await act(async ()=>finish(json({items:[],total:0,nextCursor:null}))); await screen.findByText('No pending review items.'); expect(screen.getByText(/matching review items/)).toHaveTextContent('0 matching review items');
 });
