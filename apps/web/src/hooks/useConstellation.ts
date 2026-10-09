@@ -157,8 +157,8 @@ export function useConstellation(
   const walk = useRef({ focus: options.walkingFocus, breadcrumbs: options.breadcrumbIds ?? [] });
   walk.current = { focus: options.walkingFocus, breadcrumbs: options.breadcrumbIds ?? [] };
   const anchors = useCallback(() => {
-    const distinct = [...new Set([...walk.current.breadcrumbs].reverse())].slice(0, ANCHOR_BREADCRUMBS);
-    return [originalSeed.current, walk.current.focus ?? currentCenter.current, ...distinct].filter((id): id is number => id != null);
+    const recent = walk.current.breadcrumbs.slice(-ANCHOR_BREADCRUMBS);
+    return [originalSeed.current, walk.current.focus ?? currentCenter.current, ...recent].filter((id): id is number => id != null);
   }, []);
   const [focusId, setFocusId] = useState<number | null>(null);
   const [streamToken, setStreamToken] = useState<StreamToken | null>(null);

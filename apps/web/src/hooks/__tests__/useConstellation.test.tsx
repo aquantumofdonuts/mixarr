@@ -344,3 +344,13 @@ it('preserves known mandatory identities on role and recenter responses without 
   expect(result.current.nodes.map(n => n.personId)).toEqual([900,800,600,500,400,300,100]);
   expect(result.current.nodes.some(n => n.personId === 999)).toBe(false);
 });
+
+it('protects identities from the last five breadcrumb entries rather than five distinct people in the whole trail', async () => {
+  const trail = [4,5,6,7,8,6,7,8,6,7];
+  vi.mocked(api.get).mockResolvedValue(ok({ focusId: 1, creditSource: 'index', streamToken: { id: 't', generation: 1 }, subgraph: subgraph(1, [4,5,9,6,7,8,1,...Array.from({ length: 294 }, (_, i) => 1000 + i)].map(id => node(id)), []) }));
+  const { result } = renderHook(() => useConstellation({ type: 'artist', id: '1' }, { walkingFocus: 7, breadcrumbIds: trail }));
+  await waitFor(() => expect(result.current.focusId).toBe(1));
+  const ids = result.current.nodes.map(person => person.personId);
+  expect(ids).toHaveLength(300); expect(ids).not.toContain(4); expect(ids).toContain(9);
+  for (const id of [1,6,7,8]) expect(ids).toContain(id);
+});

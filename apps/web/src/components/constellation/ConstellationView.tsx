@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
+import { flushSync } from 'react-dom';
 import dynamic from 'next/dynamic';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import type { ForceGraphProps, NodeObject } from 'react-force-graph-2d';
@@ -122,9 +123,14 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
   // The full trail stays in view state even when its older graph nodes leave the field.
   const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
   const [selectedPerson, setSelectedPerson] = useState<(Breadcrumb & { owned: boolean }) | null>(null);
+  // A local walk owns focus until its URL push commits or another URL arrives.
+  const [pendingWalk, setPendingWalk] = useState<{ from: number | null | undefined; to: number } | null>(null);
+  useEffect(() => { setPendingWalk(null); }, [requestedFocus, actorId, seed?.type, seed?.id]);
+  const walkingFocus = pendingWalk && pendingWalk.from === requestedFocus
+    ? pendingWalk.to : requestedFocus !== undefined ? requestedFocus : selectedPerson?.personId;
   const { nodes: mergedNodes, edges: mergedEdges, focusId, streamToken, loading, error, expandMore,
     onFrame, onStatus, availability, creditSource } = useConstellation(seed, {
-      roleMask, actorId, walkingFocus: requestedFocus ?? selectedPerson?.personId,
+      roleMask, actorId, walkingFocus,
       breadcrumbIds: breadcrumbs.map(crumb => crumb.personId),
     });
   const streamKey = streamToken ? `${streamToken.id}:${streamToken.generation}` : null;
@@ -135,14 +141,14 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
   const restored = useRef<string | null>(null);
   useEffect(() => {
     if (loading || focusId === null) return;
-    if (!requestedFocus) { onFocusChange?.(focusId, true); setSelectedPerson(null); return; }
-    const key = `${streamKey}:${requestedFocus}`;
+    if (!walkingFocus) { onFocusChange?.(focusId, true); setSelectedPerson(null); return; }
+    const key = `${streamKey}:${walkingFocus}`;
     if (restored.current === key) return;
     restored.current = key;
-    const node = mergedNodes.find(person => person.personId === requestedFocus);
-    setSelectedPerson({ personId: requestedFocus, displayName: node?.displayName || `Person ${requestedFocus}`, owned: node?.owned ?? false });
-    if (requestedFocus !== focusId) void expandMore(requestedFocus);
-  }, [requestedFocus, focusId, loading, streamKey, mergedNodes, expandMore, onFocusChange]);
+    const node = mergedNodes.find(person => person.personId === walkingFocus);
+    setSelectedPerson({ personId: walkingFocus, displayName: node?.displayName || `Person ${walkingFocus}`, owned: node?.owned ?? false });
+    if (walkingFocus !== focusId) void expandMore(walkingFocus);
+  }, [walkingFocus, focusId, loading, streamKey, mergedNodes, expandMore, onFocusChange]);
 
   useEffect(() => {
     setSelectedPerson(previous => {
@@ -201,20 +207,22 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
       if (!Number.isFinite(personId)) return;
       // Selecting a node ALWAYS opens its acquisition panel (the grain fix): the
       // user chooses artist-vs-album there rather than blind-subscribing.
-      setSelectedPerson({ personId, displayName: node.name, owned: Boolean(node.owned) });
       restored.current = `${streamKey}:${personId}`;
-      onFocusChange?.(personId);
-      setBreadcrumbs((prev) => {
-        if (prev.length > 0 && prev[prev.length - 1].personId === personId) return prev;
-        return [...prev, { personId, displayName: node.name }];
+      // The canvas callback can run outside React; commit anchors before even an
+      // immediately resolved cached expansion can merge and prune the field.
+      flushSync(() => {
+        setSelectedPerson({ personId, displayName: node.name, owned: Boolean(node.owned) });
+        setPendingWalk({ from: requestedFocus, to: personId });
+        setBreadcrumbs(prev => prev.at(-1)?.personId === personId ? prev : [...prev, { personId, displayName: node.name }]);
       });
+      onFocusChange?.(personId);
       // Expand IN PLACE: fetch this node's collaborators and MERGE them into the
       // current field (the graph grows outward, keeping everything already on
       // screen), rather than replacing the view. This is the "wander down a path"
       // model — the throughline stays visible instead of jarringly redrawing.
       void expandMore(personId);
     },
-    [expandMore, onFocusChange, mergedNodes, streamKey],
+    [expandMore, onFocusChange, mergedNodes, streamKey, requestedFocus],
   );
 
   /**
@@ -225,14 +233,17 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
     (personId: number) => {
       if (!Number.isFinite(personId)) return;
       const node = mergedNodes.find(person => person.personId === personId);
-      setSelectedPerson({ personId, displayName: node?.displayName || `Person ${personId}`, owned: node?.owned ?? false });
       restored.current = `${streamKey}:${personId}`;
+      flushSync(() => {
+        setSelectedPerson({ personId, displayName: node?.displayName || `Person ${personId}`, owned: node?.owned ?? false });
+        setPendingWalk({ from: requestedFocus, to: personId });
+        setBreadcrumbs(prev => prev.at(-1)?.personId === personId ? prev : [...prev, { personId, displayName: node?.displayName || `Person ${personId}` }]);
+      });
       onFocusChange?.(personId);
-      setBreadcrumbs(prev => prev.at(-1)?.personId === personId ? prev : [...prev, { personId, displayName: node?.displayName || `Person ${personId}` }]);
       // Expand a path hop into the current field (accumulate), same as a node click.
       void expandMore(personId);
     },
-    [expandMore, onFocusChange, mergedNodes, streamKey],
+    [expandMore, onFocusChange, mergedNodes, streamKey, requestedFocus],
   );
 
   /** Custom node paint: genre fill, prominence radius, owned ring, label. */
