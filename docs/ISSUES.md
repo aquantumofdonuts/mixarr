@@ -34,8 +34,8 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ## UI/UX catalog redesign (in progress)
 
-**Status:** T01–T18 implemented and independently reviewed on local branch `feat/music-catalog-ux`. Search preserves committed URLs, results and stable selections; action-time effective add options and explicit canonical identity choices reach acquisition paths; label traversal reports release/loaded-artist scope, retains same-offset Retry, and supports native disclosure keyboard traversal. T19 similar-artist discovery is next. The complete redesign, remaining page adoption, completion audit, and final full review remain pending. See the execution checkpoint for fresh verification and its limits.
-**Scope:** All 25 UI/UX review recommendations and a distinctive music-catalog identity; compact artwork-thumbnail feed confirmed by the user.
+**Status:** T01–T21 implemented and independently reviewed on local branch `feat/music-catalog-ux`. Discovery preserves canonical seeds/history and scoped recommendations. Queue search and stable pagination reach the full database scope; compact rows retain numeric-ID selection, effective add options, actual per-record outcomes, failed-only retries and signed rejection Undo across navigation. T22 library navigation is next. Read-only review of the R26–R28/T31–T32 amendments is required before T23 starts plan batch F. The complete redesign, remaining page adoption, completion audit and final full review remain pending. See the execution checkpoint for fresh verification and its limits.
+**Scope:** R01–R28/I01: the 25 UI/UX review recommendations, a distinctive music-catalog identity with the user-confirmed compact artwork-thumbnail feed, and the three October 8 Constellation follow-ups.
 
 - [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
 - [Implementation tasks and verification gates](plans/2026-10-07-music-catalog-ux-plan.md)
