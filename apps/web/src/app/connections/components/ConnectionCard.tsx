@@ -1,19 +1,10 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import Check from 'lucide-react/dist/esm/icons/check';
-import Edit from 'lucide-react/dist/esm/icons/edit';
-import Plus from 'lucide-react/dist/esm/icons/plus';
-import Search from 'lucide-react/dist/esm/icons/search';
-import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2';
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
-import X from 'lucide-react/dist/esm/icons/x';
 import { OAuthButtons } from './OAuthButtons';
 import { LidarrMaintenance } from './LidarrMaintenance';
 import type { OAuthType } from '../hooks/useOAuthStatus';
-
+import type { ConnectionTestState } from '../hooks/useConnectionForm';
 const OAUTH_TYPES: ReadonlySet<string> = new Set(['spotify', 'deezer', 'tidal']);
 
 export interface Connection {
@@ -31,6 +22,8 @@ export interface ConnectionCardProps {
   typeConfig: { value: string; label: string; color: string; description: string; icon?: string };
   connections: Connection[];
   isAdmin: boolean;
+  currentUserId?: number;
+  testStates?: Record<number, ConnectionTestState>;
   onAdd: (type: string) => void;
   onEdit: (id: number) => void;
   onTest: (id: number) => void;
@@ -39,111 +32,39 @@ export interface ConnectionCardProps {
   onPreview?: (connectionId: number, type: string) => void;
 }
 
-export function ConnectionCard({
-  typeConfig,
-  connections,
-  isAdmin,
-  onAdd,
-  onEdit,
-  onTest,
-  onDelete,
-  testingId,
-  onPreview,
-}: ConnectionCardProps) {
-  return (
-    <Card interactive>
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-3">
-          <div
-            className="h-10 w-10 rounded flex items-center justify-center text-white font-bold"
-            style={{ backgroundColor: typeConfig.color }}
-          >
-            {typeConfig.icon ?? typeConfig.label[0]}
+export function ConnectionCard({ typeConfig, connections, isAdmin, currentUserId, onEdit, onTest, onDelete, testingId, testStates = {}, onPreview }: ConnectionCardProps) {
+  return <>
+    {connections.map(conn => {
+      const canModify = isAdmin || (conn.userId !== null && conn.userId === currentUserId);
+      const result = testStates[conn.id];
+      const testing = result?.verdict === 'testing' || testingId === conn.id;
+      const timestamp = result?.testedAt ?? conn.lastTest;
+      return <article key={conn.id} aria-label={conn.name} className="border-b px-3 py-3 last:border-b-0">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <p className="break-words font-medium">{conn.name} <span className="font-normal text-sm text-muted-foreground">· {typeConfig.label}</span></p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>Enabled: {conn.isActive ? 'Yes' : 'No'}</span>
+              <span>{conn.userId === null ? 'Global' : 'Personal'}{isAdmin && conn.userId !== null && conn.user ? ` · ${conn.user.displayName || conn.user.username}` : ''}</span>
+              <span>Last tested: {timestamp ? <time className="font-mono" dateTime={timestamp}>{new Date(timestamp).toLocaleString()}</time> : 'Never'}</span>
+              <span>Session test: <span className={result?.verdict === 'pass' ? 'text-status-success' : result?.verdict === 'fail' ? 'text-destructive' : ''}>{testing ? 'Testing…' : result?.verdict === 'pass' ? 'Pass' : result?.verdict === 'fail' ? 'Fail' : 'Unknown'}</span></span>
+            </div>
           </div>
-          <div>
-            <CardTitle className="text-lg">{typeConfig.label}</CardTitle>
-            <CardDescription>{typeConfig.description}</CardDescription>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" title="Test connection" onClick={() => onTest(conn.id)} disabled={testing}>Test</Button>
+            {canModify && <>
+              <Button size="sm" variant="outline" title="Edit" onClick={() => onEdit(conn.id)}>Edit</Button>
+              <Button size="sm" variant="outline" title="Delete" onClick={() => onDelete(conn.id)}>Delete</Button>
+            </>}
           </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        {connections.length === 0 ? (
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => onAdd(typeConfig.value)}
-          >
-            <Plus className="h-4 w-4 mr-2" /> Configure
-          </Button>
-        ) : (
-          <div className="space-y-2">
-            {connections.map((conn) => (
-              <div key={conn.id} className="p-3 rounded-container border space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {conn.isActive ? (
-                      <Check className="h-4 w-4 text-status-success" />
-                    ) : (
-                      <X className="h-4 w-4 text-status-error" />
-                    )}
-                    <span className="font-medium">{conn.name}</span>
-                    {/* Owner badges visible to admins */}
-                    {isAdmin && (
-                      conn.userId === null ? (
-                        <Badge variant="secondary" className="text-xs">Global</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs">Personal</Badge>
-                      )
-                    )}
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => onTest(conn.id)}
-                      disabled={testingId === conn.id}
-                      title="Test connection"
-                    >
-                      <TestTube2 className={`h-4 w-4 ${testingId === conn.id ? 'animate-pulse' : ''}`} />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => onEdit(conn.id)} title="Edit">
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => onDelete(conn.id)} title="Delete">
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-                {/* OAuth buttons for Spotify/Deezer/TIDAL */}
-                {OAUTH_TYPES.has(conn.type) && (
-                  <OAuthButtons
-                    type={conn.type as OAuthType}
-                    connectionId={conn.id}
-                    onPreview={onPreview}
-                  />
-                )}
-                {/* Last.fm preview button */}
-                {conn.type === 'lastfm' && onPreview && (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onPreview(conn.id, 'lastfm')}
-                    >
-                      <Search className="h-3 w-3 mr-1" />
-                      Preview Artists
-                    </Button>
-                  </div>
-                )}
-                {/* Lidarr library maintenance */}
-                {conn.type === 'lidarr' && isAdmin && (
-                  <LidarrMaintenance connectionId={conn.id} />
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
+        <div className="mt-2">
+          {OAUTH_TYPES.has(conn.type) ? <OAuthButtons type={conn.type as OAuthType} connectionId={conn.id} canModify={canModify} onPreview={onPreview} /> : <span className="text-xs text-muted-foreground">Authorization: Not reported by this provider</span>}
+        </div>
+        {result?.verdict === 'fail' && <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-sm text-destructive"><span>{result.message}</span><Button variant="outline" size="sm" onClick={() => onTest(conn.id)}>Retry</Button></div>}
+        {conn.type === 'lastfm' && onPreview && <Button className="mt-2" size="sm" variant="outline" onClick={() => onPreview(conn.id, 'lastfm')}>Preview Artists</Button>}
+        {conn.type === 'lidarr' && isAdmin && <LidarrMaintenance connectionId={conn.id} />}
+      </article>;
+    })}
+  </>;
 }

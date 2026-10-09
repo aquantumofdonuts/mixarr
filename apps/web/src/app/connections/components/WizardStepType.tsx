@@ -8,20 +8,14 @@ interface WizardStepTypeProps {
 
 export function WizardStepType({ onSelectType }: WizardStepTypeProps) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="divide-y border">
       {connectionTypes.map((ct) => (
         <button
           key={ct.value}
           onClick={() => onSelectType(ct.value)}
-          className="flex flex-col items-center gap-2 rounded-container border p-4 hover:bg-accent transition-colors text-center"
+          className="flex w-full flex-col items-start gap-1 px-3 py-3 text-left hover:bg-muted transition-colors"
           data-testid={`type-card-${ct.value}`}
         >
-          <div
-            className="h-10 w-10 rounded flex items-center justify-center text-white font-bold text-sm"
-            style={{ backgroundColor: ct.color }}
-          >
-            {ct.label[0]}
-          </div>
           <span className="font-medium text-sm">{ct.label}</span>
           <span className="text-xs text-muted-foreground">{ct.description}</span>
         </button>

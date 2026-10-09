@@ -582,7 +582,7 @@ export function useBulkUpdateReview() {
 interface Connection {
   id: number;
   userId: number | null;
-  type: 'lidarr' | 'spotify' | 'lastfm' | 'tautulli' | 'deezer' | 'tidal' | 'listenbrainz' | 'discogs';
+  type: 'lidarr' | 'spotify' | 'lastfm' | 'tautulli' | 'jellyfin' | 'deezer' | 'tidal' | 'listenbrainz' | 'discogs' | 'slskd';
   name: string;
   isActive: boolean;
   lastTest: string | null;
@@ -596,7 +596,14 @@ export function useConnections() {
     queryFn: async ({ signal }) => {
       const { data, error } = await api.get<{ connections: Connection[] }>('/api/connections', { signal });
       if (error) throw new Error(error);
-      return data!.connections;
+      if (!Array.isArray(data?.connections) || data.connections.some(connection =>
+        !connection || !Number.isSafeInteger(connection.id) || connection.id <= 0 ||
+        typeof connection.type !== 'string' || typeof connection.name !== 'string' ||
+        typeof connection.isActive !== 'boolean' ||
+        !(connection.userId === null || Number.isSafeInteger(connection.userId)) ||
+        !(connection.lastTest === null || (typeof connection.lastTest === 'string' && !Number.isNaN(Date.parse(connection.lastTest))))
+      )) throw new Error('Invalid connections response');
+      return data.connections;
     },
     staleTime: 60 * 1000,
   });
@@ -604,6 +611,7 @@ export function useConnections() {
 
 export function useTestConnection() {
   return useMutation({
+    retry: false,
     mutationFn: async (id: number) => {
       const { data, error } = await api.post<{ success: boolean; message?: string }>(
         `/api/connections/${id}/test`
@@ -618,6 +626,7 @@ export function useDeleteConnection() {
   const queryClient = useQueryClient();
   
   return useMutation({
+    retry: false,
     mutationFn: async (id: number) => {
       const { error } = await api.delete(`/api/connections/${id}`);
       if (error) throw new Error(error);

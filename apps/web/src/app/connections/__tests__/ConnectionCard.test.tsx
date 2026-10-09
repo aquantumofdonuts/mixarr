@@ -1,261 +1,68 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConnectionCard, type Connection, type ConnectionCardProps } from '../components/ConnectionCard';
-
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false } },
-});
-
-function Wrapper({ children }: { children: React.ReactNode }) {
-  return (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
-}
-
-const makeTypeConfig = (overrides?: Partial<ConnectionCardProps['typeConfig']>) => ({
-  value: 'spotify',
-  label: 'Spotify',
-  color: '#1DB954',
-  description: 'Import & playlist subscriptions',
-  ...overrides,
-});
-
-const makeConnection = (overrides?: Partial<Connection>): Connection => ({
-  id: 1,
-  userId: null,
-  type: 'spotify',
-  name: 'My Spotify',
-  isActive: true,
-  lastTest: null,
-  createdAt: '2025-01-01T00:00:00Z',
-  user: null,
-  ...overrides,
-});
-
-const defaultProps: ConnectionCardProps = {
-  typeConfig: makeTypeConfig(),
-  connections: [],
-  isAdmin: false,
-  onAdd: vi.fn(),
-  onEdit: vi.fn(),
-  onTest: vi.fn(),
-  onDelete: vi.fn(),
-  testingId: null,
-};
-
-describe('ConnectionCard', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+vi.mock('../components/OAuthButtons', () => ({ OAuthButtons: ({ canModify }: { canModify: boolean }) => <span>OAuth modify: {String(canModify)}</span> }));
+vi.mock('../components/LidarrMaintenance', () => ({ LidarrMaintenance: () => <span>Library maintenance</span> }));
+const makeConnection = (overrides: Partial<Connection> = {}): Connection => ({ id: 1, userId: 7, type: 'spotify', name: 'My Spotify', isActive: true, lastTest: null, createdAt: '2025-01-01T00:00:00Z', ...overrides });
+const props: ConnectionCardProps = { typeConfig: { value: 'spotify', label: 'Spotify', color: '#1DB954', description: 'Import playlists' }, connections: [makeConnection()], currentUserId: 7, isAdmin: false, onAdd: vi.fn(), onEdit: vi.fn(), onTest: vi.fn(), onDelete: vi.fn(), testingId: null };
+beforeEach(() => vi.clearAllMocks());
+describe('configured connection rows', () => {
+  it('separates enabled state, timestamp and unknown session verdict without decorative swatches', () => {
+    const { container } = render(<ConnectionCard {...props} connections={[makeConnection({ lastTest: '2026-10-07T12:00:00Z' })]} />);
+    expect(screen.getByText(/My Spotify/)).toBeInTheDocument();
+    expect(screen.getByText('Enabled: Yes')).toBeInTheDocument();
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(container.querySelector('time')).toHaveAttribute('dateTime', '2026-10-07T12:00:00Z');
+    expect(container.querySelector('[style]')).toBeNull();
+    expect(screen.queryByText('Pass')).not.toBeInTheDocument();
   });
-
-  // --- Rendering basics ---
-
-  it('renders type label and description', () => {
-    render(<ConnectionCard {...defaultProps} />, { wrapper: Wrapper });
-    expect(screen.getByText('Spotify')).toBeInTheDocument();
-    expect(screen.getByText('Import & playlist subscriptions')).toBeInTheDocument();
+  it('shows a failed result and Retry independently of the saved timestamp and active flag', () => {
+    render(<ConnectionCard {...props} testStates={{ 1: { verdict: 'fail', message: 'Invalid key', testedAt: '2026-10-09T12:00:00Z' } }} />);
+    expect(screen.getByText('Fail')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid key');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(props.onTest).toHaveBeenCalledWith(1);
   });
-
-  it('renders color swatch with first letter of label', () => {
-    const { container } = render(<ConnectionCard {...defaultProps} />, { wrapper: Wrapper });
-    const swatch = container.querySelector('[style*="background-color"]');
-    expect(swatch).toHaveStyle({ backgroundColor: '#1DB954' });
-    expect(swatch).toHaveTextContent('S');
+  it('shows explicit Test/edit/delete actions for an owned personal connection', () => {
+    render(<ConnectionCard {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(props.onTest).toHaveBeenCalledWith(1);
+    expect(props.onEdit).toHaveBeenCalledWith(1);
+    expect(props.onDelete).toHaveBeenCalledWith(1);
   });
-
-  it('renders custom icon when provided', () => {
-    const { container } = render(
-      <ConnectionCard
-        {...defaultProps}
-        typeConfig={makeTypeConfig({ icon: '🎵' })}
-      />,
-      { wrapper: Wrapper },
-    );
-    const swatch = container.querySelector('[style*="background-color"]');
-    expect(swatch).toHaveTextContent('🎵');
+  it('restricts modifying global and other-owner connections for a member while retaining Test', () => {
+    render(<ConnectionCard {...props} connections={[makeConnection({ userId: null }), makeConnection({ id: 2, userId: 9, name: 'Other user' })]} />);
+    expect(screen.getAllByRole('button', { name: 'Test' })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+    expect(screen.getAllByText('OAuth modify: false')).toHaveLength(2);
   });
-
-  // --- Empty state ---
-
-  it('shows "Configure" button when no connections', () => {
-    render(<ConnectionCard {...defaultProps} connections={[]} />, { wrapper: Wrapper });
-    expect(screen.getByText('Configure')).toBeInTheDocument();
+  it('allows admin modification and labels the actual owner neutrally', () => {
+    render(<ConnectionCard {...props} isAdmin connections={[makeConnection({ userId: 9, user: { username: 'owner', displayName: 'Owner' } })]} />);
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.getByText('Personal · Owner')).toBeInTheDocument();
   });
-
-  it('calls onAdd with type value when Configure is clicked', () => {
-    const onAdd = vi.fn();
-    render(<ConnectionCard {...defaultProps} onAdd={onAdd} connections={[]} />, { wrapper: Wrapper });
-    fireEvent.click(screen.getByText('Configure'));
-    expect(onAdd).toHaveBeenCalledWith('spotify');
+  it('tracks concurrent tests independently by ID', () => {
+    render(<ConnectionCard {...props} connections={[makeConnection(), makeConnection({ id: 2, name: 'Second' }), makeConnection({ id: 3, name: 'Third' })]} testingId={1} testStates={{ 1: { verdict: 'testing' }, 2: { verdict: 'testing' } }} />);
+    expect(within(screen.getByRole('article', { name: 'My Spotify' })).getByRole('button', { name: 'Test' })).toBeDisabled();
+    expect(within(screen.getByRole('article', { name: 'Second' })).getByRole('button', { name: 'Test' })).toBeDisabled();
+    expect(within(screen.getByRole('article', { name: 'Third' })).getByRole('button', { name: 'Test' })).toBeEnabled();
   });
-
-  it('does not show Configure button when connections exist', () => {
-    render(
-      <ConnectionCard
-        {...defaultProps}
-        connections={[makeConnection()]}
-      />,
-      { wrapper: Wrapper },
-    );
-    expect(screen.queryByText('Configure')).not.toBeInTheDocument();
+  it('preserves Lidarr maintenance for admins and Last.fm preview', () => {
+    const preview = vi.fn();
+    const { rerender } = render(<ConnectionCard {...props} isAdmin connections={[makeConnection({ type: 'lidarr' })]} />);
+    expect(screen.getByText('Library maintenance')).toBeInTheDocument();
+    rerender(<ConnectionCard {...props} connections={[makeConnection({ type: 'lastfm' })]} onPreview={preview} />);
+    expect(screen.queryByText('Library maintenance')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview Artists' }));
+    expect(preview).toHaveBeenCalledWith(1, 'lastfm');
+    expect(screen.getByText('Authorization: Not reported by this provider')).toBeInTheDocument();
   });
-
-  // --- Connection entries ---
-
-  it('renders connection name and active status for each connection', () => {
-    const connections = [
-      makeConnection({ id: 1, name: 'Primary', isActive: true }),
-      makeConnection({ id: 2, name: 'Secondary', isActive: false }),
-    ];
-    render(<ConnectionCard {...defaultProps} connections={connections} />, { wrapper: Wrapper });
-
-    expect(screen.getByText('Primary')).toBeInTheDocument();
-    expect(screen.getByText('Secondary')).toBeInTheDocument();
-  });
-
-  // --- Action callbacks ---
-
-  it('calls onTest with correct ID when Test button clicked', () => {
-    const onTest = vi.fn();
-    const conn = makeConnection({ id: 42 });
-    render(<ConnectionCard {...defaultProps} onTest={onTest} connections={[conn]} />, { wrapper: Wrapper });
-
-    fireEvent.click(screen.getByTitle('Test connection'));
-    expect(onTest).toHaveBeenCalledWith(42);
-  });
-
-  it('calls onEdit with correct ID when Edit button clicked', () => {
-    const onEdit = vi.fn();
-    const conn = makeConnection({ id: 7 });
-    render(<ConnectionCard {...defaultProps} onEdit={onEdit} connections={[conn]} />, { wrapper: Wrapper });
-
-    fireEvent.click(screen.getByTitle('Edit'));
-    expect(onEdit).toHaveBeenCalledWith(7);
-  });
-
-  it('calls onDelete with correct ID when Delete button clicked', () => {
-    const onDelete = vi.fn();
-    const conn = makeConnection({ id: 99 });
-    render(<ConnectionCard {...defaultProps} onDelete={onDelete} connections={[conn]} />, { wrapper: Wrapper });
-
-    fireEvent.click(screen.getByTitle('Delete'));
-    expect(onDelete).toHaveBeenCalledWith(99);
-  });
-
-  // --- Testing state ---
-
-  it('disables Test button for the connection being tested', () => {
-    const conn = makeConnection({ id: 5 });
-    render(
-      <ConnectionCard
-        {...defaultProps}
-        connections={[conn]}
-        testingId={5}
-      />,
-      { wrapper: Wrapper },
-    );
-
-    const testBtn = screen.getByTitle('Test connection');
-    expect(testBtn).toBeDisabled();
-  });
-
-  it('shows animate-pulse class on icon when testingId matches', () => {
-    const conn = makeConnection({ id: 5 });
-    const { container } = render(
-      <ConnectionCard
-        {...defaultProps}
-        connections={[conn]}
-        testingId={5}
-      />,
-      { wrapper: Wrapper },
-    );
-
-    const pulsingIcon = container.querySelector('.animate-pulse');
-    expect(pulsingIcon).toBeInTheDocument();
-  });
-
-  it('does not disable Test button for other connections', () => {
-    const connections = [
-      makeConnection({ id: 5 }),
-      makeConnection({ id: 10, name: 'Other' }),
-    ];
-    render(
-      <ConnectionCard
-        {...defaultProps}
-        connections={connections}
-        testingId={5}
-      />,
-      { wrapper: Wrapper },
-    );
-
-    const testButtons = screen.getAllByTitle('Test connection');
-    // First button (id=5) should be disabled
-    expect(testButtons[0]).toBeDisabled();
-    // Second button (id=10) should be enabled
-    expect(testButtons[1]).not.toBeDisabled();
-  });
-
-  // --- Owner badges ---
-
-  it('shows Global badge when isAdmin and userId is null', () => {
-    const conn = makeConnection({ userId: null });
-    render(
-      <ConnectionCard
-        {...defaultProps}
-        isAdmin={true}
-        connections={[conn]}
-      />,
-      { wrapper: Wrapper },
-    );
-
-    expect(screen.getByText('Global')).toBeInTheDocument();
-  });
-
-  it('shows Personal badge when isAdmin and userId is set', () => {
-    const conn = makeConnection({ userId: 42 });
-    render(
-      <ConnectionCard
-        {...defaultProps}
-        isAdmin={true}
-        connections={[conn]}
-      />,
-      { wrapper: Wrapper },
-    );
-
-    expect(screen.getByText('Personal')).toBeInTheDocument();
-  });
-
-  it('does not show owner badges when not admin', () => {
-    const connections = [
-      makeConnection({ id: 1, userId: null }),
-      makeConnection({ id: 2, userId: 42, name: 'Personal Conn' }),
-    ];
-    render(
-      <ConnectionCard
-        {...defaultProps}
-        isAdmin={false}
-        connections={connections}
-      />,
-      { wrapper: Wrapper },
-    );
-
-    expect(screen.queryByText('Global')).not.toBeInTheDocument();
-    expect(screen.queryByText('Personal')).not.toBeInTheDocument();
-  });
-
-  // --- Multiple connections ---
-
-  it('renders all connections in the list', () => {
-    const connections = [
-      makeConnection({ id: 1, name: 'Alpha' }),
-      makeConnection({ id: 2, name: 'Bravo' }),
-      makeConnection({ id: 3, name: 'Charlie' }),
-    ];
-    render(<ConnectionCard {...defaultProps} connections={connections} />, { wrapper: Wrapper });
-
-    expect(screen.getByText('Alpha')).toBeInTheDocument();
-    expect(screen.getByText('Bravo')).toBeInTheDocument();
-    expect(screen.getByText('Charlie')).toBeInTheDocument();
+  it('never renders an available provider when no configured rows exist', () => {
+    render(<ConnectionCard {...props} connections={[]} />);
+    expect(screen.queryByRole('article')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Configure' })).toBeNull();
   });
 });

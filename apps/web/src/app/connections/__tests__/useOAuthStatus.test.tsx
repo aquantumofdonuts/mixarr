@@ -19,7 +19,7 @@ const createWrapper = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
-      mutations: { retry: false },
+      mutations: { retry: 2, retryDelay: 0 },
     },
   });
   const Wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -48,6 +48,77 @@ describe('useOAuthStatus', () => {
     if (originalLocation) {
       Object.defineProperty(window, 'location', originalLocation);
     }
+  });
+
+  it('rejects a malformed authorization response and keeps status unknown', async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { authorized: 'yes' }, error: null, status: 200 });
+    const { result } = renderHook(() => useOAuthStatus('spotify', 42), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    expect(result.current.status).toBeNull();
+  });
+
+  it('accepts the actual Deezer response without an expired field', async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { authorized: true, needsReauthorization: false }, error: null, status: 200 });
+    const { result } = renderHook(() => useOAuthStatus('deezer', 42), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.status).toEqual({ authorized: true, expired: false, needsReauthorization: false }));
+  });
+
+  it('keeps missing status unknown and exposes an explicit retry', async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ data: null, error: null, status: 200 });
+    const { result } = renderHook(() => useOAuthStatus('spotify', 42), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    expect(result.current.status).toBeNull();
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { authorized: false, expired: false, needsReauthorization: true }, error: null, status: 200 });
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.status?.authorized).toBe(false));
+    expect(api.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry an authorization side effect under the real global retry default', async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { authorized: false, expired: false, needsReauthorization: true }, error: null, status: 200 });
+    const { result } = renderHook(() => useOAuthStatus('spotify', 42), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.status).toBeTruthy());
+    vi.mocked(api.get).mockResolvedValue({ data: null, error: 'Authorization unavailable', status: 503 });
+    act(() => result.current.authorize());
+    await waitFor(() => expect(result.current.error?.message).toBe('Authorization unavailable'));
+    expect(api.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts and prevents late authorization navigation after unmount', async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { authorized: false, expired: false, needsReauthorization: true }, error: null, status: 200 });
+    const { result, unmount } = renderHook(() => useOAuthStatus('spotify', 42), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.status).toBeTruthy());
+    let resolve!: (value: any) => void;
+    vi.mocked(api.get).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    act(() => result.current.authorize());
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    const signal = vi.mocked(api.get).mock.calls[1][1]?.signal;
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { resolve({ data: { authUrl: 'https://accounts.spotify.com/authorize' }, error: null, status: 200 }); });
+    expect(window.location.href).toBe('');
+  });
+
+  it('ignores a retired actor authorization result and does not invalidate after retired revoke', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: 2, retryDelay: 0 } } });
+    queryClient.setQueryData(['auth'], { user: { id: 1, role: 'user' } });
+    const Wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { authorized: true, expired: false, needsReauthorization: false }, error: null, status: 200 });
+    const { result } = renderHook(() => useOAuthStatus('spotify', 42), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.status).toBeTruthy());
+    let resolveAuth!: (value: any) => void, resolveRevoke!: (value: any) => void;
+    vi.mocked(api.get).mockReturnValueOnce(new Promise(done => { resolveAuth = done; }));
+    vi.mocked(api.post).mockReturnValueOnce(new Promise(done => { resolveRevoke = done; }));
+    const invalidation = vi.spyOn(queryClient, 'invalidateQueries');
+    act(() => { result.current.authorize(); result.current.revoke(); });
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    queryClient.setQueryData(['auth'], { user: { id: 2, role: 'user' } });
+    await act(async () => {
+      resolveAuth({ data: { authUrl: 'https://accounts.spotify.com/authorize' }, error: null, status: 200 });
+      resolveRevoke({ data: { success: true }, error: null, status: 200 });
+    });
+    expect(window.location.href).toBe('');
+    expect(invalidation).not.toHaveBeenCalled();
   });
 
   describe('status fetching', () => {
@@ -124,7 +195,7 @@ describe('useOAuthStatus', () => {
         expect(window.location.href).toBe('https://accounts.spotify.com/authorize?client_id=abc');
       });
 
-      expect(api.get).toHaveBeenCalledWith('/api/connections/42/spotify/auth');
+      expect(api.get).toHaveBeenCalledWith('/api/connections/42/spotify/auth', { signal: expect.any(AbortSignal) });
     });
 
     it('sets isLoading during authorize', async () => {
@@ -205,7 +276,7 @@ describe('useOAuthStatus', () => {
       });
 
       await waitFor(() => {
-        expect(api.post).toHaveBeenCalledWith('/api/connections/5/deezer/revoke');
+        expect(api.post).toHaveBeenCalledWith('/api/connections/5/deezer/revoke', undefined, { signal: expect.any(AbortSignal) });
       });
 
       await waitFor(() => {
