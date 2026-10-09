@@ -59,7 +59,7 @@ test('deliberate same-name choices, real credit bridges, playback, inspector rou
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByRole('radio')).toHaveCount(2); await expect(page.getByRole('button', { name: 'Explore artist' })).toBeDisabled();
   expect(fixture.calls.some(call => call.includes('/seed'))).toBe(false);
-  await page.getByRole('radio', { name: /British/ }).check(); await page.getByRole('button', { name: 'Explore artist' }).click();
+  await page.getByRole('radio', { name: /British/ }).check(); await expect(page.getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await page.getByRole('button', { name: 'Explore artist' }).click();
   await expect(page).toHaveURL(new RegExp(`seed=${ARTIST_IDS[0]}&focus=1`));
   const panel = page.getByRole('dialog', { name: `${people[0].displayName} details` });
   await expect(panel.getByText('Producer · Composer', { exact: true })).toBeVisible();
@@ -88,6 +88,7 @@ test('named endpoints send numeric path IDs and reload restores verified names',
   await page.getByRole('button', { name: 'Close panel' }).click();
   await page.getByText('Find a collaboration path', { exact: true }).click();
   await choose(page, 'From artist', 'British'); await choose(page, 'To artist', 'Canadian');
+  await expect(page.getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await expect(page.getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Find path', exact: true }).click();
   await expect(page.getByTestId('path-finder-result')).toContainText('2 degrees');
   expect(fixture.calls.some(call => call === '/api/constellation/path?from=1&to=7&mode=shortest')).toBe(true);
@@ -95,6 +96,7 @@ test('named endpoints send numeric path IDs and reload restores verified names',
   await page.reload(); await page.getByText('Find a collaboration path', { exact: true }).click();
   await expect(page.getByLabel('From artist', { exact: true })).toHaveValue(people[0].displayName);
   await expect(page.getByLabel('To artist', { exact: true })).toHaveValue(people[1].displayName);
+  await expect(page.getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await expect(page.getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
   await expect(page.getByTestId('path-finder-result')).toContainText('2 degrees'); expect(fixture.invalid).toEqual([]);
 });
 
@@ -102,7 +104,7 @@ test('an unresolved named candidate never seeds a graph or fabricates an inspect
   const fixture = await constellationFixture(page);
   await page.route('**/api/constellation/identity?mbid=*', route => route.fulfill({ json: { mbid: ARTIST_IDS[0], personId: null, needsManual: true } }));
   await page.goto('/constellation'); await choose(page, 'Seed artist', 'British');
-  await expect(page.getByText(/No verified graph identity/)).toBeVisible(); await expect(page.getByRole('button', { name: 'Explore artist' })).toBeDisabled();
+  await expect(page.getByText(/No verified graph identity/)).toBeVisible(); await expect(page.getByText(/Discogs person ID:/)).toHaveCount(0); await expect(page.getByRole('button', { name: 'Explore artist' })).toBeDisabled();
   expect(fixture.calls.some(call => call.includes('/seed'))).toBe(false); expect(fixture.invalid).toEqual([]);
 });
 
@@ -133,6 +135,8 @@ for (const theme of ['light', 'dark'] as const) test(`320px ${theme} named contr
   const controls = page.getByTestId('constellation-controls'); expect(await controls.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await page.getByRole('button', { name: 'Close panel' }).click(); await page.getByText('Find a collaboration path', { exact: true }).click();
   await choose(page, 'From artist', 'British'); await choose(page, 'To artist', 'Canadian');
+  await expect(page.getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await expect(page.getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
+  await page.getByText('Discogs person ID: 7', { exact: true }).scrollIntoViewIfNeeded();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const button = page.getByRole('button', { name: 'Find path', exact: true }); expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await page.screenshot({ path: `${evidence}/constellation-path-320-${theme}.png`, animations: 'disabled' }); expect(fixture.invalid).toEqual([]);

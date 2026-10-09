@@ -31,6 +31,7 @@ it('retries a restored identity failure and resolves a missing cached name using
   const changed = vi.fn(); render(<ArtistLookup label="Artist" initialPersonId={15} onChange={changed} />);
   await userEvent.click(await screen.findByRole('button', { name: 'Retry artist' }));
   expect(await screen.findByText('Restored Name selected')).toBeInTheDocument();
+  expect(screen.getByText('Discogs person ID: 15')).toHaveClass('font-mono');
   expect(changed).toHaveBeenLastCalledWith({ mbid: id, personId: 15, name: 'Restored Name' });
   expect(api.get).toHaveBeenCalledTimes(3);
 });
@@ -40,4 +41,21 @@ it('retains candidate choices during resolution failure and retries the actual l
   await userEvent.type(screen.getByLabelText('Artist'), 'Name'); await userEvent.click(screen.getByRole('button', { name: 'Search' })); await userEvent.click(await screen.findByRole('radio'));
   expect(await screen.findByRole('alert')).toHaveTextContent('Offline'); expect(screen.getAllByRole('radio')).toHaveLength(1);
   await userEvent.click(screen.getByRole('button', { name: 'Retry artist' })); await waitFor(() => expect(changed).toHaveBeenLastCalledWith({ mbid: id, personId: 15, name: 'Name' }));
+});
+
+it('shows verified numeric metadata only after deliberate candidate resolution and clears it when edited', async () => {
+  let complete!: (value: any) => void;
+  vi.mocked(api.get).mockResolvedValueOnce(ok({ results: [{ id, name: 'Name' }] }) as any).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  render(<ArtistLookup label="Artist" onChange={vi.fn()} />);
+  await userEvent.type(screen.getByLabelText('Artist'), 'Name'); await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+  expect(screen.queryByText(/Discogs person ID:/)).toBeNull(); await userEvent.click(await screen.findByRole('radio'));
+  expect(screen.queryByText(/Discogs person ID:/)).toBeNull();
+  await act(async () => complete(ok({ mbid: id, personId: 15, needsManual: false })));
+  expect(screen.getByText('Name selected')).toBeInTheDocument(); expect(screen.getByText('Discogs person ID: 15')).toHaveClass('font-mono');
+  await userEvent.type(screen.getByLabelText('Artist'), ' edited'); expect(screen.queryByText(/Discogs person ID:/)).toBeNull();
+});
+it('does not present an unresolved restored numeric identifier as a verified selection', async () => {
+  vi.mocked(api.get).mockResolvedValue(ok({ personId: 15, mbid: null, needsManual: true }) as any);
+  render(<ArtistLookup label="Artist" initialPersonId={15} onChange={vi.fn()} />);
+  expect(await screen.findByText(/No verified graph identity/)).toBeInTheDocument(); expect(screen.queryByText(/Discogs person ID:/)).toBeNull();
 });
