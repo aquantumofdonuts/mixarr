@@ -59,3 +59,41 @@ it('does not present an unresolved restored numeric identifier as a verified sel
   render(<ArtistLookup label="Artist" initialPersonId={15} onChange={vi.fn()} />);
   expect(await screen.findByText(/No verified graph identity/)).toBeInTheDocument(); expect(screen.queryByText(/Discogs person ID:/)).toBeNull();
 });
+
+it('restores the canonical seed MBID through verified identity and real artist metadata across navigation', async () => {
+  const other = '22222222-2222-4222-8222-222222222222';
+  vi.mocked(api.get).mockImplementation(async url => {
+    const mbid = url.includes(other) ? other : id;
+    return ok(url.endsWith('/detail') ? { mbid, name: mbid === id ? 'British seed' : 'Canadian seed' } : { mbid, personId: mbid === id ? 1 : 7, needsManual: false }) as any;
+  });
+  const changed = vi.fn(), view = render(<ArtistLookup label="Seed artist" initialMbid={id} actorId={7} onChange={changed} />);
+  expect(await screen.findByText('British seed selected')).toBeInTheDocument(); expect(screen.getByText('Discogs person ID: 1')).toBeInTheDocument();
+  view.rerender(<ArtistLookup label="Seed artist" initialMbid={other} actorId={7} onChange={changed} />);
+  expect(await screen.findByText('Canadian seed selected')).toBeInTheDocument(); expect(screen.getByText('Discogs person ID: 7')).toBeInTheDocument();
+  view.rerender(<ArtistLookup label="Seed artist" initialMbid={id} actorId={7} onChange={changed} />);
+  expect(await screen.findByText('British seed selected')).toBeInTheDocument(); expect(screen.queryByText('Discogs person ID: 7')).toBeNull();
+  expect(changed).toHaveBeenLastCalledWith({ mbid: id, personId: 1, name: 'British seed' });
+});
+it('preserves a deliberately selected seed during its own URL commit without repeating identity or name requests', async () => {
+  vi.mocked(api.get).mockResolvedValueOnce(ok({ results: [{ id, name: 'Manual name', disambiguation: 'Chosen artist' }] }) as any).mockResolvedValueOnce(ok({ mbid: id, personId: 15, needsManual: false }) as any);
+  const changed = vi.fn(), view = render(<ArtistLookup label="Seed artist" onChange={changed} />);
+  await userEvent.type(screen.getByLabelText('Seed artist'), 'Name'); await userEvent.click(screen.getByRole('button', { name: 'Search' })); await userEvent.click(await screen.findByRole('radio'));
+  await screen.findByText('Manual name selected'); view.rerender(<ArtistLookup label="Seed artist" initialMbid={id} onChange={changed} />);
+  expect(screen.getByText('Manual name selected')).toBeInTheDocument(); expect(screen.getByText('Discogs person ID: 15')).toBeInTheDocument(); expect(api.get).toHaveBeenCalledTimes(2);
+});
+it('retires seed restoration responses on a new URL seed and actor, including name responses', async () => {
+  const other = '22222222-2222-4222-8222-222222222222';
+  let completeName!: (value: any) => void;
+  vi.mocked(api.get).mockImplementation(async url => {
+    if (url.endsWith('/detail') && url.includes(id)) return await new Promise(resolve => { completeName = resolve; });
+    const mbid = url.includes(other) ? other : id;
+    return ok(url.endsWith('/detail') ? { mbid, name: 'Canadian seed' } : { mbid, personId: mbid === id ? 1 : 7, needsManual: false }) as any;
+  });
+  const changed = vi.fn(), view = render(<ArtistLookup label="Seed artist" initialMbid={id} actorId={7} onChange={changed} />);
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith(`/api/search/artist/${id}/detail`, { signal: expect.any(AbortSignal) }));
+  const oldSignal = vi.mocked(api.get).mock.calls.find(([url]) => url.endsWith('/detail'))![1]!.signal!;
+  view.rerender(<ArtistLookup label="Seed artist" initialMbid={other} actorId={8} onChange={changed} />);
+  expect(oldSignal.aborted).toBe(true); await screen.findByText('Canadian seed selected');
+  await act(async () => completeName(ok({ mbid: id, name: 'Old British seed' })));
+  expect(screen.queryByText('Old British seed selected')).toBeNull(); expect(changed).toHaveBeenLastCalledWith({ mbid: other, personId: 7, name: 'Canadian seed' });
+});

@@ -14,10 +14,11 @@ export function personIdentifier(value: string | null): number | null {
 }
 
 /** A deliberately chosen MusicBrainz candidate is required before resolving a graph person. */
-export function ArtistLookup({ label, onChange, actorId, initialPersonId }: {
-  label: string; onChange: (person: ResolvedPerson | null) => void; actorId?: number; initialPersonId?: number | null;
+export function ArtistLookup({ label, onChange, actorId, initialPersonId, initialMbid, consumeOwnCommit }: {
+  label: string; onChange: (person: ResolvedPerson | null) => void; actorId?: number; initialPersonId?: number | null; initialMbid?: string | null; consumeOwnCommit?: (mbid: string | null) => boolean;
 }) {
   const namespace = useId();
+  const seedMbid = canonicalArtistMbid(initialMbid);
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<Candidate[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -29,30 +30,37 @@ export function ArtistLookup({ label, onChange, actorId, initialPersonId }: {
   const callback = useRef(onChange); callback.current = onChange;
   const retire = () => { request.current?.abort(); request.current = null; };
   useEffect(() => {
-    if (initialPersonId && resolved.current && resolved.current.actorId === actorId && resolved.current.person.personId === initialPersonId) return;
+    // The user may already be typing again when their own Explore URL update arrives.
+    if (consumeOwnCommit?.(seedMbid)) return;
+    const previous = resolved.current;
+    // Keep a deliberate choice when its own Explore action commits the same identity.
+    if (previous && previous.actorId === actorId &&
+        (seedMbid ? previous.person.mbid === seedMbid : initialPersonId && previous.person.personId === initialPersonId)) return;
     resolved.current = null;
     retire(); callback.current(null); setQuery(''); setChoices([]); setSelected(null); setState('idle');
-    if (!initialPersonId) return;
+    if (!seedMbid && !initialPersonId) return;
     const controller = new AbortController(); request.current = controller;
     setState('resolving');
-    void api.get<IdentityResponse>(`/api/constellation/identity?personId=${initialPersonId}`, { signal: controller.signal }).then(async ({ data, error }) => {
+    const url = seedMbid ? `/api/constellation/identity?mbid=${seedMbid}` : `/api/constellation/identity?personId=${initialPersonId}`;
+    void api.get<IdentityResponse>(url, { signal: controller.signal }).then(async ({ data, error }) => {
       if (controller.signal.aborted) return;
-      const mbid = canonicalArtistMbid(data?.mbid);
-      let name = typeof data?.displayName === 'string' ? data.displayName.trim() : '';
-      if (mbid && data && !data.needsManual && data.personId === initialPersonId && !name) {
+      if (error || !data) { setMessage(error || 'Identity lookup failed'); setState('error'); return; }
+      const mbid = canonicalArtistMbid(data.mbid), personId = personIdentifier(String(data.personId));
+      if (!mbid || !personId || data.needsManual || (seedMbid ? mbid !== seedMbid : personId !== initialPersonId)) { setState('unresolved'); return; }
+      let name = typeof data.displayName === 'string' ? data.displayName.trim() : '';
+      if (!name) {
         const detail = await api.get<{ name: string; mbid: string }>(`/api/search/artist/${mbid}/detail`, { signal: controller.signal });
         if (controller.signal.aborted) return;
         if (detail.error || !detail.data) { setMessage(detail.error || 'Artist name unavailable'); setState('error'); return; }
         if (canonicalArtistMbid(detail.data.mbid) === mbid && typeof detail.data.name === 'string') name = detail.data.name.trim();
       }
-      if (error || !data) { setMessage(error || 'Identity lookup failed'); setState('error'); return; }
-      if (!mbid || !name || data.needsManual || data.personId !== initialPersonId) { setState('unresolved'); return; }
+      if (!name) { setState('unresolved'); return; }
       setQuery(name); setSelected(mbid); setState('resolved');
-      const person = { mbid, personId: initialPersonId, name };
+      const person = { mbid, personId, name };
       resolved.current = { actorId, person }; callback.current(person);
     }).catch(() => { if (!controller.signal.aborted) { setMessage('Identity lookup failed'); setState('error'); } });
-    return retire;
-  }, [actorId, initialPersonId, retry]);
+    return () => { controller.abort(); if (request.current === controller) request.current = null; };
+  }, [actorId, initialPersonId, seedMbid, retry, consumeOwnCommit]);
   useEffect(() => () => retire(), []);
 
   async function search() {
@@ -98,6 +106,6 @@ export function ArtistLookup({ label, onChange, actorId, initialPersonId }: {
     {state === 'empty' && <p role="status" className="text-xs">No matching artists. Try another name.</p>}
     {state === 'resolved' && resolved.current && <p role="status" className="text-xs"><span>{query} selected</span><span className="block font-mono text-xs text-muted-foreground">Discogs person ID: {resolved.current.person.personId}</span></p>}
     {state === 'unresolved' && <p role="status" className="text-xs">No verified graph identity. Choose another artist or check the MusicBrainz Discogs link.</p>}
-    {state === 'error' && <div role="alert" className="text-xs">{message} <button type="button" className="min-h-11 text-link underline" onClick={() => { const candidate = choices.find(choice => choice.id === selected); if (candidate) void resolve(candidate); else if (initialPersonId && !query) { setRetry(value => value + 1); } else void search(); }}>Retry {label.toLowerCase()}</button></div>}
+    {state === 'error' && <div role="alert" className="text-xs">{message} <button type="button" className="min-h-11 text-link underline" onClick={() => { const candidate = choices.find(choice => choice.id === selected); if (candidate) void resolve(candidate); else if ((seedMbid || initialPersonId) && !query) { setRetry(value => value + 1); } else void search(); }}>Retry {label.toLowerCase()}</button></div>}
   </div>;
 }

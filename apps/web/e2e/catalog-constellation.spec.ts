@@ -88,7 +88,7 @@ test('named endpoints send numeric path IDs and reload restores verified names',
   await page.getByRole('button', { name: 'Close panel' }).click();
   await page.getByText('Find a collaboration path', { exact: true }).click();
   await choose(page, 'From artist', 'British'); await choose(page, 'To artist', 'Canadian');
-  await expect(page.getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await expect(page.getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('path-finder').getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await expect(page.getByTestId('path-finder').getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Find path', exact: true }).click();
   await expect(page.getByTestId('path-finder-result')).toContainText('2 degrees');
   expect(fixture.calls.some(call => call === '/api/constellation/path?from=1&to=7&mode=shortest')).toBe(true);
@@ -96,7 +96,7 @@ test('named endpoints send numeric path IDs and reload restores verified names',
   await page.reload(); await page.getByText('Find a collaboration path', { exact: true }).click();
   await expect(page.getByLabel('From artist', { exact: true })).toHaveValue(people[0].displayName);
   await expect(page.getByLabel('To artist', { exact: true })).toHaveValue(people[1].displayName);
-  await expect(page.getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await expect(page.getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('path-finder').getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await expect(page.getByTestId('path-finder').getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
   await expect(page.getByTestId('path-finder-result')).toContainText('2 degrees'); expect(fixture.invalid).toEqual([]);
 });
 
@@ -135,9 +135,37 @@ for (const theme of ['light', 'dark'] as const) test(`320px ${theme} named contr
   const controls = page.getByTestId('constellation-controls'); expect(await controls.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await page.getByRole('button', { name: 'Close panel' }).click(); await page.getByText('Find a collaboration path', { exact: true }).click();
   await choose(page, 'From artist', 'British'); await choose(page, 'To artist', 'Canadian');
-  await expect(page.getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await expect(page.getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
-  await page.getByText('Discogs person ID: 7', { exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.getByTestId('path-finder').getByText('Discogs person ID: 1', { exact: true })).toBeVisible(); await expect(page.getByTestId('path-finder').getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
+  await page.getByTestId('path-finder').getByText('Discogs person ID: 7', { exact: true }).scrollIntoViewIfNeeded();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const button = page.getByRole('button', { name: 'Find path', exact: true }); expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await page.screenshot({ path: `${evidence}/constellation-path-320-${theme}.png`, animations: 'disabled' }); expect(fixture.invalid).toEqual([]);
+});
+
+test('seed names and IDs follow cross-seed Back, Forward and reload independently of walking focus', async ({ catalogPage: page }) => {
+  const fixture = await constellationFixture(page);
+  await page.route('**/api/search/musicbrainz/artist?*', route => route.fulfill({ json: { results: ARTIST_IDS.map((id, index) => ({ id, name: index ? 'Canadian seed' : 'British seed', disambiguation: index ? 'Canadian ensemble' : 'British solo artist' })) } }));
+  await page.route(/\/api\/search\/artist\/[^/]+\/detail(?:\?|$)/, route => {
+    const mbid = new URL(route.request().url()).pathname.split('/')[4];
+    if (!ARTIST_IDS.includes(mbid) || route.request().method() !== 'GET') return route.fallback();
+    return route.fulfill({ json: { mbid, name: mbid === ARTIST_IDS[0] ? 'British restored seed' : 'Canadian restored seed', imageUrl: null, disambiguation: 'Verified fixture artist', membership: 'not-in-library', sources: [], sourcesNextCursor: null, unavailable: [] } });
+  });
+  await page.goto('/constellation'); await seed(page, 'British');
+  await expect(page).toHaveURL(new RegExp(`seed=${ARTIST_IDS[0]}&focus=1`)); await expect(page.getByLabel('Seed artist', { exact: true })).toHaveValue('British seed');
+  await seed(page, 'Canadian'); await expect(page).toHaveURL(new RegExp(`seed=${ARTIST_IDS[1]}&focus=7`));
+  await expect(page.getByLabel('Seed artist', { exact: true })).toHaveValue('Canadian seed');
+  await page.goBack(); await expect(page).toHaveURL(new RegExp(`seed=${ARTIST_IDS[0]}&focus=1`));
+  await expect(page.getByLabel('Seed artist', { exact: true })).toHaveValue('British restored seed'); await expect(page.getByText('Discogs person ID: 1', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Explore artist' })).toBeEnabled();
+  await page.goForward(); await expect(page).toHaveURL(new RegExp(`seed=${ARTIST_IDS[1]}&focus=7`));
+  await expect(page.getByLabel('Seed artist', { exact: true })).toHaveValue('Canadian restored seed'); await expect(page.getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
+  await page.reload(); await expect(page.getByLabel('Seed artist', { exact: true })).toHaveValue('Canadian restored seed');
+  await page.getByRole('button', { name: 'Close panel' }).click(); await page.getByText('People in this field', { exact: true }).click();
+  await page.getByRole('button', { name: people[2].displayName, exact: true }).click();
+  await expect(page).toHaveURL(url => url.searchParams.get('seed') === ARTIST_IDS[1] && url.searchParams.get('focus') === '42');
+  await expect(page.getByLabel('Seed artist', { exact: true })).toHaveValue('Canadian restored seed'); await expect(page.getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
+  await page.reload(); await expect(page).toHaveURL(url => url.searchParams.get('seed') === ARTIST_IDS[1] && url.searchParams.get('focus') === '42');
+  await expect(page.getByLabel('Seed artist', { exact: true })).toHaveValue('Canadian restored seed'); await expect(page.getByText('Discogs person ID: 7', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: `${people[2].displayName} details` })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Explore artist' })).toBeEnabled(); expect(fixture.invalid).toEqual([]);
 });
