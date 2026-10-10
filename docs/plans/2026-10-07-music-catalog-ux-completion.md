@@ -1,6 +1,6 @@
 # Music-catalog UX completion audit
 
-Audit date: October 9, 2026. **Gate: INCOMPLETE — genuine external-provider acceptance C137 remains pending.** The entire matrix was regenerated after implementation repairs and the final independent SPEC/QUALITY reviews at `ffeb12352704b404130fc73c27ff661c032c7733`. The immutable checklist was extracted before implementation inspection at `af9b577`. Code quality and local runtime proof do not automatically accept the remaining provider evidence gap.
+Audit evidence date: October 9, 2026. Owner gap acceptance: October 10, 2026. **Gate: PASS with accepted gap C137 — provider verification is deferred to separate work.** The entire matrix was regenerated after implementation repairs and the final independent SPEC/QUALITY reviews at `ffeb12352704b404130fc73c27ff661c032c7733`. The immutable checklist was extracted before implementation inspection at `af9b577`. Code quality and local runtime proof do not establish genuine external-provider compatibility. The owner explicitly accepted C137 as deferred on October 10; its E2E verification remains unproven.
 
 Specification: the authoritative main-checkout [design](/home/chris/Github/mixarr/docs/plans/2026-10-07-music-catalog-ux-design.md) and [plan](/home/chris/Github/mixarr/docs/plans/2026-10-07-music-catalog-ux-plan.md), plus the owner-approved [hard-cap amendment](2026-10-08-music-catalog-amendment-review.md). Original dirty specification files are preserved. Design SHA256 `22e921511252736daf54f9d420c6a0747ed6291a978faea55d125e100d91d323`; plan SHA256 `1dc6a0e14d4f422ef440d51018e947ee476829bb64cfee61d40bc1c99a636008`.
 
@@ -13,9 +13,9 @@ The spec-derived [TypeScript checklist](2026-10-07-music-catalog-ux-audit.ts) ha
 | Status | Count |
 |---|---:|
 | COMPLETE | 136 |
-| PENDING_EVIDENCE | 1 |
+| ACCEPTED_GAP | 1 |
 
-27/29 parent requirements are complete. A parent remains incomplete while any mapped commitment is incomplete. No gaps have been accepted by the owner. Explicit approval of the five-surface gallery covers C040; it does not accept missing runtime/provider evidence.
+All 29 parent requirements satisfy the completion gate: 27 COMPLETE and two ACCEPTED_GAP (R14 and I01, both mapped to C137). The owner explicitly accepted C137 with the reason: “C137 deferred: provider verification will be performed separately”. Gallery approval covers C040 independently; provider verification remains deferred.
 
 | Parent requirement | Status |
 |---|---|
@@ -32,7 +32,7 @@ The spec-derived [TypeScript checklist](2026-10-07-music-catalog-ux-audit.ts) ha
 | R11 | COMPLETE |
 | R12 | COMPLETE |
 | R13 | COMPLETE |
-| R14 | INCOMPLETE |
+| R14 | ACCEPTED_GAP |
 | R15 | COMPLETE |
 | R16 | COMPLETE |
 | R17 | COMPLETE |
@@ -47,11 +47,11 @@ The spec-derived [TypeScript checklist](2026-10-07-music-catalog-ux-audit.ts) ha
 | R26 | COMPLETE |
 | R27 | COMPLETE |
 | R28 | COMPLETE |
-| I01 | INCOMPLETE |
+| I01 | ACCEPTED_GAP |
 
 ## Four-level completion matrix
 
-`yes` means verified at that level; `no` means not established. COMPLETE requires all four levels. PENDING_EVIDENCE is an explicit incomplete status, never an automatic waiver. Exists and Wired identify production execution paths, not just test filenames.
+`yes` means verified at that level; `no` means not established. COMPLETE requires all four levels. PENDING_EVIDENCE is an explicit incomplete status, never an automatic waiver. ACCEPTED_GAP records an explicit owner deferral with a reason; it does not change verification levels. Exists and Wired identify production execution paths, not just test filenames.
 
 Reference legend: D numbers refer to design sections; D8 named suffixes refer to its individual workflow headings; P2A–E refer to plan contracts A–E; Txx.n refers to the task step. I01 is the catalog's source-backed identity. Runtime logs under /tmp are local audit artifacts, not production deployment or external-provider acceptance.
 
@@ -193,7 +193,7 @@ Reference legend: D numbers refer to design sections; D8 named suffixes refer to
 | C134 | backend | R28 | T32.4 — Atomic shared-key budget share0.8 bounds crawl while fullshare interactive work uses remaining headroom | yes | yes | yes | yes | COMPLETE | apps/api/src/services/constellation/DailyApiBudget.ts:44; apps/api/src/services/constellation/DailyApiBudget.ts:85; apps/api/tests/services/constellation/DailyApiBudget.test.ts:143; /tmp/catalog-final-callers-quality-backend-tests.log; /tmp/catalog-final-callers-quality-backend-cleanup.json; /tmp/catalog-final-callers-quality-backend.md — Atomic Lua shared-key reservation limits crawl at80%, lets interactive consume remaining20%, and leaves rejected takes uncharged; fresh genuine Redis DB15 concurrency/TTL proof passed, cleanup keys0. |
 | C135 | backend | R28 | T32.4 — Only crawl passes0.8 budget share and shared limiter/seed identifier policy is preserved | yes | yes | yes | yes | COMPLETE | apps/api/src/jobs/constellation/orbit-crawl-worker.ts:467; apps/api/src/jobs/constellation/constellation-expand-worker.ts:112; apps/api/src/services/constellation/resolveCreditSource.ts:96; apps/api/src/services/constellation/resolveCreditSource.ts:114; apps/api/tests/jobs/constellation/orbit-crawl.test.ts:1; /tmp/catalog-final-callers-quality-backend-tests.log; /tmp/catalog-final-callers-quality-backend-cleanup.json; /tmp/catalog-final-callers-quality-backend.md — Only crawl passes budgetShare0.8; interactive default remains1, both use same shared budget counter and existing Discogs request limiter/seed policy. Fresh crawl/worker/source-degradation tests pass. |
 | C136 | backend | R14,R17,R21 | T29.2-3 — Isolated real-router/database proof covers two users,missingidentity/connection,timeout,stale revision and Undo | yes | yes | yes | yes | COMPLETE | apps/api/tests/api/catalog-completion-database.test.ts:52; apps/api/tests/api/catalog-completion-database.test.ts:102; apps/api/tests/api/catalog-completion-database.test.ts:151; apps/api/tests/api/catalog-completion-database.test.ts:258; apps/api/tests/api/catalog-completion-database.test.ts:270; /tmp/catalog-final-callers-quality-backend-tests.log; /tmp/catalog-final-callers-quality-backend-cleanup.json; /tmp/catalog-final-callers-quality-backend.md — New15-case real MySQL proof executes Feed/import/settings routers with real express-session/Passport restoration and production guards; tests two users/admin, missingidentity/connection, actual abort, stale CAS rollback/finalization, acquisition, same-name mixed bulk, queue search, actual owned PUT pause/resume and foreign-session rejection, global/owned provider connection composition, signed Undo and source pagination. Login identity boundary and provider adapters are controlled; credential/deployed-store/provider compatibility remain separate. |
-| C137 | backend | R14,I01 | T29.3-4 — Genuine external-provider acceptance is independently evidenced or remains explicitly pending | yes | yes | yes | no | PENDING_EVIDENCE | apps/api/tests/api/catalog-completion-database.test.ts:1; /tmp/catalog-final-callers-quality-backend-tests.log; /tmp/catalog-final-callers-quality-backend-cleanup.json; /tmp/catalog-final-callers-quality-backend.md — No genuine external-provider credential/compatibility/action evidence was available or authorized. Controlled adapters, mocked browser responses and passing database/router tests cannot establish live-provider acceptance; remains pending without human gap acceptance. |
+| C137 | backend | R14,I01 | T29.3-4 — Genuine external-provider acceptance is independently evidenced or remains explicitly pending | yes | yes | yes | no | ACCEPTED_GAP | apps/api/tests/api/catalog-completion-database.test.ts:1; /tmp/catalog-final-callers-quality-backend-tests.log; /tmp/catalog-final-callers-quality-backend-cleanup.json; /tmp/catalog-final-callers-quality-backend.md — No genuine external-provider credential/compatibility/action evidence was available or authorized. Controlled adapters, mocked browser responses and passing database/router tests cannot establish live-provider acceptance; Owner acceptance on October 10, 2026: “C137 deferred: provider verification will be performed separately”. This is an accepted deferral; genuine provider compatibility remains unverified and the E2E flag stays no. |
 
 ## Initial gaps, repairs and final re-audit
 
@@ -201,7 +201,7 @@ The initial complete matrix contained 130 COMPLETE, five BROKEN_CHAIN and two PE
 
 C036 is supported by a fresh complete 22-check authentic Chromium native 200% zoom run in both themes at the final reviewed source, including settings, all eight keyboard workflows and narrow error recovery. The earlier 22-check run at ecdcd879 remains historical evidence. Browser-reported zoom is 2; actual layout widths halve, device-pixel ratio doubles and visual-viewport scale stays 1. Earlier ineffective shortcuts and 640px reflow-only evidence remain historical limitations, not the basis of this pass. Firefox/WebKit native zoom is not claimed. C040 has the owner's explicit five-surface gallery approval at `2999bff`.
 
-C137 remains pending: no external-provider sandbox credentials/actions were supplied or authorized. Actual disposable MySQL/session and Redis tests passed with controlled external adapters; they do not prove genuine provider compatibility. The owner has not accepted this gap. To close it, supply explicit sandbox-provider verification or explicitly identify C137 and a reason for deferral, as required by the completion-audit skill. R14 and I01 remain incomplete while this item is pending; no whole-plan completion claim is made.
+C137 is ACCEPTED_GAP following the owner’s explicit October 10, 2026 decision: “C137 deferred: provider verification will be performed separately”. No external-provider sandbox credentials/actions were supplied or authorized. Actual disposable MySQL/session and Redis tests passed with controlled external adapters; they do not prove genuine provider compatibility. Only C137’s status and acceptance justification changed; all other 136 commitments remain COMPLETE and C137’s E2E flag remains no. R14 and I01 are ACCEPTED_GAP. The plan satisfies the completion gate with this accepted deferral; genuine provider verification remains separate work.
 
 ## Completion-theater scan
 
@@ -215,4 +215,4 @@ The isolated MySQL cases use actual Prisma reads/transactions, production router
 
 The initial independent platform pass ran 193 unit/boundary checks and 37 Chromium checks; workflow ran 314 unit/boundary checks and 111/112 Chromium checks, retaining the Settings failure; backend ran 23 genuine database cases and 553 targeted checks. Original failure logs are retained. Final command summaries, exact source revisions, independent review verdicts and owned-resource cleanup are recorded in the [progress checkpoint](2026-10-08-music-catalog-ux-progress.md) and [full review](2026-10-09-music-catalog-ux-full-review.md). Per-row evidence distinguishes fresh execution from unchanged-hash historical proof.
 
-T30's full-review sequence was rubber-duck, hostile attack, code review and best-practices, followed by fresh verification and create-to-cleanup checks. Its code-quality verdict is separate from the incomplete acceptance gate above. No push, PR, merge, deployment or real provider mutation was performed.
+T30's full-review sequence was rubber-duck, hostile attack, code review and best-practices, followed by fresh verification and create-to-cleanup checks. Its code-quality verdict is separate from the completion gate, which now passes with the owner-accepted C137 deferral. No push, PR, merge, deployment or real provider mutation was performed.
