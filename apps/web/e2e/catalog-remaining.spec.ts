@@ -55,13 +55,25 @@ for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width: 320, height: 844 });
     await page.addInitScript(value => localStorage.setItem('theme', value), theme);
     await page.route('**/api/auth/me', route => route.fulfill({ json: { user: { ...CATALOG_USER, username, displayName }, setupRequired: false } }));
-    await page.route('**/api/admin/users', route => route.fulfill({ json: { users: [] } }));
+    await page.route('**/api/admin/users', route => route.fulfill({ json: { users: [{ ...CATALOG_USER, id: 8, username, displayName, role: 'user', isActive: false, lastLogin: null, createdAt: timestamp, _count: { connections: 2, subscriptions: 3, importSources: 4 } }] } }));
     const measurements = [];
     for (const path of ['/users', '/users/me']) {
       await page.goto(path);
       const main = page.getByRole('main');
       await expect(main.getByText(username, { exact: true })).toBeVisible();
-      await expect(main.getByText(displayName, { exact: true })).toBeVisible();
+      await expect(main.getByText(displayName, { exact: true })).toHaveCount(path === '/users' ? 2 : 1);
+      await expect(main.getByText(displayName, { exact: true }).last()).toBeVisible();
+      if (path === '/users') {
+        await expect(main.getByText(`#8 · @${username} · Last login: Never`, { exact: true })).toBeVisible();
+        await expect(main.getByText('2 connections · 3 subscriptions · 4 imports', { exact: true })).toBeVisible();
+        await expect(main.getByText('user', { exact: true })).toBeVisible();
+        await expect(main.getByText('Inactive', { exact: true })).toBeVisible();
+        await expect(main.getByRole('button', { name: `Edit user ${username}`, exact: true })).toBeEnabled();
+        await expect(main.getByRole('button', { name: `Delete user ${username}`, exact: true })).toBeEnabled();
+        await main.getByRole('button', { name: `Edit user ${username}`, exact: true }).scrollIntoViewIfNeeded();
+        await expect(main.getByRole('button', { name: `Edit user ${username}`, exact: true })).toBeInViewport();
+        await expect(main.getByRole('button', { name: `Delete user ${username}`, exact: true })).toBeInViewport();
+      }
       await waitForTheme(page, theme);
       measurements.push({ path, ...await main.evaluate(element => ({ width: element.clientWidth, content: element.scrollWidth })) });
       await page.screenshot({ path: `${evidence}/long-account-${path.replaceAll('/', '-')}-${theme}.png` });

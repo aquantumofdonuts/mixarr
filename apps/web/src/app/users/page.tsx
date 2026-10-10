@@ -260,9 +260,9 @@ export default function UsersPage() {
                     className={`flex min-w-0 flex-wrap items-center justify-between gap-3 py-3 ${!u.isActive ? 'bg-muted/50' : ''}`}
                   >
                     <div className="flex min-w-0 items-center gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="break-words font-medium">{u.displayName || u.username}</p>
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <p className="min-w-0 break-words font-medium">{u.displayName || u.username}</p>
                           <span className="text-xs text-muted-foreground capitalize">{u.role}</span>
                           {!u.isActive && (
                             <Badge variant="secondary">Inactive</Badge>
