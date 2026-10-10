@@ -4,28 +4,16 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui';
-import { Badge } from '@/components/ui/badge';
+import { ResultState } from '@/components/ui/result-state';
 import { Select } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/layout/page-header';
 import { useLogs } from '@/lib/hooks';
 import { useQueryClient } from '@tanstack/react-query';
-import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle';
-import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
-import Bug from 'lucide-react/dist/esm/icons/bug';
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
-import FileText from 'lucide-react/dist/esm/icons/file-text';
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import Filter from 'lucide-react/dist/esm/icons/filter';
-import Info from 'lucide-react/dist/esm/icons/info';
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-
-const levelConfig = {
-  debug: { icon: Bug, color: 'text-muted-foreground', bg: 'bg-muted' },
-  info: { icon: Info, color: 'text-status-info', bg: 'bg-status-info/10' },
-  warn: { icon: AlertTriangle, color: 'text-status-warning', bg: 'bg-status-warning/10' },
-  error: { icon: AlertCircle, color: 'text-status-error', bg: 'bg-status-error/10' },
-};
 
 const levelOptions = [
   { value: '', label: 'All levels' },
@@ -54,16 +42,15 @@ export default function LogsPage() {
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
-  const [expandedId, setExpandedId] = useState<number | null>(null);
   const [offset, setOffset] = useState(0);
 
   // React Query for logs with caching
-  const { data, isFetching, isLoading } = useLogs({ 
-    level, 
-    category, 
-    search, 
-    limit: PAGE_SIZE, 
-    offset 
+  const { data, isFetching, isLoading, isError, error } = useLogs({
+    level,
+    category,
+    search,
+    limit: PAGE_SIZE,
+    offset
   });
 
   const logs = data?.logs || [];
@@ -99,7 +86,7 @@ export default function LogsPage() {
     <>
       <PageHeader
         title="Logs"
-        description={total > 0 ? <span className="tabular-nums">{total.toLocaleString()} total entries</span> : 'View application activity and errors'}
+        description={total > 0 ? <span className="font-mono tabular-nums">{total.toLocaleString()} total entries</span> : 'View application activity and errors'}
       >
         <Button variant="outline" onClick={handleRefresh} disabled={isFetching}>
           <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
@@ -108,11 +95,12 @@ export default function LogsPage() {
       </PageHeader>
 
       {/* Filters */}
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <form onSubmit={handleSearch} className="flex flex-wrap gap-4">
+      <Card className="mb-4">
+        <CardContent className="pt-4">
+          <form onSubmit={handleSearch} className="flex flex-wrap items-end gap-3">
             <div className="w-40">
               <Select
+                label="Level"
                 value={level}
                 onChange={(e) => handleFilterChange(e.target.value, category)}
                 options={levelOptions}
@@ -120,6 +108,7 @@ export default function LogsPage() {
             </div>
             <div className="w-40">
               <Select
+                label="Category"
                 value={category}
                 onChange={(e) => handleFilterChange(level, e.target.value)}
                 options={categoryOptions}
@@ -127,6 +116,7 @@ export default function LogsPage() {
             </div>
             <div className="flex-1 min-w-[200px]">
               <Input
+                label="Search logs"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="Search logs..."
@@ -154,65 +144,33 @@ export default function LogsPage() {
             </div>
           </CardContent>
         </Card>
+      ) : isError ? (
+        <ResultState kind="error" message={error.message} action={<Button variant="outline" onClick={handleRefresh}>Retry</Button>} />
       ) : logs.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <FileText className="h-12 w-12 text-muted-foreground/50 mb-4" />
-            <p className="text-muted-foreground">No logs found</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {level || category || search ? 'Try adjusting your filters' : 'Logs will appear here as events occur'}
-            </p>
-          </CardContent>
-        </Card>
+        <ResultState kind={level || category || search ? 'no-matches' : 'no-records'} message={level || category || search ? 'Try adjusting your filters.' : 'Logs will appear here as events occur.'} />
       ) : (
         <Card>
           <CardContent className="p-0">
             <div className="divide-y">
-              {logs.map((log) => {
-                const config = levelConfig[log.level];
-                const LevelIcon = config.icon;
-                const isExpanded = expandedId === log.id;
-
-                return (
-                  <div
-                    key={log.id}
-                    className="p-4 hover:bg-muted/50 cursor-pointer transition-colors"
-                    onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={`rounded-container p-2 ${config.bg} ${config.color}`}>
-                        <LevelIcon className="h-4 w-4" />
-                      </div>
-                      
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge variant="outline" className="uppercase text-xs">
-                            {log.level}
-                          </Badge>
-                          <Badge variant="secondary" className="text-xs">
-                            {log.category}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {formatTime(log.createdAt)}
-                          </span>
-                        </div>
-                        
-                        <p className={`mt-1 ${isExpanded ? '' : 'truncate'}`}>
-                          {log.message}
-                        </p>
-
-                        {isExpanded && log.metadata && (
-                          <pre className="mt-3 p-3 rounded-container bg-muted text-xs overflow-x-auto">
-                            {JSON.stringify(log.metadata, null, 2)}
-                          </pre>
-                        )}
-                      </div>
-                    </div>
+              {logs.map((log) => (
+                <details key={log.id} className="group min-w-0">
+                  <summary className="flex cursor-pointer list-none items-start gap-3 px-3 py-3 hover:bg-muted [&::-webkit-details-marker]:hidden">
+                    <ChevronRight aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 transition-transform duration-[140ms] group-open:rotate-90" />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-muted-foreground">
+                        <span className={log.level === 'error' ? 'text-status-error' : log.level === 'warn' ? 'text-status-warning' : ''}>{log.level.toUpperCase()}</span>
+                        <span>{log.category}</span><span>{formatTime(log.createdAt)}</span><span>#{log.id}</span>
+                      </span>
+                      <span className="mt-1 block break-words">{log.message}</span>
+                    </span>
+                  </summary>
+                  <div className="px-3 pb-3 sm:pl-10">
+                    {log.metadata ? <pre className="overflow-x-auto rounded-button bg-muted p-3 font-mono text-xs">{JSON.stringify(log.metadata, null, 2)}</pre> : <p className="text-sm text-muted-foreground">No additional details recorded.</p>}
                   </div>
-                );
-              })}
+                </details>
+              ))}
             </div>
-            
+
             {/* Load More Button */}
             {hasMore && (
               <div className="p-4 border-t flex justify-center">
@@ -224,9 +182,9 @@ export default function LogsPage() {
                   {isFetching ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   ) : (
-                    <ChevronDown className="h-4 w-4 mr-2" />
+                    <ChevronRight className="h-4 w-4 mr-2 rotate-90" />
                   )}
-                  Load More (<span className="tabular-nums">{logs.length} of {total.toLocaleString()}</span>)
+                  Load More (<span className="font-mono tabular-nums">{logs.length} of {total.toLocaleString()}</span>)
                 </Button>
               </div>
             )}

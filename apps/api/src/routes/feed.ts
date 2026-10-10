@@ -1,3 +1,4 @@
+import { addOptionsSchema } from '../lib/add-options.js';
 /**
  * Feed Routes - Discovery Feed API
  *
@@ -12,6 +13,9 @@ import { z } from 'zod';
 import { FeedService, NotFoundError, ForbiddenError } from '../services/FeedService.js';
 import { createLogger } from '../lib/logger.js';
 import { getLidarrServiceWithConfig, getLastfmService } from '../lib/connection-resolver.js';
+import prisma from '../lib/db.js';
+import { restoreDecision, restoreDecisionSchema } from '../lib/decision-undo.js';
+import { DecisionError } from '../lib/decision.js';
 import { cacheService } from '../services/cache.js';
 
 const logger = createLogger('FeedRoute');
@@ -24,10 +28,11 @@ const logger = createLogger('FeedRoute');
 const feedQuerySchema = z.object({
   limit: z.coerce
     .number()
+    .int()
     .min(1)
     .default(50)
     .transform((val) => Math.min(val, 100)),
-  offset: z.coerce.number().min(0).default(0),
+  offset: z.coerce.number().int().min(0).default(0),
 });
 
 /**
@@ -77,6 +82,17 @@ export function feedRouter(feedService?: FeedService): Router {
     }
   });
 
+  router.post('/restore', requireAuth, async (req: Request, res: Response): Promise<void> => {
+    const body = restoreDecisionSchema.safeParse(req.body);
+    if (!body.success) { res.status(400).json({ error: 'Invalid restoration request' }); return; }
+    try {
+      res.json(await restoreDecision(prisma, body.data.undoToken, req.user!.id, 'feed-dismiss'));
+    } catch (error) {
+      if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
+      res.status(500).json({ error: 'Failed to restore decision' });
+    }
+  });
+
   /**
    * POST /api/feed/:id/approve
    * Approves a feed item, updating status to 'added' and removing from review.
@@ -84,20 +100,28 @@ export function feedRouter(feedService?: FeedService): Router {
    */
   router.post('/:id/approve', requireAuth, async (req: Request, res: Response): Promise<void> => {
     try {
+      const body = addOptionsSchema.extend({ mbid: z.string().uuid().optional() }).strict().safeParse(req.body ?? {});
+      if (!body.success) { res.status(400).json({ error: 'Invalid approval options', code: 'INVALID_REQUEST' }); return; }
       const feedId = req.params.id;
       const userId = req.user!.id;
 
       // Get user's Lidarr connection for adding artist
-      const lidarrResult = await getLidarrServiceWithConfig(userId);
+      const signal = AbortSignal.timeout(60_000);
+      const lidarrResult = await getLidarrServiceWithConfig(userId, signal);
+      signal.throwIfAborted();
       
       // Create FeedService with Lidarr integration if available
       const approveService = lidarrResult 
-        ? new FeedService(undefined, lidarrResult.service, lidarrResult.config)
+        ? new FeedService(undefined, lidarrResult.service, lidarrResult.config, cacheService)
         : service;
 
-      const result = await approveService.approve(feedId, userId);
-      res.json({ success: true, artistName: result.artistName });
+      const result = await approveService.approve(feedId, userId, signal, body.data);
+      res.json({ success: result.outcome.state === 'added' || result.outcome.state === 'already-in-library', ...result });
     } catch (error) {
+      if (error instanceof DecisionError) {
+        res.status(error.status).json({ error: error.message, code: error.code });
+        return;
+      }
       if (error instanceof NotFoundError) {
         res.status(404).json({ error: error.message });
         return;
@@ -121,8 +145,12 @@ export function feedRouter(feedService?: FeedService): Router {
       const userId = req.user!.id;
 
       const result = await service.dismiss(feedId, userId);
-      res.json({ success: true, artistName: result.artistName });
+      res.json({ success: true, ...result });
     } catch (error) {
+      if (error instanceof DecisionError) {
+        res.status(error.status).json({ error: error.message, code: error.code });
+        return;
+      }
       if (error instanceof NotFoundError) {
         res.status(404).json({ error: error.message });
         return;

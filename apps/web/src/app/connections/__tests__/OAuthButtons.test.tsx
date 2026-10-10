@@ -21,6 +21,8 @@ function mockHook(overrides: Partial<ReturnType<typeof useOAuthStatus>> = {}) {
     authorize: mockAuthorize,
     revoke: mockRevoke,
     isLoading: false,
+    isChecking: false,
+    retry: vi.fn(),
     error: null,
     ...overrides,
   });
@@ -38,11 +40,12 @@ describe('OAuthButtons', () => {
 
   // --- Unauthorized state -------------------------------------------------
 
-  it('shows Authorize button when status is null (not yet loaded)', () => {
+  it('keeps authorization unknown while status has not loaded', () => {
     mockHook({ status: null });
     render(<OAuthButtons {...defaultProps} />);
 
-    expect(screen.getByRole('button', { name: /authorize spotify/i })).toBeInTheDocument();
+    expect(screen.getByText('Authorization: Unknown')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /authorize spotify/i })).not.toBeInTheDocument();
   });
 
   it('shows Authorize button when status is not authorized', () => {
@@ -81,7 +84,7 @@ describe('OAuthButtons', () => {
     });
     render(<OAuthButtons {...defaultProps} />);
 
-    expect(screen.getByText('Authorized')).toBeInTheDocument();
+    expect(screen.getByText('Authorization: Authorized')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /revoke/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /authorize/i })).not.toBeInTheDocument();
   });

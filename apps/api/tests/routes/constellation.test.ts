@@ -18,6 +18,11 @@ vi.mock('../../src/jobs/constellation/queue.js', () => ({
   CONSTELLATION_QUEUE_NAMES: { EXPAND: 'constellation-expand' },
 }));
 
+vi.mock('../../src/services/settings.service.js', () => ({
+  SettingsService: { getConstellationSettings: vi.fn().mockResolvedValue({ fanoutN: 8, pathMaxDegrees: 6 }) },
+}));
+import { SettingsService } from '../../src/services/settings.service.js';
+
 // Silence the logger.
 vi.mock('../../src/lib/logger.js', () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -112,6 +117,7 @@ function makeDeps(overrides: Partial<ConstellationDeps> = {}): ConstellationDeps
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(SettingsService.getConstellationSettings).mockResolvedValue({ fanoutN: 8, pathMaxDegrees: 6 } as any);
 });
 
 // ---- /seed ------------------------------------------------------------------
@@ -170,7 +176,7 @@ describe('GET /seed', () => {
     const res = mockRes();
     await h.seed(req, res);
 
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(42, { userId: 7 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(42, { userId: 7, roleMask: undefined, topN: 8, maxNodes: 50 });
     expect(res.statusCode).toBe(200);
     expect(res.body.subgraph).toEqual(subgraph);
     expect(res.body.streamToken.id).toBeTypeOf('string');
@@ -191,7 +197,7 @@ describe('GET /seed', () => {
     await h.seed(req, res);
 
     expect(deps.identity!.mbidToDiscogs).toHaveBeenCalledWith(mbid);
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(99, { userId: 7 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(99, { userId: 7, roleMask: undefined, topN: 8, maxNodes: 50 });
     expect(res.statusCode).toBe(200);
   });
 
@@ -227,7 +233,7 @@ describe('GET /seed', () => {
     const res = mockRes();
     await h.seed(req, res);
 
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(42, { userId: 7, roleMask: 6 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(42, { userId: 7, roleMask: 6, topN: 8, maxNodes: 50 });
     expect(res.statusCode).toBe(200);
   });
 
@@ -349,7 +355,7 @@ describe('GET /expand/:personId', () => {
     await h.expand(req, res);
 
     expect(deps.expandQueue!.add).toHaveBeenCalledWith('constellation-expand', { artistId: 5 });
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7, roleMask: undefined, topN: 8, maxNodes: 50 });
     expect(res.statusCode).toBe(200);
     expect(res.body.enqueued).toBe(true);
     expect(res.body.subgraph).toBeDefined();
@@ -364,7 +370,7 @@ describe('GET /expand/:personId', () => {
     const res = mockRes();
     await h.expand(req, res);
 
-    expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7, roleMask: 3 });
+    expect(deps.graph!.subgraph).toHaveBeenCalledWith(5, { userId: 7, roleMask: 3, topN: 8, maxNodes: 50 });
   });
 
   it('coerces expand roleMask=0 to undefined (no filter)', async () => {
@@ -414,7 +420,7 @@ describe('GET /path', () => {
     expect(res.body).toEqual(result);
   });
 
-  it('clamps an excessive max to the degree ceiling (10)', async () => {
+  it('clamps an excessive requested max to the configured ceiling (6)', async () => {
     const deps = makeDeps();
     (deps.graph!.path as any).mockResolvedValue({ nodes: [1, 2], degrees: 1, mode: 'shortest' });
     const h = buildConstellationHandlers(deps);
@@ -423,7 +429,7 @@ describe('GET /path', () => {
     const res = mockRes();
     await h.path(req, res);
 
-    expect(deps.graph!.path).toHaveBeenCalledWith(1, 2, { mode: 'shortest', max: 10 });
+    expect(deps.graph!.path).toHaveBeenCalledWith(1, 2, { mode: 'shortest', max: 6 });
   });
 
   it('404s when no path is found', async () => {
@@ -590,6 +596,14 @@ describe('subscribeToLidarrDefault', () => {
       addArtistWithCacheWarm: vi.fn().mockResolvedValue({}),
     };
   }
+
+  it.each([false, true])('preserves helper-confirmed artist membership existing=%s through the real default wrapper', async alreadyInLibrary => {
+    const lidarr = fakeLidarr();
+    lidarr.addArtistWithCacheWarm.mockResolvedValue({ alreadyInLibrary });
+    (getLidarrServiceWithConfig as any).mockResolvedValue({ service: lidarr, config: { qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } });
+    await expect(subscribeToLidarrDefault({ userId: 7, mbid: 'artist-mbid' })).resolves.toEqual({ added: !alreadyInLibrary, target: 'artist' });
+    expect(lidarr.addArtistWithCacheWarm).toHaveBeenCalledTimes(1);
+  });
 
   it('adds the exact-title album belonging to the resolved artist', async () => {
     const lidarr = fakeLidarr();
@@ -788,7 +802,7 @@ describe('GET /stream/:token (SSE)', () => {
     const deps = makeDeps({ streams });
     const h = buildConstellationHandlers(deps);
 
-    const token = 'tok-123';
+    const token = streams.mint(7).id;
     const req = mockReq({ params: { token } });
     const res = mockRes();
     await h.stream(req, res);
@@ -802,11 +816,11 @@ describe('GET /stream/:token (SSE)', () => {
     expect(streams.listenerCount(token)).toBe(1);
 
     // publishing forwards a data event carrying the generation
-    streams.publish(token, 4, { personId: 88 });
+    streams.publish(token, 1, { personId: 88, generation: 4 });
     const dataFrame = res.writes.find((w: string) => w.startsWith('data:'));
     expect(dataFrame).toBeDefined();
     const payload = JSON.parse(dataFrame!.replace(/^data: /, '').trim());
-    expect(payload.generation).toBe(4);
+    expect(payload.generation).toBe(1);
     expect(payload.personId).toBe(88);
 
     // close -> cleanup, no dangling listener
@@ -867,13 +881,14 @@ describe('GET /expand with a stream token', () => {
     (deps.graph!.subgraph as any).mockResolvedValue({ focusId: 5, nodes: [], edges: [] });
     const h = buildConstellationHandlers(deps);
 
-    const req = mockReq({ params: { personId: '5' }, query: { token: 'tok-9', generation: '3' } });
+    const streams = deps.streams!; const token = streams.mint(7); streams.bump(token.id, 7); streams.bump(token.id, 7);
+    const req = mockReq({ params: { personId: '5' }, query: { token: token.id, generation: '3' } });
     const res = mockRes();
     await h.expand(req, res);
 
     expect(deps.expandQueue!.add).toHaveBeenCalledWith('constellation-expand', {
       artistId: 5,
-      tokenId: 'tok-9',
+      tokenId: token.id,
       generation: 3,
     });
   });
@@ -941,4 +956,127 @@ describe('auth', () => {
     const resp = await request(app).get('/api/constellation/owned');
     expect(resp.status).toBe(401);
   });
+});
+
+
+describe('stored constellation exploration bounds', () => {
+  it.each([3, 500])('applies stored fan-out %s to seed and expand with the 50-person guard', async fanoutN => {
+    vi.mocked(SettingsService.getConstellationSettings).mockResolvedValue({ fanoutN, pathMaxDegrees: 6 } as any);
+    const deps = makeDeps(); vi.mocked(deps.graph!.subgraph).mockResolvedValue({ focusId: 42, nodes: [], edges: [] });
+    const h = buildConstellationHandlers(deps);
+    await h.seed(mockReq({ query: { id: '42', roleMask: '3' } }), mockRes());
+    await h.expand(mockReq({ params: { personId: '42' }, query: { roleMask: '3' } }), mockRes());
+    expect(deps.graph!.subgraph).toHaveBeenNthCalledWith(1, 42, { userId: 7, roleMask: 3, topN: Math.min(fanoutN, 49), maxNodes: 50 });
+    expect(deps.graph!.subgraph).toHaveBeenNthCalledWith(2, 42, { userId: 7, roleMask: 3, topN: Math.min(fanoutN, 49), maxNodes: 50 });
+  });
+  it.each([[3, undefined, 3], [3, '2', 2], [3, '9', 3], [20, '19', 10], [4, 'bogus', 4], [4, '0', 4], [4, '-1', 4], [4, '1.5', 4], [4, '', 4]])('uses configured %s / requested %s path bound %s', async (configured, requested, expected) => {
+    vi.mocked(SettingsService.getConstellationSettings).mockResolvedValue({ fanoutN: 8, pathMaxDegrees: configured } as any);
+    const deps = makeDeps(); vi.mocked(deps.graph!.path).mockResolvedValue(null);
+    await buildConstellationHandlers(deps).path(mockReq({ query: { from: '1', to: '2', max: requested } }), mockRes());
+    expect(deps.graph!.path).toHaveBeenCalledWith(1, 2, { mode: 'shortest', max: expected });
+  });
+});
+
+describe('read-only constellation identities', () => {
+  const mbid = '11111111-1111-4111-8111-111111111111';
+  it('forward resolution returns a person without graph/enqueue/orbit/acquisition side effects', async () => {
+    const deps = makeDeps(); vi.mocked(deps.identity!.mbidToDiscogs).mockResolvedValue(15);
+    const res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query: { mbid } }), res);
+    expect(res.body).toEqual({ mbid, personId: 15, needsManual: false });
+    expect(deps.identity!.mbidToDiscogs).toHaveBeenCalledWith(mbid);
+    expect(deps.graph!.subgraph).not.toHaveBeenCalled(); expect(deps.expandQueue!.add).not.toHaveBeenCalled();
+    expect(deps.warmOrbit).not.toHaveBeenCalled(); expect(deps.subscribeToLidarr).not.toHaveBeenCalled();
+  });
+  it('returns unresolved rather than guesses when forward identity has no link', async () => {
+    const deps = makeDeps(); vi.mocked(deps.identity!.mbidToDiscogs).mockResolvedValue(null);
+    const res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query: { mbid } }), res);
+    expect(res.body).toEqual({ mbid, personId: null, needsManual: true });
+  });
+  it.each([false, true])('reverse resolution preserves service manual decision %s', async manual => {
+    const deps = makeDeps(); vi.mocked(prisma.constellationPerson.findUnique).mockResolvedValue({ displayName: 'Known person' } as any);
+    vi.mocked(deps.identity!.discogsToMbid).mockResolvedValue({ mbid: manual ? null : mbid, confidence: manual ? null : 'linked', needsManual: manual });
+    const res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query: { personId: '15', name: 'Other name' } }), res);
+    expect(deps.identity!.discogsToMbid).toHaveBeenCalledWith(15, 'Known person');
+    expect(res.body).toMatchObject({ personId: 15, displayName: 'Known person', mbid: manual ? null : mbid, needsManual: manual });
+    expect(deps.expandQueue!.add).not.toHaveBeenCalled(); expect(deps.warmOrbit).not.toHaveBeenCalled();
+  });
+  it.each([{}, { mbid: 'name' }, { mbid, personId: '1' }, { mbid, name: 'guess' }, { personId: '0' }, { personId: '-2' }, { personId: '1.2' }, { personId: '9007199254740992' }, { personId: ['1', '2'] }, { personId: '1', name: 'x'.repeat(201) }, { personId: '1', extra: 'unexpected' }])('rejects malformed identity queries %j', async query => {
+    const deps = makeDeps(), res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query }), res);
+    expect(res.statusCode).toBe(400); expect(deps.identity!.mbidToDiscogs).not.toHaveBeenCalled(); expect(deps.identity!.discogsToMbid).not.toHaveBeenCalled();
+  });
+  it('uses the existing router/auth boundary', async () => {
+    const deps = makeDeps(); vi.mocked(deps.identity!.mbidToDiscogs).mockResolvedValue(15);
+    const app = express(); app.use((req: any, _res, next) => { req.isAuthenticated = () => true; req.user = { id: 7 }; next(); }); app.use('/api/constellation', createConstellationRouter(deps));
+    const response = await request(app).get(`/api/constellation/identity?mbid=${mbid}`); expect(response.status).toBe(200); expect(response.body.personId).toBe(15);
+    const anonymous = express(); anonymous.use((req: any, _res, next) => { req.isAuthenticated = () => false; next(); }); anonymous.use('/api/constellation', createConstellationRouter(deps));
+    expect((await request(anonymous).get(`/api/constellation/identity?mbid=${mbid}`)).status).toBe(401);
+  });
+  it('reports real service failures inline without starting a graph', async () => {
+    const deps = makeDeps(); vi.mocked(deps.identity!.mbidToDiscogs).mockRejectedValue(new Error('unavailable'));
+    const res = mockRes(); await buildConstellationHandlers(deps).identity(mockReq({ query: { mbid } }), res);
+    expect(res.statusCode).toBe(500); expect(res.body.error).toBe('Artist identity lookup failed'); expect(deps.warmOrbit).not.toHaveBeenCalled();
+  });
+});
+
+describe('bounded availability replay and actor correlation', () => {
+  it('replays only the latest current status, expires and evicts actual entries, and clears on success or generation', () => {
+    vi.useFakeTimers();
+    try {
+      const streams = new StreamRegistry(100, 2); const a = streams.mint(7), b = streams.mint(7), c = streams.mint(8);
+      const failure = { focusId: 4, status: 'source-unavailable', nodes: [], edges: [], detail: 'Collaborator source is unavailable. Please retry.' };
+      streams.publish(a.id, 1, failure); streams.publish(a.id, 1, { ...failure, focusId: 5 });
+      expect(streams.statusCount).toBe(1);
+      const replay = vi.fn(); streams.subscribe(a.id, replay)(); expect(replay).toHaveBeenCalledOnce(); expect(replay.mock.calls[0][0].focusId).toBe(5);
+      streams.publish('unknown', 1, failure); streams.publish(a.id, 99, failure); expect(streams.statusCount).toBe(1);
+      streams.publish(b.id, 1, failure); streams.publish(c.id, 1, failure); expect(streams.statusCount).toBe(2);
+      const evicted = vi.fn(); streams.subscribe(a.id, evicted)(); expect(evicted).not.toHaveBeenCalled();
+      streams.publish(b.id, 1, { focusId: 4, nodes: [], edges: [] }); expect(streams.statusCount).toBe(1);
+      streams.bump(c.id, 8); expect(streams.statusCount).toBe(0);
+      streams.publish(c.id, 2, failure); expect(streams.statusCount).toBe(1);
+      vi.advanceTimersByTime(101); expect(streams.statusCount).toBe(0);
+      const expired = vi.fn(); streams.subscribe(c.id, expired)(); expect(expired).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(['foreign', 'unknown', 'malformed', 'stale', 'missing-generation'])('rejects %s correlation before enqueue or graph access', async kind => {
+    const streams = new StreamRegistry(); const owned = streams.mint(7); const foreign = streams.mint(8);
+    const query = kind === 'foreign' ? { token: foreign.id, generation: '1' }
+      : kind === 'unknown' ? { token: 'unknown', generation: '1' }
+      : kind === 'malformed' ? { token: owned.id, generation: '1garbage' }
+      : kind === 'stale' ? { token: owned.id, generation: '2' } : { token: owned.id };
+    const deps = makeDeps({ streams }); const res = mockRes();
+    await buildConstellationHandlers(deps).expand(mockReq({ params: { personId: '5' }, query }), res);
+    expect(res.statusCode).toBe(kind === 'foreign' ? 403 : kind === 'unknown' ? 404 : kind === 'stale' ? 409 : 400);
+    expect(deps.expandQueue!.add).not.toHaveBeenCalled(); expect(deps.graph!.subgraph).not.toHaveBeenCalled(); expect(streams.statusCount).toBe(0);
+  });
+  it.each([true, false])('returns actual configured source %s on seed and expand', async constellationIndexEnabled => {
+    vi.mocked(SettingsService.getConstellationSettings).mockResolvedValue({ constellationIndexEnabled, fanoutN: 8 } as any);
+    const deps = makeDeps(); const h = buildConstellationHandlers(deps); const seed = mockRes();
+    await h.seed(mockReq({ query: { id: '42' } }), seed);
+    expect(seed.body.creditSource).toBe(constellationIndexEnabled ? 'index' : 'live');
+    const expand = mockRes(); await h.expand(mockReq({ params: { personId: '42' } }), expand);
+    expect(expand.body.creditSource).toBe(constellationIndexEnabled ? 'index' : 'live');
+  });
+  it('publishes failed seed enqueue for late attachment and failed expand enqueue, then clears retry status', async () => {
+    const streams = new StreamRegistry(); const add = vi.fn().mockRejectedValue(new Error('secret token=abc'));
+    const deps = makeDeps({ streams, expandQueue: { add } }); vi.mocked(deps.graph!.subgraph).mockResolvedValue({ focusId: 42, nodes: [], edges: [] }); const h = buildConstellationHandlers(deps); const seed = mockRes();
+    vi.mocked(prisma.constellationPerson.findUnique).mockResolvedValue(null as any);
+    await h.seed(mockReq({ query: { id: '42' } }), seed);
+    const token = seed.body.streamToken; const late = vi.fn(); const off = streams.subscribe(token.id, late);
+    expect(late).toHaveBeenLastCalledWith({ generation: 1, focusId: 42, nodes: [], edges: [], status: 'source-unavailable', detail: 'Collaborator source is unavailable. Please retry.' });
+    const res = mockRes(); const req = mockReq({ params: { personId: '5' }, query: { token: token.id, generation: '1' } });
+    await h.expand(req, res); expect(res.statusCode).toBe(200); expect(res.body.enqueued).toBe(false); expect(res.body.subgraph).toBeDefined();
+    expect(late).toHaveBeenLastCalledWith(expect.objectContaining({ focusId: 5, status: 'source-unavailable' }));
+    add.mockResolvedValue({}); await h.expand(req, mockRes()); expect(streams.statusCount).toBe(0); off();
+  });
+});
+
+it('does not replay an expired status when wall time advances before its cleanup timer runs', () => {
+  vi.useFakeTimers();
+  try {
+    const now = Date.now(); const streams = new StreamRegistry(100, 2); const token = streams.mint(7);
+    streams.publish(token.id, 1, { focusId: 42, status: 'source-unavailable', nodes: [], edges: [], detail: 'secret' });
+    expect(streams.statusCount).toBe(1); expect(vi.getTimerCount()).toBe(1);
+    vi.setSystemTime(now + 101); const listener = vi.fn(); streams.subscribe(token.id, listener)();
+    expect(listener).not.toHaveBeenCalled(); expect(streams.statusCount).toBe(0); expect(vi.getTimerCount()).toBe(0);
+  } finally { vi.useRealTimers(); }
 });

@@ -1,32 +1,19 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArtistLookup, type ResolvedPerson } from './ArtistLookup';
 import { api } from '@/lib/api';
 import type { PathResult } from '@/types/constellation';
 
-/**
- * The "six degrees" mode of the constellation (Design §5).
- *
- * Two artists in, a collaboration path out. Two strategies:
- *  - **Shortest** (default, cheap): the fewest-hops path. Tends to route through
- *    hubs (a mega-producer everyone worked with).
- *  - **Interesting** (slower, bridge-ranked): prefers non-obvious connectors and
- *    may run a hop or two longer. Because it enumerates more of the graph it can
- *    take noticeably longer, so we surface an explicit "Searching…" state.
- *
- * ## Inputs
- * Numeric Discogs person ids (documented simplification). A richer artist search
- * box is future work — the backend `/path` endpoint takes raw person ids, so raw
- * ids are the honest, dependency-free input for this task.
- *
- * ## Honest dead-end
- * The backend answers 404 `{ error: "no path within N degrees" }` when no path
- * exists inside the degree bound. We show THAT message verbatim rather than a
- * generic error — "no path" is a real answer, not a failure.
- */
 export interface PathFinderProps {
   /** Called with a hop's person id when a chain node is clicked (recenter/open). */
   onSelectPerson?: (personId: number) => void;
+  actorId?: number;
+  initialFrom?: number | null;
+  initialTo?: number | null;
+  initialMode?: PathMode;
+  names?: Map<number, string>;
+  onPathChange?: (from: number, to: number, mode: PathMode) => void;
 }
 
 type PathMode = 'shortest' | 'interesting';
@@ -40,90 +27,62 @@ type PathState =
 
 const IDLE: PathState = { status: 'idle' };
 
-function parseId(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!/^[0-9]+$/.test(trimmed)) return null;
-  const n = Number(trimmed);
-  return Number.isFinite(n) ? n : null;
-}
-
 function pathUrl(from: number, to: number, mode: PathMode): string {
   const params = new URLSearchParams({ from: String(from), to: String(to), mode });
   return `/api/constellation/path?${params.toString()}`;
 }
 
-export function PathFinder({ onSelectPerson }: PathFinderProps) {
-  const [fromRaw, setFromRaw] = useState('');
-  const [toRaw, setToRaw] = useState('');
-  const [mode, setMode] = useState<PathMode>('shortest');
+export function PathFinder({ onSelectPerson, actorId, initialFrom, initialTo, initialMode = 'shortest', names, onPathChange }: PathFinderProps) {
+  const [fromPerson, setFrom] = useState<ResolvedPerson | null>(null);
+  const [toPerson, setTo] = useState<ResolvedPerson | null>(null);
+  const [mode, setMode] = useState<PathMode>(initialMode);
   const [state, setState] = useState<PathState>(IDLE);
-
-  const from = parseId(fromRaw);
-  const to = parseId(toRaw);
-  // A path from an artist to itself is degenerate — block it client-side so we
-  // never send a from==to request (the backend would just echo a 0-degree path).
+  const request = useRef<AbortController | null>(null);
+  const from = fromPerson?.personId ?? null, to = toPerson?.personId ?? null;
+  useEffect(() => { setMode(initialMode); }, [initialMode]);
+  useEffect(() => {
+    request.current?.abort(); setState(IDLE);
+    return () => { request.current?.abort(); };
+  }, [from, to, mode, actorId]);
   const sameEndpoints = from !== null && to !== null && from === to;
   const canSubmit =
     from !== null && to !== null && !sameEndpoints && state.status !== 'searching';
 
   const findPath = useCallback(async () => {
     if (from === null || to === null || from === to) return;
+    request.current?.abort();
+    const controller = new AbortController(); request.current = controller;
     setState({ status: 'searching' });
-    const { data, error, status } = await api.get<PathResult>(pathUrl(from, to, mode));
-
-    if (data) {
-      setState({ status: 'found', result: data });
-      return;
+    try {
+      const { data, error, status } = await api.get<PathResult>(pathUrl(from, to, mode), { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (data) { setState({ status: 'found', result: data }); return; }
+      setState(status === 404 ? { status: 'empty', message: error ?? 'no path within reach' } : { status: 'error', message: error ?? 'Path search failed' });
+    } catch {
+      if (!controller.signal.aborted) setState({ status: 'error', message: 'Path search failed' });
     }
-    // 404 is the honest "no path" answer — surface the server message as-is.
-    if (status === 404) {
-      setState({ status: 'empty', message: error ?? `no path within reach` });
-      return;
-    }
-    setState({ status: 'error', message: error ?? 'Path search failed' });
   }, [from, to, mode]);
+  useEffect(() => {
+    if (initialFrom === from && initialTo === to && from !== null && to !== null && from !== to) void findPath();
+  }, [initialFrom, initialTo, from, to, findPath]);
 
   const onSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      if (from !== null && to !== null) onPathChange?.(from, to, mode);
       void findPath();
     },
-    [findPath],
+    [findPath, from, to, mode, onPathChange],
   );
 
   return (
     <form
       onSubmit={onSubmit}
       data-testid="path-finder"
-      className="flex flex-col gap-2 rounded-container bg-background/80 p-3 text-xs text-foreground backdrop-blur"
+      className="flex flex-col gap-2 rounded-container bg-background p-3 text-xs text-foreground"
     >
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">From artist id</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={fromRaw}
-            onChange={(e) => setFromRaw(e.target.value)}
-            aria-label="From artist id"
-            className="w-24 rounded border border-border bg-background px-2 py-1"
-          />
-        </label>
-        <span aria-hidden="true" className="pb-2 text-muted-foreground">
-          →
-        </span>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">To artist id</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={toRaw}
-            onChange={(e) => setToRaw(e.target.value)}
-            aria-label="To artist id"
-            className="w-24 rounded border border-border bg-background px-2 py-1"
-          />
-        </label>
-      </div>
+      <ArtistLookup label="From artist" actorId={actorId} initialPersonId={initialFrom} onChange={setFrom} />
+      <ArtistLookup label="To artist" actorId={actorId} initialPersonId={initialTo} onChange={setTo} />
 
       <fieldset className="flex items-center gap-3">
         <legend className="sr-only">Path mode</legend>
@@ -144,7 +103,7 @@ export function PathFinder({ onSelectPerson }: PathFinderProps) {
       <button
         type="submit"
         disabled={!canSubmit}
-        className="rounded bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-50"
+        className="rounded bg-primary min-h-11 px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-50"
       >
         Find path
       </button>
@@ -195,7 +154,7 @@ export function PathFinder({ onSelectPerson }: PathFinderProps) {
                   onClick={() => onSelectPerson?.(id)}
                   className="rounded bg-muted px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"
                 >
-                  {id}
+                  {id === from ? fromPerson?.name : id === to ? toPerson?.name : names?.get(id) || `Person ${id}`}
                 </button>
               </span>
             ))}

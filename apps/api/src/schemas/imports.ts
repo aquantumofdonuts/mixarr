@@ -1,3 +1,4 @@
+import { addOptionsSchema } from '../lib/add-options.js';
 import { z } from 'zod';
 
 // ============================================================================
@@ -88,8 +89,23 @@ export const reviewStatusEnum = z.enum(['pending', 'approved', 'rejected']);
 /**
  * Query params for GET /review/queue
  */
+export const reviewCursorSchema = z.object({
+  v: z.literal(1), id: z.number().int().positive().max(2147483647),
+  createdAt: z.string().datetime().refine(value => new Date(value).toISOString() === value),
+  actor: z.number().int().positive().max(2147483647), admin: z.boolean(),
+  status: reviewStatusEnum, itemType: z.enum(['artist', 'album']).nullable(), q: z.string().max(120),
+}).strict();
+
+export function decodeReviewCursor(value: string) {
+  return reviewCursorSchema.parse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8')));
+}
+
 export const reviewQueueQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(500).optional().default(50),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  q: z.string().trim().max(120).optional().default(''),
+  cursor: z.string().min(1).max(1024).regex(/^[A-Za-z0-9_-]+$/).refine(value => {
+    try { decodeReviewCursor(value); return true; } catch { return false; }
+  }, 'Invalid review cursor').optional(),
   status: reviewStatusEnum.optional().default('pending'),
   itemType: z.enum(['artist', 'album']).optional(),
 });
@@ -97,16 +113,17 @@ export const reviewQueueQuerySchema = z.object({
 /**
  * Body for PUT /review/:id — single review item status update
  */
-export const updateReviewItemSchema = z.object({
-  status: reviewStatusEnum,
+export const updateReviewItemSchema = addOptionsSchema.extend({
+  mbid: z.string().uuid().transform(value => value.toLowerCase()).optional(),
+  status: z.enum(['approved', 'rejected']),
 });
 
 /**
  * Body for POST /review/bulk — bulk review
  */
-export const bulkReviewSchema = z.object({
-  ids: z.array(z.number().int().positive()).min(1, 'At least one ID is required'),
-  status: reviewStatusEnum,
+export const bulkReviewSchema = addOptionsSchema.extend({
+  ids: z.array(z.number().int().positive().safe()).min(1, 'At least one ID is required').max(100),
+  status: z.enum(['approved', 'rejected']),
 });
 
 // ============================================================================

@@ -26,6 +26,8 @@ export interface GraphEdge {
   bridge: number | null;
   bridgeConfident: boolean;
   roleBitmask: number;
+  sampleMasterId?: number | null;
+  sharedMasterCount?: number;
 }
 
 /** A focus-centred slice of the graph (focus + ring-1 + ring-2). */
@@ -57,7 +59,16 @@ export interface PathResult {
 // ---------------------------------------------------------------------------
 
 /** `GET /api/constellation/seed` response. */
+export type CreditSource = 'index' | 'live';
+export interface ExpansionStatus {
+  generation: number;
+  focusId: number;
+  status: 'budget-exhausted' | 'source-unavailable';
+  detail?: string;
+}
+
 export interface SeedResponse {
+  creditSource?: CreditSource;
   focusId: number;
   subgraph: Subgraph;
   streamToken: StreamToken;
@@ -65,6 +76,7 @@ export interface SeedResponse {
 
 /** `GET /api/constellation/expand/:personId` response. */
 export interface ExpandResponse {
+  creditSource?: CreditSource;
   personId: number;
   enqueued: boolean;
   subgraph: Subgraph;

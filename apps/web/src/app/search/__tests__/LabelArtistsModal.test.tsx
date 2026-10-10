@@ -1,430 +1,169 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-
-// Hoist mocks so they're available inside vi.mock factories
-const { mockAddToast, mockApiGet, mockApiPost } = vi.hoisted(() => ({
-  mockAddToast: vi.fn(),
-  mockApiGet: vi.fn(),
-  mockApiPost: vi.fn(),
+import type { LabelArtistPage } from '@mixarr/shared-types';
+const navigation = vi.hoisted(() => ({ query: 'q=Catalog&tab=label', push: vi.fn(), replace: vi.fn() }));
+vi.mock('next/navigation', () => ({ usePathname: () => '/search', useSearchParams: () => new URLSearchParams(navigation.query), useRouter: () => navigation }));
+vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: 7 } }) }));
+const { mockAddToast, mockApiGet, mockApiPost, chosenOptions } = vi.hoisted(() => ({
+  mockAddToast: vi.fn(), mockApiGet: vi.fn(), mockApiPost: vi.fn(),
+  chosenOptions: { qualityProfileId: 2, metadataProfileId: 3, rootFolderPath: '/music', monitorOption: 'missing', searchOnAdd: false },
 }));
-
-// Mock api module
-vi.mock('@/lib/api', () => ({
-  api: {
-    get: mockApiGet,
-    post: mockApiPost,
-  },
-}));
-
-// Mock toast module
-vi.mock('@/components/ui/toast', () => ({
-  useToast: () => ({ addToast: mockAddToast, toasts: [], removeToast: vi.fn() }),
-}));
-
-// Mock ExternalLinks — simple stub (renders only data-testid, no text to avoid duplicate text matches)
-vi.mock('@/components/ExternalLinks', () => ({
-  ExternalLinks: ({ mbid }: { mbid: string; artistName: string }) => (
-    <span data-testid={`external-links-${mbid}`} />
-  ),
-}));
-
-// Mock lucide-react icons as simple spans
-vi.mock('lucide-react/dist/esm/icons/check-square', () => ({
-  default: (props: any) => <span data-testid="icon-check-square" {...props} />,
-}));
-vi.mock('lucide-react/dist/esm/icons/loader-2', () => ({
-  default: (props: any) => <span data-testid="icon-loader" {...props} />,
-}));
-vi.mock('lucide-react/dist/esm/icons/music', () => ({
-  default: (props: any) => <span data-testid="icon-music" {...props} />,
-}));
-vi.mock('lucide-react/dist/esm/icons/plus', () => ({
-  default: (props: any) => <span data-testid="icon-plus" {...props} />,
-}));
-vi.mock('lucide-react/dist/esm/icons/search', () => ({
-  default: (props: any) => <span data-testid="icon-search" {...props} />,
-}));
-vi.mock('lucide-react/dist/esm/icons/square', () => ({
-  default: (props: any) => <span data-testid="icon-square" {...props} />,
-}));
-vi.mock('lucide-react/dist/esm/icons/x', () => ({
-  default: (props: any) => <span data-testid="icon-x" {...props} />,
-}));
-
+vi.mock('@/components/artists/AddArtistOptions', () => ({ useAddArtistOptions: () => ({ dialog: null, runWithOptions: (_request: unknown, execute: (options: unknown, current: () => boolean) => Promise<unknown>) => execute(chosenOptions, () => true).catch(() => null) }) }));
+vi.mock('@/lib/api', () => ({ api: { get: mockApiGet, post: mockApiPost } }));
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: mockAddToast }) }));
+vi.mock('@/components/ExternalLinks', () => ({ ExternalLinks: ({ mbid }: { mbid: string }) => <span data-testid={`external-${mbid}`} /> }));
 import { LabelArtistsModal } from '../components/LabelArtistsModal';
+const artistA = { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Alpha', sortName: 'Alpha', imageUrl: null };
+const artistB = { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', name: 'Beta', sortName: 'Beta', imageUrl: null };
+const label = { id: 'cccccccc-cccc-cccc-cccc-cccccccccccc', name: 'Warp Records' };
+const response = (artists: LabelArtistPage['artists'], releasesProcessed: number, totalReleases: number, nextReleaseOffset: number | null) => ({ data: { artists, releasesProcessed, totalReleases, nextReleaseOffset }, error: null });
+const initial = () => mockApiGet.mockResolvedValueOnce(response([artistA], 50, 120, 50));
+const ready = () => screen.findByRole('checkbox', { name: 'Select Alpha' });
+beforeEach(() => { vi.resetAllMocks(); navigation.query = 'q=Catalog&tab=label'; });
 
-// ─── Helpers ─────────────────────────────────────────────────────────
-
-const makeArtists = (count: number, offset = 0) =>
-  Array.from({ length: count }, (_, i) => ({
-    id: `mbid-${offset + i}`,
-    name: `Artist ${String(offset + i).padStart(3, '0')}`,
-    imageUrl: i % 2 === 0 ? `https://img/${offset + i}.jpg` : null,
-  }));
-
-const defaultProps = {
-  label: { name: 'Warp Records', id: 'label-1' },
-  onClose: vi.fn(),
-};
-
-function mockInitialFetch(artists = makeArtists(3), count?: number) {
-  mockApiGet.mockResolvedValueOnce({
-    data: { artists, count: count ?? artists.length },
-    error: null,
-    status: 200,
+describe('Label artist release pages', () => {
+  it('renders nothing without a label and makes no request', () => {
+    const { container } = render(<LabelArtistsModal label={null} onClose={vi.fn()} />);
+    expect(container).toBeEmptyDOMElement(); expect(mockApiGet).not.toHaveBeenCalled();
   });
-}
-
-// ─── Tests ───────────────────────────────────────────────────────────
-
-describe('LabelArtistsModal', () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
+  it('counts raw releases and deduplicates artists, including pages with no new artists', async () => {
+    initial(); mockApiGet.mockResolvedValueOnce(response([artistA], 50, 120, 100)).mockResolvedValueOnce(response([artistA, artistB], 20, 120, null));
+    render(<LabelArtistsModal label={label} onClose={vi.fn()} />); await ready();
+    expect(screen.getByText('50 releases checked; 1 artists loaded')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await screen.findByText('100 releases checked; 1 artists loaded');
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await screen.findByText('120 releases checked; 2 artists loaded');
+    expect(mockApiGet.mock.calls.map(call => call[0])).toEqual([0, 50, 100].map(offset => `/api/search/label/${label.id}/artists?limit=50&offset=${offset}`));
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+    expect(screen.getByText('All reported releases checked.')).toBeVisible();
   });
-
-  // ─── Rendering ──────────────────────────────────────────────────
-
-  it('renders nothing when label is null', () => {
-    const { container } = render(
-      <LabelArtistsModal label={null} onClose={vi.fn()} />,
-    );
-    expect(container.innerHTML).toBe('');
+  it('keeps Load more when no loaded artists match the filter, including a zero-new-artist page', async () => {
+    initial(); mockApiGet.mockResolvedValueOnce(response([artistA], 50, 120, 100)).mockResolvedValueOnce(response([artistB], 20, 120, null));
+    render(<LabelArtistsModal label={label} onClose={vi.fn()} />); await ready();
+    fireEvent.change(screen.getByLabelText('Search loaded artists'), { target: { value: 'Beta' } });
+    expect(screen.getByText('No loaded artists match your search.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await screen.findByText('100 releases checked; 1 artists loaded');
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await screen.findByRole('checkbox', { name: 'Select Beta' });
+    expect(screen.getByLabelText('Search loaded artists')).toHaveValue('Beta');
   });
-
-  it('renders label name in the header', async () => {
-    mockInitialFetch();
-    render(<LabelArtistsModal {...defaultProps} />);
-    expect(screen.getByText('Warp Records')).toBeInTheDocument();
+  it('advances a page without artist credits', async () => {
+    mockApiGet.mockResolvedValueOnce(response([], 50, 51, 50)).mockResolvedValueOnce(response([artistB], 1, 51, null));
+    render(<LabelArtistsModal label={label} onClose={vi.fn()} />); await screen.findByText('50 releases checked; 0 artists loaded');
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' })); await screen.findByRole('checkbox', { name: 'Select Beta' });
+    expect(mockApiGet.mock.calls[1][0]).toContain('offset=50');
   });
-
-  // ─── Fetching ──────────────────────────────────────────────────
-
-  it('fetches artists on open', async () => {
-    mockInitialFetch();
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(mockApiGet).toHaveBeenCalledWith(
-        '/api/search/label/label-1/artists?limit=50&offset=0',
-      );
-    });
+  it('keeps filter, selection and progress on failure and retries the identical cursor', async () => {
+    initial(); mockApiGet.mockResolvedValueOnce({ data: null, error: 'Provider unavailable' }).mockResolvedValueOnce(response([artistB], 50, 120, 100));
+    render(<LabelArtistsModal label={label} onClose={vi.fn()} />); fireEvent.click(await ready());
+    fireEvent.change(screen.getByLabelText('Search loaded artists'), { target: { value: 'Alpha' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' })); await screen.findByRole('alert');
+    expect(screen.getByText('50 releases checked; 1 artists loaded')).toBeVisible(); expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' })); await screen.findByText('100 releases checked; 2 artists loaded');
+    expect(mockApiGet.mock.calls[1][0]).toEqual(mockApiGet.mock.calls[2][0]); expect(screen.getByLabelText('Search loaded artists')).toHaveValue('Alpha');
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).toBeChecked();
   });
-
-  it('displays fetched artists', async () => {
-    const artists = makeArtists(3);
-    mockInitialFetch(artists);
-
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Artist 000')).toBeInTheDocument();
-      expect(screen.getByText('Artist 001')).toBeInTheDocument();
-      expect(screen.getByText('Artist 002')).toBeInTheDocument();
-    });
+  it('keeps the dialog open on initial failure and retries offset zero', async () => {
+    mockApiGet.mockResolvedValueOnce({ data: null, error: 'Provider unavailable' }).mockResolvedValueOnce(response([artistA], 1, 1, null));
+    const onClose = vi.fn(); render(<LabelArtistsModal label={label} onClose={onClose} />); await screen.findByRole('alert'); expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' })); await ready(); expect(mockApiGet.mock.calls[0][0]).toEqual(mockApiGet.mock.calls[1][0]);
   });
-
-  it('shows artist count after loading', async () => {
-    mockInitialFetch(makeArtists(3), 42);
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('42 artists found')).toBeInTheDocument();
-    });
+  it('aborts a pending request on close and ignores late completion', async () => {
+    let finish!: (result: ReturnType<typeof response>) => void;
+    mockApiGet.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const view = render(<LabelArtistsModal label={label} onClose={vi.fn()} />); const signal = mockApiGet.mock.calls[0][1].signal as AbortSignal;
+    view.rerender(<LabelArtistsModal label={null} onClose={vi.fn()} />); expect(signal.aborted).toBe(true);
+    await act(async () => finish(response([artistA], 50, 120, 50))); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
-
-  it('shows error toast and closes on fetch failure', async () => {
-    mockApiGet.mockResolvedValueOnce({
-      data: null,
-      error: 'Network error',
-      status: 0,
-    });
-    const onClose = vi.fn();
-
-    render(<LabelArtistsModal {...defaultProps} onClose={onClose} />);
-
-    await waitFor(() => {
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'error', title: 'Failed to load artists' }),
-      );
-      expect(onClose).toHaveBeenCalled();
-    });
+  it('ignores an obsolete page after switching labels', async () => {
+    let finish!: (result: ReturnType<typeof response>) => void;
+    mockApiGet.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce(response([artistB], 1, 1, null));
+    const view = render(<LabelArtistsModal label={label} onClose={vi.fn()} />);
+    view.rerender(<LabelArtistsModal label={{ id: 'dddddddd-dddd-dddd-dddd-dddddddddddd', name: 'Other label' }} onClose={vi.fn()} />);
+    await screen.findByRole('checkbox', { name: 'Select Beta' }); await act(async () => finish(response([artistA], 50, 120, 50)));
+    expect(screen.queryByRole('checkbox', { name: 'Select Alpha' })).not.toBeInTheDocument(); expect(screen.getByText('1 releases checked; 1 artists loaded')).toBeVisible();
   });
-
-  it('shows info toast when label has no artists', async () => {
-    mockInitialFetch([], 0);
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'info', title: 'No artists found for this label' }),
-      );
-    });
+  it('uses independent native disclosures and footer actions outside the only scroll body', async () => {
+    initial(); const { container } = render(<LabelArtistsModal label={label} onClose={vi.fn()} />); await ready();
+    const groups = container.querySelectorAll('details'); expect(groups).toHaveLength(2); expect(groups[0]).toHaveAttribute('open'); expect(groups[1]).toHaveAttribute('open');
+    groups[0].removeAttribute('open'); expect(groups[1]).toHaveAttribute('open');
+    expect(screen.getByRole('button', { name: 'Load more' }).closest('[data-modal-body]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add 0 selected artists' }).closest('[data-modal-body]')).toBeNull();
+    expect(container.querySelectorAll('[class*="overflow-y-auto"]')).toHaveLength(1);
   });
-
-  // ─── Filter ─────────────────────────────────────────────────────
-
-  it('filter narrows the displayed list', async () => {
-    const artists = [
-      { id: '1', name: 'Aphex Twin', imageUrl: null },
-      { id: '2', name: 'Boards of Canada', imageUrl: null },
-      { id: '3', name: 'Autechre', imageUrl: null },
-    ];
-    mockInitialFetch(artists);
-
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    // Wait for artists to load
-    await waitFor(() => {
-      expect(screen.getByText('Aphex Twin')).toBeInTheDocument();
-    });
-
-    // Type in filter
-    const filterInput = screen.getByPlaceholderText('Filter artists by name...');
-    fireEvent.change(filterInput, { target: { value: 'board' } });
-
-    // Only Boards of Canada should be visible
-    expect(screen.getByText('Boards of Canada')).toBeInTheDocument();
-    expect(screen.queryByText('Aphex Twin')).not.toBeInTheDocument();
-    expect(screen.queryByText('Autechre')).not.toBeInTheDocument();
+  it('sorts loaded artists locally without changing release paging', async () => {
+    mockApiGet.mockResolvedValueOnce(response([artistB, artistA], 2, 2, null)); render(<LabelArtistsModal label={label} onClose={vi.fn()} />); await ready();
+    expect(screen.getAllByRole('checkbox').map(node => node.getAttribute('aria-label'))).toEqual(['Select Alpha', 'Select Beta']);
+    fireEvent.change(screen.getByLabelText('Sort loaded artists'), { target: { value: 'desc' } });
+    expect(screen.getAllByRole('checkbox').map(node => node.getAttribute('aria-label'))).toEqual(['Select Beta', 'Select Alpha']); expect(mockApiGet).toHaveBeenCalledTimes(1);
+  });
+  it('keeps hidden selections and submits canonical IDs with effective options', async () => {
+    mockApiGet.mockResolvedValueOnce(response([artistA, artistB], 2, 2, null)); mockApiPost.mockResolvedValueOnce({ data: { added: [artistA.id, artistB.id], skipped: [], failed: [] }, error: null });
+    const onClose = vi.fn(); render(<LabelArtistsModal label={label} onClose={onClose} />); fireEvent.click(await ready());
+    fireEvent.change(screen.getByLabelText('Search loaded artists'), { target: { value: 'Beta' } }); fireEvent.click(screen.getByRole('button', { name: 'Select all matching artists' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add 2 selected artists' }));
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/search/batch', { artistIds: [artistA.id, artistB.id], ...chosenOptions })); expect(onClose).toHaveBeenCalledOnce();
+  });
+  it('removes only successful selections on partial bulk failure', async () => {
+    mockApiGet.mockResolvedValueOnce(response([artistA, artistB], 2, 2, null)); mockApiPost.mockResolvedValueOnce({ data: { added: [artistA.id], skipped: [], failed: [{ id: artistB.id, error: 'Unavailable' }] }, error: null });
+    const onClose = vi.fn(); render(<LabelArtistsModal label={label} onClose={onClose} />); await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'Select all loaded artists' })); fireEvent.click(screen.getByRole('button', { name: 'Add 2 selected artists' }));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).not.toBeChecked()); expect(screen.getByRole('checkbox', { name: 'Select Beta' })).toBeChecked(); expect(onClose).not.toHaveBeenCalled();
+  });
+  it('keeps selections after a failed bulk request', async () => {
+    initial(); mockApiPost.mockResolvedValueOnce({ data: null, error: 'Unavailable' }); const onClose = vi.fn(); render(<LabelArtistsModal label={label} onClose={onClose} />); fireEvent.click(await ready());
+    fireEvent.click(screen.getByRole('button', { name: 'Add 1 selected artists' })); await waitFor(() => expect(mockAddToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' })));
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).toBeChecked(); expect(onClose).not.toHaveBeenCalled();
+  });
+  it('closes on Escape using the shared modal', async () => {
+    initial(); const onClose = vi.fn(); render(<LabelArtistsModal label={label} onClose={onClose} />); await ready(); fireEvent.keyDown(document, { key: 'Escape' }); expect(onClose).toHaveBeenCalledOnce();
+  });
+  it('submits more than 100 loaded selections in bounded chunks with the same options', async () => {
+    const artists = Array.from({ length: 101 }, (_, index) => ({ ...artistA, id: `aaaaaaaa-aaaa-aaaa-aaaa-${String(index).padStart(12, '0')}`, name: `Artist ${String(index).padStart(3, '0')}` }));
+    mockApiGet.mockResolvedValueOnce(response(artists.slice(0, 50), 50, 101, 50)).mockResolvedValueOnce(response(artists.slice(50, 100), 50, 101, 100)).mockResolvedValueOnce(response(artists.slice(100), 1, 101, null));
+    mockApiPost.mockImplementation((_url: string, body: { artistIds: string[] }) => Promise.resolve({ data: { added: body.artistIds, skipped: [], failed: [] }, error: null }));
+    const onClose = vi.fn(); render(<LabelArtistsModal label={label} onClose={onClose} />);
+    await screen.findByRole('checkbox', { name: 'Select Artist 000' }); fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await screen.findByText('100 releases checked; 100 artists loaded'); fireEvent.click(screen.getByRole('button', { name: 'Load more' })); await screen.findByText('101 releases checked; 101 artists loaded'); fireEvent.click(screen.getByRole('button', { name: 'Select all loaded artists' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add 101 selected artists' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(mockApiPost.mock.calls.map(call => call[1])).toEqual([{ artistIds: artists.slice(0, 100).map(artist => artist.id), ...chosenOptions }, { artistIds: [artists[100].id], ...chosenOptions }]);
+  });
+  it('retains unconfirmed later chunks while removing only earlier confirmed identities', async () => {
+    const artists = Array.from({ length: 101 }, (_, index) => ({ ...artistA, id: `aaaaaaaa-aaaa-aaaa-aaaa-${String(index).padStart(12, '0')}`, name: `Artist ${String(index).padStart(3, '0')}` }));
+    mockApiGet.mockResolvedValueOnce(response(artists.slice(0, 50), 50, 101, 50)).mockResolvedValueOnce(response(artists.slice(50, 100), 50, 101, 100)).mockResolvedValueOnce(response(artists.slice(100), 1, 101, null));
+    mockApiPost.mockImplementationOnce((_url: string, body: { artistIds: string[] }) => Promise.resolve({ data: { added: body.artistIds.slice(1), skipped: [], failed: [{ id: body.artistIds[0], error: 'Unavailable' }] }, error: null })).mockResolvedValueOnce({ data: null, error: 'Timeout' });
+    const onClose = vi.fn(); render(<LabelArtistsModal label={label} onClose={onClose} />);
+    await screen.findByRole('checkbox', { name: 'Select Artist 000' }); fireEvent.click(screen.getByRole('button', { name: 'Load more' })); await screen.findByText('100 releases checked; 100 artists loaded'); fireEvent.click(screen.getByRole('button', { name: 'Load more' })); await screen.findByText('101 releases checked; 101 artists loaded'); fireEvent.click(screen.getByRole('button', { name: 'Select all loaded artists' })); fireEvent.click(screen.getByRole('button', { name: 'Add 101 selected artists' }));
+    await screen.findByRole('button', { name: 'Add 2 selected artists' });
+    expect(screen.getByRole('checkbox', { name: 'Select Artist 000' })).toBeChecked(); expect(screen.getByRole('checkbox', { name: 'Select Artist 100' })).toBeChecked(); expect(screen.getByRole('checkbox', { name: 'Select Artist 001' })).not.toBeChecked();
+    expect(onClose).not.toHaveBeenCalled(); expect(mockApiPost).toHaveBeenCalledTimes(2);
   });
 
-  it('shows "No artists match your search" when filter has no matches', async () => {
-    const artists = [{ id: '1', name: 'Aphex Twin', imageUrl: null }];
-    mockInitialFetch(artists);
+});
 
-    render(<LabelArtistsModal {...defaultProps} />);
 
-    await waitFor(() => {
-      expect(screen.getByText('Aphex Twin')).toBeInTheDocument();
-    });
-
-    const filterInput = screen.getByPlaceholderText('Filter artists by name...');
-    fireEvent.change(filterInput, { target: { value: 'zzzzz' } });
-
-    expect(screen.getByText('No artists match your search')).toBeInTheDocument();
-  });
-
-  // ─── Selection ─────────────────────────────────────────────────
-
-  it('select and deselect an artist by clicking', async () => {
-    const artists = [{ id: '1', name: 'Aphex Twin', imageUrl: null }];
-    mockInitialFetch(artists);
-
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Aphex Twin')).toBeInTheDocument();
-    });
-
-    // Click artist row to select
-    const row = screen.getByText('Aphex Twin').closest('.flex.items-center')!;
-    fireEvent.click(row);
-
-    // Should show "Add 1 Selected" button
-    expect(screen.getByText(/Add 1 Selected/)).toBeInTheDocument();
-
-    // Click again to deselect
-    fireEvent.click(row);
-
-    // "Add N Selected" should disappear
-    expect(screen.queryByText(/Add \d+ Selected/)).not.toBeInTheDocument();
-  });
-
-  it('Select All selects all displayed artists', async () => {
-    const artists = makeArtists(3);
-    mockInitialFetch(artists);
-
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Artist 000')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText('Select All'));
-
-    expect(screen.getByText(/Add 3 Selected/)).toBeInTheDocument();
-  });
-
-  it('Deselect All clears all selections', async () => {
-    const artists = makeArtists(3);
-    mockInitialFetch(artists);
-
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Artist 000')).toBeInTheDocument();
-    });
-
-    // Select all then deselect
-    fireEvent.click(screen.getByText('Select All'));
-    expect(screen.getByText(/Add 3 Selected/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('Deselect All'));
-    expect(screen.queryByText(/Add \d+ Selected/)).not.toBeInTheDocument();
-  });
-
-  // ─── Batch add ─────────────────────────────────────────────────
-
-  it('batch add calls /api/search/batch with selected artist ids', async () => {
-    const artists = [
-      { id: 'mbid-a', name: 'Artist A', imageUrl: null },
-      { id: 'mbid-b', name: 'Artist B', imageUrl: null },
-    ];
-    mockInitialFetch(artists);
-
-    mockApiPost.mockResolvedValueOnce({
-      data: { added: ['mbid-a', 'mbid-b'], skipped: [], failed: [] },
-      error: null,
-      status: 200,
-    });
-
-    const onClose = vi.fn();
-    render(<LabelArtistsModal {...defaultProps} onClose={onClose} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Artist A')).toBeInTheDocument();
-    });
-
-    // Select all
-    fireEvent.click(screen.getByText('Select All'));
-
-    // Click add button
-    const addBtn = screen.getByText(/Add 2 Selected/);
-    await act(async () => {
-      fireEvent.click(addBtn);
-    });
-
-    await waitFor(() => {
-      expect(mockApiPost).toHaveBeenCalledWith('/api/search/batch', {
-        artistIds: expect.arrayContaining(['mbid-a', 'mbid-b']),
-      });
-    });
-
-    // Success toast shown
-    expect(mockAddToast).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'success', title: 'Artists added' }),
-    );
-
-    // Modal closed after successful batch add
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it('batch add shows error toast on failure', async () => {
-    const artists = [{ id: 'mbid-a', name: 'Artist A', imageUrl: null }];
-    mockInitialFetch(artists);
-
-    mockApiPost.mockResolvedValueOnce({
-      data: null,
-      error: 'Server error',
-      status: 500,
-    });
-
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Artist A')).toBeInTheDocument();
-    });
-
-    // Select and add
-    fireEvent.click(screen.getByText('Select All'));
-    const addBtn = screen.getByText(/Add 1 Selected/);
-    await act(async () => {
-      fireEvent.click(addBtn);
-    });
-
-    await waitFor(() => {
-      expect(mockAddToast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'error', title: 'Failed to add artists' }),
-      );
-    });
-  });
-
-  // ─── Close ──────────────────────────────────────────────────────
-
-  it('calls onClose when close button is clicked', async () => {
-    mockInitialFetch();
-    const onClose = vi.fn();
-
-    render(<LabelArtistsModal {...defaultProps} onClose={onClose} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Artist 000')).toBeInTheDocument();
-    });
-
-    // Find the close button — it's the button containing the X icon
-    const xIcon = screen.getByTestId('icon-x');
-    const closeBtn = xIcon.closest('button')!;
-    fireEvent.click(closeBtn);
-
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  // ─── Infinite scroll ──────────────────────────────────────────
-
-  it('loads more artists when scrolled to bottom', async () => {
-    // First page: 50 artists (full page => hasMore = true)
-    const firstPage = makeArtists(50);
-    mockApiGet.mockResolvedValueOnce({
-      data: { artists: firstPage, count: 75 },
-      error: null,
-      status: 200,
-    });
-
-    // Second page: 25 more
-    const secondPage = makeArtists(25, 50);
-    mockApiGet.mockResolvedValueOnce({
-      data: { artists: secondPage, count: 75 },
-      error: null,
-      status: 200,
-    });
-
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    // Wait for initial load
-    await waitFor(() => {
-      expect(screen.getByText('Artist 000')).toBeInTheDocument();
-    });
-
-    // Simulate scroll to bottom — find the scroll container by class
-    const scrollContainer = document.querySelector('.overflow-auto')!;
-    Object.defineProperty(scrollContainer, 'scrollHeight', { value: 1000, configurable: true });
-    Object.defineProperty(scrollContainer, 'scrollTop', { value: 900, configurable: true });
-    Object.defineProperty(scrollContainer, 'clientHeight', { value: 100, configurable: true });
-
-    fireEvent.scroll(scrollContainer);
-
-    await waitFor(() => {
-      expect(mockApiGet).toHaveBeenCalledTimes(2);
-      expect(mockApiGet).toHaveBeenLastCalledWith(
-        '/api/search/label/label-1/artists?limit=50&offset=50',
-      );
-    });
-  });
-
-  // ─── Sort ──────────────────────────────────────────────────────
-
-  it('sorts artists by name descending when sort changed', async () => {
-    const artists = [
-      { id: '1', name: 'Alpha', imageUrl: null },
-      { id: '2', name: 'Charlie', imageUrl: null },
-      { id: '3', name: 'Bravo', imageUrl: null },
-    ];
-    mockInitialFetch(artists);
-
-    render(<LabelArtistsModal {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Alpha')).toBeInTheDocument();
-    });
-
-    // Default sort is A→Z; switch to Z→A
-    const sortSelect = document.querySelector('select')!;
-    fireEvent.change(sortSelect, { target: { value: 'desc' } });
-
-    // Get the order of artist names from the .font-medium spans
-    const nameSpans = document.querySelectorAll('span.font-medium');
-    const names = Array.from(nameSpans).map((el) => el.textContent);
-
-    expect(names).toEqual(['Charlie', 'Bravo', 'Alpha']);
-  });
+it('opens each same-name canonical identity while retaining loaded label selections and filters', async () => {
+  const artists = [{ ...artistA, name: 'Common Name' }, { ...artistB, name: 'Common Name' }];
+  mockApiGet.mockResolvedValueOnce(response(artists, 50, 100, 50));
+  const onClose = vi.fn();
+  const view = render(<LabelArtistsModal label={label} onClose={onClose} />);
+  const selections = await screen.findAllByRole('checkbox', { name: 'Select Common Name' });
+  fireEvent.click(selections[1]);
+  fireEvent.change(screen.getByLabelText('Search loaded artists'), { target: { value: 'Common' } });
+  const names = screen.getAllByRole('link', { name: 'Common Name' });
+  expect(names.map(link => new URL((link as HTMLAnchorElement).href).searchParams.get('artist'))).toEqual([artistA.id, artistB.id]);
+  fireEvent.click(names[1]);
+  expect(new URL(navigation.push.mock.calls[0][0], 'https://mixarr.invalid').searchParams.get('artist')).toBe(artistB.id);
+  navigation.query += '&artist=' + artistB.id;
+  view.rerender(<LabelArtistsModal label={label} onClose={onClose} />);
+  expect(screen.getByLabelText('Search loaded artists')).toHaveValue('Common');
+  expect(screen.getAllByRole('checkbox')[1]).toBeChecked();
+  expect(mockApiGet).toHaveBeenCalledTimes(1);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getAllByRole('link', { name: 'Open artist Common Name' }).map(link => new URL((link as HTMLAnchorElement).href).searchParams.get('artist'))).toEqual([artistA.id, artistB.id]);
 });

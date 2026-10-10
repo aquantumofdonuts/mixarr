@@ -1,4 +1,11 @@
+import { addOptionsSchema, effectiveAddOptions } from '../lib/add-options.js';
+import { DecisionError } from '../lib/decision.js';
+import { validateBody } from '../middleware/validate.js';
 import { Router } from 'express';
+import { z } from 'zod';
+import type { LabelArtistPage } from '@mixarr/shared-types';
+import { ArtistDetailInputError, ArtistDetailService } from '../services/artist-detail.js';
+import { readBeforeDeadline } from '../lib/acquisition-deadline.js';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { parseIntParam } from '../utils/params.js';
@@ -146,7 +153,8 @@ searchRouter.get('/discover', async (req, res) => {
     }
     
     // Search across enabled sources
-    const results = await multiSourceSearch(q, req.user!.id, enabledSources, 25);
+    const sourceErrors: { source: SearchSource; message: string }[] = [];
+    const results = await multiSourceSearch(q, req.user!.id, enabledSources, 25, sourceErrors);
     
     // Skip MBID lookup during search - too slow with rate limits
     // MBID resolution happens when user clicks "Add" via /resolve-mbid endpoint
@@ -154,6 +162,7 @@ searchRouter.get('/discover', async (req, res) => {
     res.json({ 
       results,
       sources: enabledSources,
+      errors: sourceErrors.map(error => error.message),
     });
   } catch (error) {
     log.error('Multi-source search error:', error);
@@ -201,12 +210,13 @@ searchRouter.post('/ai', async (req, res) => {
     log.debug(`Processing prompt: "${truncated}"`);
     const effectiveLimit = Math.min(limit, 10); // Cap at 10 to avoid timeouts
     const { artists: artistNames, providers, errors: aiErrors } = await aiService.searchByPrompt(prompt.trim(), effectiveLimit);
+    const searchErrors = (aiErrors || []).map(error => `${error.startsWith('OpenAI:') ? 'OpenAI' : error.startsWith('Anthropic:') ? 'Anthropic' : 'AI provider'} search unavailable. Retry the search.`);
 
     if (artistNames.length === 0) {
       // If we have errors but no results, indicate the failure
       const hasProviderErrors = aiErrors && aiErrors.length > 0;
       const message = hasProviderErrors
-        ? `AI providers encountered errors: ${aiErrors.join('; ')}. Please try again.`
+        ? `AI providers encountered errors: ${searchErrors.join('; ')}`
         : 'No recommendations found. Try rephrasing your query.';
       
       res.json({
@@ -214,7 +224,7 @@ searchRouter.post('/ai', async (req, res) => {
         results: [],
         aiProviders: providers,
         message,
-        errors: aiErrors,
+        errors: searchErrors,
       });
       return;
     }
@@ -310,6 +320,7 @@ searchRouter.post('/ai', async (req, res) => {
       prompt: prompt.trim(),
       results: finalResults,
       aiProviders: providers,
+      errors: searchErrors,
     });
   } catch (error) {
     log.error('Error:', error);
@@ -337,9 +348,9 @@ searchRouter.post('/resolve-mbid', async (req, res) => {
 });
 
 // Add artist from discovery search (with MBID resolution)
-searchRouter.post('/discover/add', async (req, res) => {
+searchRouter.post('/discover/add', validateBody(addOptionsSchema.extend({ artistName: z.string().min(1).max(500), mbid: z.string().uuid().transform(value => value.toLowerCase()).optional() })), async (req, res) => {
   try {
-    const { artistName, mbid, qualityProfileId, metadataProfileId, rootFolderPath } = req.body;
+    const { artistName, mbid } = req.body;
     
     if (!artistName) {
       res.status(400).json({ error: 'Artist name required' });
@@ -353,60 +364,31 @@ searchRouter.post('/discover/add', async (req, res) => {
     }
     const { service: lidarr, config: lidarrConfig } = lidarrResult;
     
-    // Use provided MBID or resolve it
-    let resolvedMbid = mbid;
+    const resolvedMbid = mbid;
     if (!resolvedMbid) {
       const resolution = await resolveMbid(artistName);
-      if (!resolution.mbid) {
-        // Return candidates for manual selection
-        res.status(422).json({
-          error: 'Could not automatically match artist in MusicBrainz',
-          candidates: resolution.candidates,
-          artistName,
-        });
-        return;
-      }
-      resolvedMbid = resolution.mbid;
-    }
-    
-    // Get defaults from connection config, then fall back to fetching first available
-    let qpId = qualityProfileId || lidarrConfig.qualityProfileId;
-    let mpId = metadataProfileId || lidarrConfig.metadataProfileId;
-    let rfPath = rootFolderPath || lidarrConfig.rootFolderPath;
-
-    if (!qpId) {
-      const profiles = await lidarr.getQualityProfiles();
-      qpId = profiles[0]?.id;
-    }
-
-    if (!mpId) {
-      const profiles = await lidarr.getMetadataProfiles();
-      mpId = profiles[0]?.id;
-    }
-
-    if (!rfPath) {
-      const folders = await lidarr.getRootFolders();
-      rfPath = folders[0]?.path;
-    }
-
-    if (!qpId || !mpId || !rfPath) {
-      res.status(400).json({ error: 'Missing Lidarr configuration (profiles/folders)' });
+      res.status(422).json({ error: 'Choose a MusicBrainz artist before adding', code: 'IDENTITY_REQUIRED',
+        details: { candidates: resolution.candidates || [], artistName }, candidates: resolution.candidates || [], artistName });
       return;
     }
 
+    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
+    const { qualityProfileId: qpId, metadataProfileId: mpId, rootFolderPath: rfPath } = options;
+
     // Use addArtistWithCacheWarm to warm SkyHook cache for reliable metadata lookup
     // Use monitorOption from connection config (defaults to 'all' if not set)
-    const { artist, refreshCommand } = await lidarr.addArtistWithCacheWarm(
+    const { artist, refreshCommand, alreadyInLibrary } = await lidarr.addArtistWithCacheWarm(
       resolvedMbid, qpId, mpId, rfPath,
       true,  // monitored
-      lidarrConfig.searchOnAdd !== false,  // searchForMissingAlbums from config
+      options.searchOnAdd,  // searchForMissingAlbums from config
       false, // waitForRefresh (deprecated)
-      lidarrConfig.monitorOption || 'all',
-      lidarrConfig.monitorNewItems || 'all'
+      options.monitorOption,
+      options.monitorNewItems
     );
     
-    // Log the successful artist addition
-    await addLogEntry('info', 'search', `Added artist "${artistName}" from search`, {
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
+    await addLogEntry('info', 'search', alreadyInLibrary ? `Artist "${artistName}" is already in Lidarr` : `Added artist "${artistName}" from search`, {
+      outcome,
       artistName,
       mbid: resolvedMbid,
       source: 'discover-search',
@@ -415,8 +397,9 @@ searchRouter.post('/discover/add', async (req, res) => {
       status: 'success',
     });
     
-    res.json({ success: true, artist, mbid: resolvedMbid, refreshTriggered: !!refreshCommand });
+    res.json({ success: true, outcome, artist, mbid: resolvedMbid, refreshTriggered: !!refreshCommand });
   } catch (error) {
+    if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     // Log the failed artist addition
     await addLogEntry('error', 'search', `Failed to add artist "${req.body.artistName}" from search`, {
       artistName: req.body.artistName,
@@ -435,9 +418,9 @@ searchRouter.post('/discover/add', async (req, res) => {
 });
 
 // Add artist to Lidarr
-searchRouter.post('/artists/add', async (req, res) => {
+searchRouter.post('/artists/add', validateBody(addOptionsSchema.extend({ foreignArtistId: z.string().uuid().transform(value => value.toLowerCase()) })), async (req, res) => {
   try {
-    const { foreignArtistId, qualityProfileId, metadataProfileId, rootFolderPath } = req.body;
+    const { foreignArtistId } = req.body;
     
     if (!foreignArtistId) {
       res.status(400).json({ error: 'Artist ID required' });
@@ -452,45 +435,24 @@ searchRouter.post('/artists/add', async (req, res) => {
     }
     const { service: lidarr, config: lidarrConfig } = lidarrResult;
     
-    // Get defaults from connection config, then fall back to fetching first available
-    let qpId = qualityProfileId || lidarrConfig.qualityProfileId;
-    let mpId = metadataProfileId || lidarrConfig.metadataProfileId;
-    let rfPath = rootFolderPath || lidarrConfig.rootFolderPath;
-
-    if (!qpId) {
-      const profiles = await lidarr.getQualityProfiles();
-      qpId = profiles[0]?.id;
-    }
-
-    if (!mpId) {
-      const profiles = await lidarr.getMetadataProfiles();
-      mpId = profiles[0]?.id;
-    }
-
-    if (!rfPath) {
-      const folders = await lidarr.getRootFolders();
-      rfPath = folders[0]?.path;
-    }
-
-    if (!qpId || !mpId || !rfPath) {
-      res.status(400).json({ error: 'Missing Lidarr configuration (profiles/folders)' });
-      return;
-    }
+    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
+    const { qualityProfileId: qpId, metadataProfileId: mpId, rootFolderPath: rfPath } = options;
 
     // Use addArtistWithCacheWarm to warm SkyHook cache for reliable metadata lookup
     // Use monitorOption from connection config (defaults to 'all' if not set)
-    const { artist, refreshCommand } = await lidarr.addArtistWithCacheWarm(
+    const { artist, refreshCommand, alreadyInLibrary } = await lidarr.addArtistWithCacheWarm(
       foreignArtistId, qpId, mpId, rfPath,
       true,  // monitored
-      lidarrConfig.searchOnAdd !== false,  // searchForMissingAlbums from config
+      options.searchOnAdd,  // searchForMissingAlbums from config
       false, // waitForRefresh (deprecated)
-      lidarrConfig.monitorOption || 'all',
-      lidarrConfig.monitorNewItems || 'all'
+      options.monitorOption,
+      options.monitorNewItems
     );
     
-    // Log the successful artist addition
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
     const artistName = artist.artistName || 'Unknown Artist';
-    await addLogEntry('info', 'search', `Added artist "${artistName}" from search`, {
+    await addLogEntry('info', 'search', alreadyInLibrary ? `Artist "${artistName}" is already in Lidarr` : `Added artist "${artistName}" from search`, {
+      outcome,
       artistName,
       mbid: foreignArtistId,
       source: 'search',
@@ -500,12 +462,13 @@ searchRouter.post('/artists/add', async (req, res) => {
     });
     
     // Send notification
-    await notificationService.send(req.user!.id, 'artist.added', {
+    if (!alreadyInLibrary) await notificationService.send(req.user!.id, 'artist.added', {
       artistName,
-    });
+    }).catch(() => log.warn('Search artist notification failed', { userId: req.user!.id }));
     
-    res.json({ success: true, artist, refreshTriggered: !!refreshCommand });
+    res.json({ success: true, outcome, artist, refreshTriggered: !!refreshCommand });
   } catch (error) {
+    if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     // Log the failed artist addition
     await addLogEntry('error', 'search', `Failed to add artist from search`, {
       mbid: req.body.foreignArtistId,
@@ -1213,72 +1176,143 @@ searchRouter.get('/year', async (req, res) => {
   }
 });
 
-// Get artist releases
-searchRouter.get('/artist/:mbid/releases', async (req, res) => {
-  try {
-    const { mbid } = req.params;
-    const { limit = '100', offset = '0' } = req.query;
+const artistIdentity = z.string().uuid().transform(value => value.toLowerCase());
+const pagingInteger = (min: number, max: number) => z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(min).max(max));
+const detailQuery = z.object({
+  sourceLimit: pagingInteger(1, 100).optional(),
+  sourceCursor: z.string().min(1).max(1024).regex(/^[A-Za-z0-9_-]+$/).optional(),
+});
+const releaseQuery = z.object({
+  limit: pagingInteger(1, 100).default('100'),
+  offset: pagingInteger(0, 1_000_000).default('0'),
+});
 
-    const mb = new MusicBrainzService();
-    const result = await mb.getArtistReleases(mbid, parseInt(limit as string), parseInt(offset as string));
-    
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Failed to get releases' 
+// Owned provenance and optional metadata share one budget, including connection lookup.
+searchRouter.get('/artist/:mbid/detail', async (req, res) => {
+  const mbid = artistIdentity.safeParse(req.params.mbid);
+  const query = detailQuery.safeParse(req.query);
+  if (!mbid.success || !query.success) {
+    res.status(400).json({ error: 'Invalid artist identity or source paging', code: 'INVALID_INPUT' });
+    return;
+  }
+  const cancellation = new AbortController();
+  const signal = AbortSignal.any([AbortSignal.timeout(20_000), cancellation.signal]);
+  const close = () => { if (!res.writableEnded) cancellation.abort(); };
+  res.on('close', close);
+  try {
+    const service = new ArtistDetailService(prisma, {
+      getArtistByMbid: async (identity, providerSignal) => {
+        const lidarr = await getLidarrService(req.user!.id, providerSignal);
+        if (!lidarr) throw new Error('No active Lidarr connection');
+        return lidarr.getArtistByMbid(identity, providerSignal);
+      },
     });
+    const detail = await service.getArtistDetail(mbid.data, req.user!.id, {
+      limit: query.data.sourceLimit, cursor: query.data.sourceCursor, signal,
+    });
+    if (!cancellation.signal.aborted) res.json(detail);
+  } catch (error) {
+    if (cancellation.signal.aborted) return;
+    if (error instanceof ArtistDetailInputError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+    } else if (error && typeof error === 'object' && 'status' in error && (error.status === 401 || error.status === 403)) {
+      res.status(error.status).json({ error: 'Artist detail access denied' });
+    } else {
+      log.error('Artist detail lookup failed:', error);
+      res.status(signal.aborted ? 504 : 500).json({ error: 'Artist detail unavailable' });
+    }
+  } finally {
+    res.off('close', close);
   }
 });
 
-// Get label artists
-searchRouter.get('/label/:mbid/artists', async (req, res) => {
+// Reuse the MusicBrainz release-group contract with strict bounded paging.
+searchRouter.get('/artist/:mbid/releases', async (req, res) => {
+  const mbid = artistIdentity.safeParse(req.params.mbid);
+  const query = releaseQuery.safeParse(req.query);
+  if (!mbid.success || !query.success) {
+    res.status(400).json({ error: 'Invalid artist identity or release paging', code: 'INVALID_INPUT' });
+    return;
+  }
+  const cancellation = new AbortController();
+  const signal = AbortSignal.any([AbortSignal.timeout(20_000), cancellation.signal]);
+  const close = () => { if (!res.writableEnded) cancellation.abort(); };
+  res.on('close', close);
   try {
-    const { mbid } = req.params;
-    const { limit = '100', offset = '0' } = req.query;
-
     const mb = new MusicBrainzService();
-    const result = await mb.getLabelArtists(mbid, parseInt(limit as string), parseInt(offset as string));
-    
-    // Extract unique artists from releases
-    const artistMap = new Map<string, { id: string; name: string; sortName: string }>();
+    const result = await readBeforeDeadline(mb.getArtistReleases(mbid.data, query.data.limit, query.data.offset), signal);
+    if (!cancellation.signal.aborted) res.json(result);
+  } catch (error) {
+    if (cancellation.signal.aborted) return;
+    log.error('Artist releases lookup failed:', error);
+    res.status(signal.aborted ? 504 : 500).json({ error: 'Artist releases unavailable' });
+  } finally {
+    res.off('close', close);
+  }
+});
+
+// Label traversal counts releases, not the artists extracted from each release page.
+searchRouter.get('/label/:mbid/artists', async (req, res) => {
+  const mbid = artistIdentity.safeParse(req.params.mbid);
+  const query = releaseQuery.safeParse(req.query);
+  if (!mbid.success || !query.success) {
+    res.status(400).json({ error: 'Invalid label identity or release paging', code: 'INVALID_INPUT' });
+    return;
+  }
+  const cancellation = new AbortController();
+  const signal = AbortSignal.any([AbortSignal.timeout(20_000), cancellation.signal]);
+  const close = () => { if (!res.writableEnded) cancellation.abort(); };
+  res.on('close', close);
+  try {
+    const mb = new MusicBrainzService();
+    const result = await readBeforeDeadline(mb.getLabelArtists(mbid.data, query.data.limit, query.data.offset), signal);
+    if (!Number.isSafeInteger(result.count) || result.count < 0 || (!result.releases.length && query.data.offset < result.count)) {
+      res.status(502).json({ error: 'Label release page unavailable. Retry this page.' });
+      return;
+    }
+    const artistMap = new Map<string, LabelArtistPage['artists'][number]>();
     for (const release of result.releases) {
       for (const credit of release['artist-credit'] || []) {
-        if (credit.artist && !artistMap.has(credit.artist.id)) {
-          artistMap.set(credit.artist.id, {
-            id: credit.artist.id,
+        const identity = artistIdentity.safeParse(credit.artist?.id);
+        if (identity.success && typeof credit.artist?.name === 'string' && credit.artist.name.trim() && !artistMap.has(identity.data)) {
+          artistMap.set(identity.data, {
+            id: identity.data,
             name: credit.artist.name,
-            sortName: credit.artist['sort-name']
+            sortName: typeof credit.artist['sort-name'] === 'string' ? credit.artist['sort-name'] : credit.artist.name,
+            imageUrl: null,
           });
         }
       }
     }
-    
-    const artists = Array.from(artistMap.values());
-    
-    // Fetch images from Deezer
-    const artistNames = artists.map(a => a.name);
-    const imageMap = await getArtistImages(artistNames);
-    
-    const enrichedArtists = artists.map(artist => ({
-      ...artist,
-      imageUrl: imageMap.get(artist.name) || null
-    }));
-    
-    res.json({ 
-      artists: enrichedArtists,
-      count: enrichedArtists.length 
-    });
+    const artists = [...artistMap.values()];
+    // ponytail: artwork is optional. An image outage must not discard a valid release page.
+    try {
+      const imageMap = await readBeforeDeadline(getArtistImages(artists.map(artist => artist.name)), signal);
+      artists.forEach(artist => { artist.imageUrl = imageMap.get(artist.name) || null; });
+    } catch (error) {
+      log.warn('Label artist images unavailable:', error);
+    }
+    const nextOffset = query.data.offset + result.releases.length;
+    const page: LabelArtistPage = {
+      artists,
+      releasesProcessed: result.releases.length,
+      totalReleases: result.count,
+      nextReleaseOffset: nextOffset < result.count ? nextOffset : null,
+    };
+    if (!cancellation.signal.aborted) res.json(page);
   } catch (error) {
-    res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Failed to get label artists' 
-    });
+    if (cancellation.signal.aborted) return;
+    log.error('Label release lookup failed:', error);
+    res.status(signal.aborted ? 504 : 500).json({ error: 'Label artists unavailable. Retry this page.' });
+  } finally {
+    res.off('close', close);
   }
 });
 
 // Batch add artists to Lidarr
-searchRouter.post('/batch', async (req, res) => {
+searchRouter.post('/batch', validateBody(addOptionsSchema.extend({ artistIds: z.array(z.string().uuid().transform(value => value.toLowerCase())).min(1).max(100).transform(ids => [...new Set(ids)]) })), async (req, res) => {
   try {
-    const { artistIds, qualityProfileId, metadataProfileId, rootFolderPath } = req.body;
+    const { artistIds } = req.body;
     
     if (!artistIds || !Array.isArray(artistIds) || artistIds.length === 0) {
       res.status(400).json({ error: 'Artist IDs array required' });
@@ -1292,30 +1326,8 @@ searchRouter.post('/batch', async (req, res) => {
     }
     const { service: lidarr, config: lidarrConfig } = lidarrResult;
     
-    // Get defaults from connection config, then fall back to fetching first available
-    let qpId = qualityProfileId || lidarrConfig.qualityProfileId;
-    let mpId = metadataProfileId || lidarrConfig.metadataProfileId;
-    let rfPath = rootFolderPath || lidarrConfig.rootFolderPath;
-
-    if (!qpId) {
-      const profiles = await lidarr.getQualityProfiles();
-      qpId = profiles[0]?.id;
-    }
-
-    if (!mpId) {
-      const profiles = await lidarr.getMetadataProfiles();
-      mpId = profiles[0]?.id;
-    }
-
-    if (!rfPath) {
-      const folders = await lidarr.getRootFolders();
-      rfPath = folders[0]?.path;
-    }
-
-    if (!qpId || !mpId || !rfPath) {
-      res.status(400).json({ error: 'Missing Lidarr configuration (profiles/folders)' });
-      return;
-    }
+    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
+    const { qualityProfileId: qpId, metadataProfileId: mpId, rootFolderPath: rfPath } = options;
 
     // Get cache to check existing artists (shared 5-min cache)
     const lidarrResult2 = await getLidarrServiceWithConfig(req.user!.id);
@@ -1341,15 +1353,16 @@ searchRouter.post('/batch', async (req, res) => {
 
         // Use addArtistWithCacheWarm to warm SkyHook cache (batch mode)
         // Use monitorOption from connection config (defaults to 'all' if not set)
-        await lidarr.addArtistWithCacheWarm(
+        const acquisition = await lidarr.addArtistWithCacheWarm(
           artistId, qpId, mpId, rfPath,
           true,  // monitored
-          lidarrConfig.searchOnAdd !== false,  // searchForMissingAlbums from config
+          options.searchOnAdd,  // searchForMissingAlbums from config
           false, // waitForRefresh (deprecated)
-          lidarrConfig.monitorOption || 'all',
-          lidarrConfig.monitorNewItems || 'all'
+          options.monitorOption,
+          options.monitorNewItems
         );
-        results.added.push(artistId);
+        if (acquisition.alreadyInLibrary) results.skipped.push(artistId);
+        else results.added.push(artistId);
       } catch (error) {
         results.failed.push({
           id: artistId,
@@ -1360,6 +1373,7 @@ searchRouter.post('/batch', async (req, res) => {
 
     res.json(results);
   } catch (error) {
+    if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Batch add failed' 
     });

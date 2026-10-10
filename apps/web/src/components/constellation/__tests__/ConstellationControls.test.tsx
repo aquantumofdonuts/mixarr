@@ -86,3 +86,15 @@ describe('ConstellationControls — genre highlight', () => {
     expect(legend).toHaveTextContent(/rock/i);
   });
 });
+
+it('disables genre highlight with its live-source reason and clears a previous highlight', async () => {
+  const changed = vi.fn();
+  const props = { onRoleMaskChange: vi.fn(), onHideHotnessChange: vi.fn(), onGenreHighlightChange: changed };
+  const { rerender } = render(<ConstellationControls {...props} creditSource="index" />);
+  await userEvent.selectOptions(screen.getByLabelText('Highlight genre'), 'rock');
+  expect(changed).toHaveBeenLastCalledWith('rock');
+  rerender(<ConstellationControls {...props} creditSource="live" />);
+  expect(screen.getByLabelText('Highlight genre')).toBeDisabled(); expect(changed).toHaveBeenLastCalledWith(null);
+  expect(screen.getByLabelText('Highlight genre')).toHaveAccessibleDescription('Genre colour unavailable on the live Discogs source');
+  expect(screen.getByTestId('genre-legend')).not.toBeVisible();
+});

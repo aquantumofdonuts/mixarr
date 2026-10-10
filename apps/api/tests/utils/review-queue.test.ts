@@ -1,14 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { findOrCreateReviewItem } from '../../src/utils/review-queue.js';
 
 // Mock prisma
 vi.mock('../../src/lib/db.js', () => ({
   default: {
+    $transaction: vi.fn(),
     reviewItem: {
       findFirst: vi.fn(),
       findMany: vi.fn(),
       create: vi.fn(),
-      update: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
 }));
@@ -16,28 +17,35 @@ vi.mock('../../src/lib/db.js', () => ({
 import prisma from '../../src/lib/db.js';
 
 const mockPrisma = prisma as unknown as {
+  $transaction: ReturnType<typeof vi.fn>;
   reviewItem: {
     findFirst: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
   };
 };
+
+const revision = new Date('2026-10-08T00:00:00.010Z');
+afterEach(() => vi.restoreAllMocks());
 
 describe('findOrCreateReviewItem', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(Date, 'now').mockReturnValue(revision.getTime() - 10);
+    mockPrisma.$transaction.mockImplementation(async callback => callback(mockPrisma));
+    mockPrisma.reviewItem.updateMany.mockResolvedValue({ count: 1 });
   });
 
   describe('when matching by MBID', () => {
     it('finds existing item by MBID and updates sources', async () => {
       mockPrisma.reviewItem.findFirst.mockResolvedValueOnce({
-        id: 1,
+        id: 1, userId: 1, status: 'pending', updatedAt: revision,
         mbid: 'mbid-123',
         source: 'import-spotify',
         artistName: 'Test Artist',
       });
-      mockPrisma.reviewItem.update.mockResolvedValue({});
+      mockPrisma.reviewItem.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await findOrCreateReviewItem({
         userId: 1,
@@ -48,15 +56,15 @@ describe('findOrCreateReviewItem', () => {
 
       expect(result.id).toBe(1);
       expect(result.created).toBe(false);
-      expect(mockPrisma.reviewItem.update).toHaveBeenCalledWith({
-        where: { id: 1 },
-        data: { source: 'import-spotify, subscription:weekly' },
+      expect(mockPrisma.reviewItem.updateMany).toHaveBeenCalledWith({
+        where: { id: 1, userId: 1, status: 'pending', updatedAt: revision },
+        data: { source: 'import-spotify, subscription:weekly', updatedAt: new Date(revision.getTime() + 1) },
       });
     });
 
     it('does not duplicate source if already present', async () => {
       mockPrisma.reviewItem.findFirst.mockResolvedValueOnce({
-        id: 1,
+        id: 1, userId: 1, status: 'pending', updatedAt: revision,
         mbid: 'mbid-123',
         source: 'import-spotify, subscription:weekly',
         artistName: 'Test Artist',
@@ -71,7 +79,7 @@ describe('findOrCreateReviewItem', () => {
 
       expect(result.id).toBe(1);
       expect(result.created).toBe(false);
-      expect(mockPrisma.reviewItem.update).not.toHaveBeenCalled();
+      expect(mockPrisma.reviewItem.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -81,12 +89,12 @@ describe('findOrCreateReviewItem', () => {
       mockPrisma.reviewItem.findFirst
         .mockResolvedValueOnce(null) // MBID search
         .mockResolvedValueOnce({     // SpotifyId search
-          id: 2,
+          id: 2, userId: 1, status: 'pending', updatedAt: revision,
           spotifyId: 'spotify-123',
           source: 'import-liked',
           artistName: 'Test Artist',
         });
-      mockPrisma.reviewItem.update.mockResolvedValue({});
+      mockPrisma.reviewItem.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await findOrCreateReviewItem({
         userId: 1,
@@ -98,10 +106,11 @@ describe('findOrCreateReviewItem', () => {
 
       expect(result.id).toBe(2);
       expect(result.created).toBe(false);
-      expect(mockPrisma.reviewItem.update).toHaveBeenCalledWith({
-        where: { id: 2 },
+      expect(mockPrisma.reviewItem.updateMany).toHaveBeenCalledWith({
+        where: { id: 2, userId: 1, status: 'pending', updatedAt: revision },
         data: {
           source: 'import-liked, subscription:daily',
+          updatedAt: new Date(revision.getTime() + 1),
           mbid: 'new-mbid', // Fill in MBID
         },
       });
@@ -112,9 +121,9 @@ describe('findOrCreateReviewItem', () => {
     it('matches "The Beatles" to "Beatles"', async () => {
       mockPrisma.reviewItem.findFirst.mockResolvedValue(null);
       mockPrisma.reviewItem.findMany.mockResolvedValue([
-        { id: 3, artistName: 'The Beatles', source: 'import-1', status: 'pending' },
+        { id: 3, userId: 1, updatedAt: revision, artistName: 'The Beatles', source: 'import-1', status: 'pending' },
       ]);
-      mockPrisma.reviewItem.update.mockResolvedValue({});
+      mockPrisma.reviewItem.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await findOrCreateReviewItem({
         userId: 1,
@@ -129,9 +138,9 @@ describe('findOrCreateReviewItem', () => {
     it('matches "AC/DC" to "ACDC"', async () => {
       mockPrisma.reviewItem.findFirst.mockResolvedValue(null);
       mockPrisma.reviewItem.findMany.mockResolvedValue([
-        { id: 4, artistName: 'AC/DC', source: 'import-1', status: 'pending' },
+        { id: 4, userId: 1, updatedAt: revision, artistName: 'AC/DC', source: 'import-1', status: 'pending' },
       ]);
-      mockPrisma.reviewItem.update.mockResolvedValue({});
+      mockPrisma.reviewItem.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await findOrCreateReviewItem({
         userId: 1,
@@ -142,6 +151,19 @@ describe('findOrCreateReviewItem', () => {
       expect(result.id).toBe(4);
       expect(result.created).toBe(false);
     });
+  });
+
+  it('refuses a stale metadata revision without overwriting a newer decision', async () => {
+    mockPrisma.reviewItem.findFirst.mockResolvedValue({ id: 1, userId: 1, status: 'pending', updatedAt: revision,
+      mbid: 'mbid-123', source: 'import-spotify', artistName: 'Test Artist' });
+    mockPrisma.reviewItem.updateMany.mockResolvedValue({ count: 0 });
+    await expect(findOrCreateReviewItem({ userId: 1, artistName: 'Test Artist', mbid: 'mbid-123', source: 'new-source' }))
+      .rejects.toThrow('Review item changed during metadata update');
+    expect(mockPrisma.reviewItem.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, userId: 1, status: 'pending', updatedAt: revision },
+      data: { source: 'import-spotify, new-source', updatedAt: new Date(revision.getTime() + 1) },
+    });
+    expect(mockPrisma.reviewItem.create).not.toHaveBeenCalled();
   });
 
   describe('when no match found', () => {

@@ -45,12 +45,11 @@ export function ConfirmDialog({
   const Icon = icons[variant];
 
   return (
-    <Modal isOpen={open} onClose={onClose} size="sm">
+    <Modal isOpen={open} onClose={onClose} title={title} size="sm">
       <div className="flex flex-col items-center text-center">
         <div className={`rounded-full bg-muted p-3 mb-4 ${iconColors[variant]}`}>
           <Icon className="h-6 w-6" />
         </div>
-        <h3 className="text-lg font-semibold">{title}</h3>
         {description && (
           <p className="mt-2 text-sm text-muted-foreground whitespace-pre-line">{description}</p>
         )}

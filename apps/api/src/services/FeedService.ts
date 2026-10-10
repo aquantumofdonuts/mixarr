@@ -1,3 +1,4 @@
+import { effectiveAddOptions, type AddOptions } from '../lib/add-options.js';
 /**
  * FeedService - Aggregates subscription results into deduplicated feed items.
  *
@@ -9,6 +10,13 @@
  */
 
 import prisma from '../lib/db.js';
+import type { AcquisitionOutcome, AcquisitionState, ArtistSourceRecord } from '@mixarr/shared-types';
+import { createDecisionUndo } from '../lib/decision-undo.js';
+import type { UndoDecisionResponse } from '@mixarr/shared-types';
+import { DecisionError, nextRevision } from '../lib/decision.js';
+import { readBeforeDeadline } from '../lib/acquisition-deadline.js';
+import { invalidateLidarrCache } from './lidarr.js';
+import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import type { LidarrService } from './lidarr.js';
 import type { LidarrConnectionConfig } from '../types/connections.js';
@@ -63,6 +71,9 @@ export interface AggregatedFeedItem {
   tags: string[] | null;
   listeners: number | null;
   subscriptionName: string | null;
+  acquisitionState?: AcquisitionState;
+  sourceRecords?: ArtistSourceRecord[];
+  sourceRecordCount?: number;
 }
 
 export interface SubscriptionResultInput {
@@ -74,6 +85,10 @@ export interface SubscriptionResultInput {
   sources: string[] | string | null | unknown;
   createdAt: Date;
   status: string;
+  processedAt?: Date | null;
+  skipReason?: string | null;
+  runId?: number | null;
+  sourceUrl?: string | null;
   // Optional metadata from SubscriptionResult
   tags?: string | null;
   listeners?: number | null;
@@ -120,12 +135,6 @@ export class FeedService {
   private lidarrService?: LidarrService;
   private lidarrConfig?: LidarrConnectionConfig;
   private cacheService: CacheService | null;
-
-  /**
-   * Promise for the most recent background Lidarr add kicked off by approve().
-   * Never rejects. Exposed so tests (and shutdown hooks) can await completion.
-   */
-  pendingLidarrAdd: Promise<void> | null = null;
 
   constructor(
     prismaInstance?: PrismaClient,
@@ -379,30 +388,10 @@ export class FeedService {
       return [];
     }
 
-    // First pass: build MBID to normalized-name mapping
-    const mbidToName = new Map<string, string>();
-    const nameToMbid = new Map<string, string>();
-
-    for (const result of results) {
-      if (result.artistMbid) {
-        const normalizedName = this.normalizeName(result.artistName);
-        mbidToName.set(result.artistMbid, normalizedName);
-        nameToMbid.set(normalizedName, result.artistMbid);
-      }
-    }
-
-    // Group by canonical key (prefer MBID, but link name-based to existing MBID groups)
+    // Unresolved names remain separate from identified artists; a name is not identity.
     const groups = new Map<string, SubscriptionResultInput[]>();
-
     for (const result of results) {
-      let key: string;
-      if (result.artistMbid) {
-        key = result.artistMbid;
-      } else {
-        const normalizedName = this.normalizeName(result.artistName);
-        // Check if we have an MBID for this normalized name
-        key = nameToMbid.get(normalizedName) || normalizedName;
-      }
+      const key = result.artistMbid ? `mbid:${result.artistMbid}` : `name:${this.normalizeName(result.artistName)}`;
       const existing = groups.get(key) || [];
       existing.push(result);
       groups.set(key, existing);
@@ -475,6 +464,19 @@ export class FeedService {
       }
       // If no subscriptionName was provided, leave as null
 
+      const sourceRecords: ArtistSourceRecord[] = [...groupResults].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id).slice(0, 50).map(row => {
+        let sourceUrl: string | null = null;
+        try {
+          if (row.sourceUrl) {
+            const url = new URL(row.sourceUrl);
+            if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) sourceUrl = url.href;
+          }
+        } catch { /* An invalid stored link is unavailable. */ }
+        return { key: `subscription-result:${row.id}`, kind: 'subscription-result',
+          label: row.subscriptionName ?? 'Subscription result', subscriptionId: row.subscriptionId,
+          runId: row.runId ?? null, recordedAt: row.createdAt.toISOString(), recordStatus: row.status, sourceUrl };
+      });
+
       aggregated.push({
         id: this.generateFeedId(linkedResultIds),
         artistName: primary.artistName,
@@ -483,8 +485,14 @@ export class FeedService {
         subscriptionCount: subscriptionIds.size,
         sourceTypes: Array.from(allSources),
         sourceCount: allSources.size,
+        sourceRecords,
+        sourceRecordCount: groupResults.length,
         linkedResultIds,
         earliestFound,
+        acquisitionState: groupResults.some(r => r.status === 'adding' && (!r.processedAt || Date.now() - r.processedAt.getTime() < 120_000)) ? 'adding'
+          : groupResults.some(r => r.status === 'adding' || r.skipReason === 'acquisition_uncertain') ? 'uncertain'
+          : groupResults.some(r => r.status === 'failed') ? 'failed'
+          : !primary.artistMbid ? 'identity-required' : 'available',
         score: 0, // Calculated in aggregateAndScore
         tags: aggregatedTags,
         listeners: maxListeners,
@@ -570,14 +578,15 @@ export class FeedService {
 
     // Filter statuses
     const statusFilter = includeActedOn
-      ? ['pending', 'queued', 'added', 'rejected']
-      : ['pending', 'queued'];
+      ? ['pending', 'queued', 'adding', 'failed', 'added', 'rejected']
+      : ['pending', 'queued', 'adding', 'failed'];
 
     // Fetch matching results (artist type only for MVP), newest first,
     // bounded so a single request can never pull an unbounded result set
     // into memory. Run the count in parallel to detect truncation.
     const resultWhere = {
       subscriptionId: { in: subscriptionIds },
+      subscription: { userId },
       itemType: 'artist',
       status: { in: statusFilter },
     };
@@ -593,10 +602,14 @@ export class FeedService {
           artistName: true,
           mbid: true,
           subscriptionId: true,
+          runId: true,
+          sourceUrl: true,
           imageUrl: true,
           sources: true,
           createdAt: true,
           status: true,
+          processedAt: true,
+          skipReason: true,
           itemType: true,
           tags: true,
           listeners: true,
@@ -621,10 +634,14 @@ export class FeedService {
       artistName: r.name,
       artistMbid: r.mbid,
       subscriptionId: r.subscriptionId,
+      runId: r.runId,
+      sourceUrl: r.sourceUrl,
       imageUrl: r.imageUrl,
       sources: r.sources,
       createdAt: r.createdAt,
       status: r.status,
+      processedAt: r.processedAt,
+      skipReason: r.skipReason,
       tags: r.tags,
       listeners: r.listeners,
       subscriptionName: subscriptionNameMap.get(r.subscriptionId) || undefined,
@@ -685,168 +702,142 @@ export class FeedService {
    * Feed IDs are in format "feed-1-2-3" where 1, 2, 3 are result IDs.
    */
   private parseFeedId(feedId: string): number[] {
-    const match = feedId.match(/^feed-(.+)$/);
-    if (!match) return [];
-    return match[1].split('-').map((id) => parseInt(id, 10)).filter((n) => !isNaN(n));
+    if (!/^feed-[1-9]\d*(?:-[1-9]\d*)*$/.test(feedId)) {
+      throw new DecisionError(400, 'INVALID_FEED_ID', 'Invalid feed item ID');
+    }
+    const ids = [...new Set(feedId.slice(5).split('-').map(Number))];
+    if (ids.length > 100 || ids.some(id => !Number.isSafeInteger(id))) {
+      throw new DecisionError(400, 'INVALID_FEED_ID', 'Invalid feed item ID');
+    }
+    return ids;
   }
 
-  /**
-   * Approve a feed item: update status to 'added', remove from ReviewItem.
-   * All linked SubscriptionResults are updated atomically.
-   */
-  async approve(feedId: string, userId: number): Promise<{ artistName: string }> {
-    const resultIds = this.parseFeedId(feedId);
-    if (resultIds.length === 0) {
-      throw new NotFoundError('Feed item not found');
-    }
-
-    // Fetch results with subscription to verify ownership
-    const results = await this.prismaClient.subscriptionResult.findMany({
-      where: { id: { in: resultIds } },
-      include: { subscription: { select: { userId: true } } },
+  private async ownedResults(feedId: string, userId: number, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const ids = this.parseFeedId(feedId);
+    const query = this.prismaClient.subscriptionResult.findMany({
+      where: { id: { in: ids } }, include: { subscription: { select: { userId: true } } },
     });
-
-    if (results.length === 0) {
-      throw new NotFoundError('Feed item not found');
+    const results = signal ? await readBeforeDeadline(query, signal) : await query;
+    if (results.length !== ids.length) throw new NotFoundError('Feed item not found');
+    if (results.some(row => row.subscription.userId !== userId)) throw new ForbiddenError('Not authorized');
+    const mbid = results[0].mbid;
+    if (results.some(row => row.itemType !== 'artist' || row.mbid !== mbid || !mbid && this.normalizeName(row.name) !== this.normalizeName(results[0].name))) {
+      throw new DecisionError(409, 'INVALID_AGGREGATE', 'Feed records do not identify one artist');
     }
+    return results;
+  }
 
-    // Verify all belong to this user
-    if (results.some((r) => r.subscription.userId !== userId)) {
-      throw new ForbiddenError('Not authorized');
-    }
-
+  async approve(feedId: string, userId: number, signal = AbortSignal.timeout(60_000), input: AddOptions & { mbid?: string } = {}): Promise<{ artistName: string; outcome: AcquisitionOutcome }> {
+    const results = await this.ownedResults(feedId, userId, signal);
     const artistName = results[0].name;
-    const artistMbid = results[0].mbid;
-
-    // Wrap in transaction
-    await this.prismaClient.$transaction(async (tx) => {
-      // Update all linked results
-      await tx.subscriptionResult.updateMany({
-        where: { id: { in: resultIds } },
-        data: { status: 'added', processedAt: new Date() },
-      });
-
-      // Delete matching ReviewItems (by MBID or name)
-      const orConditions: { mbid?: string; artistName?: string }[] = [];
-      if (artistMbid) {
-        orConditions.push({ mbid: artistMbid });
-      }
-      orConditions.push({ artistName });
-
-      await tx.reviewItem.deleteMany({
-        where: { OR: orConditions },
-      });
-    });
-
-    // Add to Lidarr in the background after the transaction completes —
-    // the HTTP response must not wait on Lidarr round-trips.
-    if (artistMbid && this.lidarrService) {
-      this.pendingLidarrAdd = this.addToLidarrInBackground(artistName, artistMbid);
-    } else if (!artistMbid) {
-      log.debug(`Skipping Lidarr add for ${artistName}: no MBID available`);
+    const artistMbid = (results[0].mbid || input.mbid)?.toLowerCase();
+    if (results[0].mbid && input.mbid && results[0].mbid.toLowerCase() !== input.mbid.toLowerCase()) throw new DecisionError(409, 'IDENTITY_CONFLICT', 'Feed records already have an artist identity');
+    if (!artistMbid || !z.string().uuid().safeParse(artistMbid).success) {
+      throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a MusicBrainz artist before adding');
     }
+    if (!this.lidarrService) throw new DecisionError(409, 'CONNECTION_REQUIRED', 'Configure a Lidarr connection before adding');
+    const lidarr = this.lidarrService;
+    const now = Date.now();
+    for (const row of results) {
+      if (row.status === 'adding' && (!row.processedAt || now - row.processedAt.getTime() < 120_000)) {
+        throw new DecisionError(409, 'IN_PROGRESS', 'Artist is already being added');
+      }
+      if (!['pending', 'queued', 'failed', 'adding'].includes(row.status)) {
+        throw new DecisionError(409, 'DECISION_CONFLICT', 'Artist has already been processed');
+      }
+    }
+    // A stale lease is reconciled before it can be reclaimed.
+    const existing = results.some(row => row.status === 'adding')
+      ? await lidarr.getArtistByMbid(artistMbid, signal) : null;
+    signal.throwIfAborted();
+    const claim = nextRevision(results.map(row => row.processedAt));
+    await this.prismaClient.$transaction(async tx => {
+      for (const row of results) {
+        signal.throwIfAborted();
+        const changed = await tx.subscriptionResult.updateMany({
+          where: { id: row.id, subscriptionId: row.subscriptionId, subscription: { userId }, status: row.status, processedAt: row.processedAt, mbid: row.mbid },
+          data: { mbid: artistMbid, status: 'adding', processedAt: claim, errorMessage: null, skipReason: null },
+        });
+        if (changed.count !== 1) throw new DecisionError(409, 'DECISION_CONFLICT', 'Artist decision changed; refresh and retry');
+      }
+    }, { timeout: 5_000 });
 
-    return { artistName };
-  }
-
-  /**
-   * Add an approved artist to Lidarr, fetching profile defaults as needed.
-   * Runs detached from the approve() response; never throws.
-   */
-  private async addToLidarrInBackground(artistName: string, artistMbid: string): Promise<void> {
-    if (!this.lidarrService) return;
+    let outcome: AcquisitionOutcome;
     try {
-      // Get config values, fetching defaults from Lidarr if not configured
-      let qpId = this.lidarrConfig?.qualityProfileId;
-      let mpId = this.lidarrConfig?.metadataProfileId;
-      let rfPath = this.lidarrConfig?.rootFolderPath;
-
-      // Fetch defaults for any missing config (same pattern as search.ts)
-      if (!qpId) {
-        const profiles = await this.lidarrService.getQualityProfiles();
-        qpId = profiles[0]?.id;
-      }
-      if (!mpId) {
-        const profiles = await this.lidarrService.getMetadataProfiles();
-        mpId = profiles[0]?.id;
-      }
-      if (!rfPath) {
-        const folders = await this.lidarrService.getRootFolders();
-        rfPath = folders[0]?.path;
-      }
-
-      if (!qpId || !mpId || !rfPath) {
-        log.warn(`Cannot add artist to Lidarr - missing configuration: qualityProfileId=${qpId || 'missing'}, metadataProfileId=${mpId || 'missing'}, rootFolderPath=${rfPath || 'missing'}`);
+      signal.throwIfAborted();
+      const member = existing || await lidarr.getArtistByMbid(artistMbid, signal);
+      if (member) {
+        outcome = { artistMbid, state: 'already-in-library', message: 'Artist is already in Lidarr' };
       } else {
-        log.info(`Adding artist to Lidarr: ${artistName} (${artistMbid}) with config: qualityProfileId=${qpId}, metadataProfileId=${mpId}, rootFolderPath=${rfPath}`);
-        // Use addArtistWithCacheWarm like all other add operations in the codebase
-        await this.lidarrService.addArtistWithCacheWarm(
-          artistMbid,
-          qpId,
-          mpId,
-          rfPath,
-          true,  // monitored
-          true,  // searchForMissingAlbums
-          false, // waitForRefresh (deprecated)
-          this.lidarrConfig?.monitorOption || 'all',
-          this.lidarrConfig?.monitorNewItems || 'all'
-        );
-        log.info(`Successfully added artist to Lidarr: ${artistName} (${artistMbid})`);
+        const options = await effectiveAddOptions(lidarr, this.lidarrConfig || {}, input, signal);
+        const result = await lidarr.addArtistWithCacheWarm(artistMbid, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, true,
+          options.searchOnAdd, false, options.monitorOption, options.monitorNewItems, signal);
+        outcome = result.alreadyInLibrary
+          ? { artistMbid, state: 'already-in-library', message: 'Artist is already in Lidarr' }
+          : { artistMbid, state: 'added', message: 'Artist added to Lidarr' };
       }
     } catch (error) {
-      // Lidarr failure shouldn't fail the approve action
-      log.warn(`Failed to add artist to Lidarr: ${artistMbid}`, error);
+      // Duplicate responses only count as success after an exact identity lookup.
+      let confirmed = false;
+      if (!signal.aborted) {
+        try { confirmed = !!(await lidarr.getArtistByMbid(artistMbid, signal)); } catch { /* Membership is unavailable. */ }
+      }
+      if (confirmed) outcome = { artistMbid, state: 'already-in-library', message: 'Artist is already in Lidarr' };
+      else {
+        const definite = error instanceof DecisionError || (error instanceof Error && 'status' in error && typeof error.status === 'number' && error.status >= 400 && error.status < 500 && error.status !== 429 && error.status !== 408);
+        outcome = { artistMbid, state: definite ? 'failed' : 'uncertain', message: definite
+          ? 'Lidarr could not add this artist. Check connection settings and retry.'
+          : 'Lidarr confirmation is unavailable. Retry to check membership before adding again.' };
+      }
     }
+    const confirmed = outcome.state === 'added' || outcome.state === 'already-in-library';
+    try {
+      await this.prismaClient.$transaction(async tx => {
+        const changed = await tx.subscriptionResult.updateMany({
+          where: { id: { in: results.map(row => row.id) }, subscription: { userId }, status: 'adding', processedAt: claim },
+          data: { status: confirmed ? 'added' : 'failed', processedAt: nextRevision([claim]),
+            skipReason: outcome.state === 'uncertain' ? 'acquisition_uncertain' : null,
+            errorMessage: confirmed ? null : outcome.message },
+        });
+        if (changed.count !== results.length) throw new DecisionError(409, 'DECISION_CONFLICT', 'Artist decision changed during acquisition');
+        if (confirmed) await tx.reviewItem.deleteMany({ where: { userId, mbid: artistMbid } });
+      }, { timeout: 5_000 });
+    } catch (error) {
+      if (!(error instanceof DecisionError)) throw error;
+      // Provider evidence survives a lost local claim; never overwrite a newer decision.
+      let member = false;
+      if (!signal.aborted) {
+        try { member = !!(await lidarr.getArtistByMbid(artistMbid, signal)); } catch { /* Return an honest uncertainty. */ }
+      }
+      outcome = { artistMbid, state: member ? 'already-in-library' : 'uncertain', message: member
+        ? 'Artist is in Lidarr; the local decision changed. Refresh to see the current record.'
+        : 'The local decision changed and membership could not be confirmed. Refresh before retrying.' };
+    }
+    if ((outcome.state === 'added' || outcome.state === 'already-in-library') && this.lidarrConfig?.url) invalidateLidarrCache(this.lidarrConfig.url);
+    return { artistName, outcome };
   }
 
-  /**
-   * Dismiss a feed item: update status to 'rejected', remove from ReviewItem.
-   * All linked SubscriptionResults are updated atomically.
-   */
-  async dismiss(feedId: string, userId: number): Promise<{ artistName: string }> {
-    const resultIds = this.parseFeedId(feedId);
-    if (resultIds.length === 0) {
-      throw new NotFoundError('Feed item not found');
-    }
-
-    // Fetch results with subscription to verify ownership
-    const results = await this.prismaClient.subscriptionResult.findMany({
-      where: { id: { in: resultIds } },
-      include: { subscription: { select: { userId: true } } },
-    });
-
-    if (results.length === 0) {
-      throw new NotFoundError('Feed item not found');
-    }
-
-    // Verify all belong to this user
-    if (results.some((r) => r.subscription.userId !== userId)) {
-      throw new ForbiddenError('Not authorized');
-    }
-
-    const artistName = results[0].name;
-    const artistMbid = results[0].mbid;
-
-    // Wrap in transaction
-    await this.prismaClient.$transaction(async (tx) => {
-      // Update all linked results
-      await tx.subscriptionResult.updateMany({
-        where: { id: { in: resultIds } },
-        data: { status: 'rejected', processedAt: new Date() },
-      });
-
-      // Delete matching ReviewItems (by MBID or name)
-      const orConditions: { mbid?: string; artistName?: string }[] = [];
-      if (artistMbid) {
-        orConditions.push({ mbid: artistMbid });
+  async dismiss(feedId: string, userId: number): Promise<{ artistName: string } & UndoDecisionResponse> {
+    return this.prismaClient.$transaction(async tx => {
+      const results = await new FeedService(tx as unknown as PrismaClient).ownedResults(feedId, userId);
+      if (results.some(row => row.status === 'adding')) throw new DecisionError(409, 'IN_PROGRESS', 'Artist is already being added');
+      if (results.some(row => !['pending', 'queued', 'failed'].includes(row.status))) {
+        throw new DecisionError(409, 'DECISION_CONFLICT', 'Artist has already been processed');
       }
-      orConditions.push({ artistName });
-
-      await tx.reviewItem.deleteMany({
-        where: { OR: orConditions },
-      });
+      const revision = nextRevision(results.map(row => row.processedAt));
+      const undo = createDecisionUndo(userId, 'feed-dismiss', results.map(row => ({
+        table: 'subscription-result', id: row.id, originalStatus: row.status as 'pending' | 'queued' | 'failed',
+        revision: revision.getTime(),
+      })));
+      for (const row of results) {
+        const changed = await tx.subscriptionResult.updateMany({
+          where: { id: row.id, subscription: { userId }, status: row.status, processedAt: row.processedAt },
+          data: { status: 'rejected', processedAt: revision },
+        });
+        if (changed.count !== 1) throw new DecisionError(409, 'DECISION_CONFLICT', 'Artist decision changed; refresh and retry');
+      }
+      return { artistName: results[0].name, ...undo };
     });
-
-    return { artistName };
   }
 }

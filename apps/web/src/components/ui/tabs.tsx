@@ -102,6 +102,7 @@ export function Tab({ value, label, icon, badge, className }: TabProps) {
 
   return (
     <button
+      type="button"
       role="tab"
       id={`${idPrefix}-tab-${value}`}
       aria-selected={isActive}
@@ -110,16 +111,16 @@ export function Tab({ value, label, icon, badge, className }: TabProps) {
       data-value={value}
       onClick={() => onChange(value)}
       className={cn(
-        'px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px',
+        'min-h-11 px-4 py-2 text-sm border-b-2 transition-colors -mb-px',
         isActive
-          ? 'border-primary text-primary'
+          ? 'border-foreground bg-muted font-bold text-foreground'
           : 'border-transparent text-muted-foreground hover:text-foreground',
         className,
       )}
     >
       {icon && <span className="inline-flex mr-2 align-middle">{icon}</span>}
       {label}
-      {badge != null && <span className="ml-1.5 text-xs text-muted-foreground">({badge})</span>}
+      {badge != null && <span className="ml-1.5 font-mono text-xs text-muted-foreground">({badge})</span>}
     </button>
   );
 }

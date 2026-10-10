@@ -1,3 +1,5 @@
+import { effectiveAddOptions } from '../lib/add-options.js';
+import { DecisionError } from '../lib/decision.js';
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
@@ -10,7 +12,6 @@ import {
   deezerGenreParamsSchema,
 } from '../schemas/discover.js';
 import { LidarrCache } from '../services/lidarr.js';
-import { skyhookWarmer } from '../services/skyhook-cache-warmer.js';
 import { fetchDeezerArtistImage, getDeezerChartArtists, getDeezerGenres, getDeezerGenreArtists } from '../services/deezer.js';
 import { addLogEntry } from './logs.js';
 import { notificationService } from '../services/notifications.js';
@@ -154,6 +155,7 @@ discoverRouter.post('/similar', validateBody(discoverSimilarSchema), async (req,
 
     // Use all seed artists for better results
     const seedArtists = artistNames;
+    const failedSeedArtists: string[] = [];
 
     for (const artistName of seedArtists) {
       try {
@@ -181,7 +183,8 @@ discoverRouter.post('/similar', validateBody(discoverSimilarSchema), async (req,
           }
         }
       } catch {
-        // Skip artists that fail
+        // Report source availability without returning provider error text.
+        failedSeedArtists.push(artistName);
       }
     }
 
@@ -228,6 +231,7 @@ discoverRouter.post('/similar', validateBody(discoverSimilarSchema), async (req,
     res.json({
       recommendations: recsWithImages,
       seedArtists,
+      failedSeedArtists,
       total: recsWithImages.length,
     });
   } catch (error) {
@@ -248,7 +252,7 @@ discoverRouter.post('/similar', validateBody(discoverSimilarSchema), async (req,
  */
 discoverRouter.post('/add', validateBody(addArtistSchema), async (req, res) => {
   try {
-    const { artistName, mbid, qualityProfileId, metadataProfileId, rootFolderPath } = req.body;
+    const { artistName, mbid } = req.body;
 
     const lidarrResult = await getLidarrServiceWithConfig(req.user!.id);
     if (!lidarrResult) {
@@ -261,37 +265,11 @@ discoverRouter.post('/add', validateBody(addArtistSchema), async (req, res) => {
     }
     const { service: lidarr, config: lidarrConfig } = lidarrResult;
 
-    let foreignArtistId: string | undefined;
-
-    // Try MBID first if available - this is more reliable with Lidarr
-    if (mbid) {
-      // Warm SkyHook cache BEFORE searching - this dramatically improves success rate
-      try {
-        const warmResult = await skyhookWarmer.warmArtist(mbid);
-        logger.info(`SkyHook cache ${warmResult.cached ? 'already warm' : warmResult.success ? 'warmed' : 'warm failed'} for MBID ${mbid}`);
-      } catch (error) {
-        logger.warn(`Failed to warm SkyHook cache for MBID ${mbid}: ${error instanceof Error ? error.message : error}`);
-      }
-      
-      const mbidResults = await lidarr.searchArtist(`lidarr:${mbid}`);
-      const mbidMatch = mbidResults.find(a => a.foreignArtistId === mbid);
-      if (mbidMatch) {
-        foreignArtistId = mbidMatch.foreignArtistId;
-      }
-    }
-
-    // Fall back to name search if MBID not available or didn't match
-    if (!foreignArtistId) {
-      const nameResults = await lidarr.searchArtist(artistName);
-      if (nameResults.length > 0) {
-        foreignArtistId = nameResults[0].foreignArtistId;
-      }
-    }
-
-    if (!foreignArtistId) {
-      res.status(404).json({ error: 'Artist not found in Lidarr search' });
+    if (!mbid) {
+      res.status(422).json({ error: 'Choose a MusicBrainz artist before adding', code: 'IDENTITY_REQUIRED' });
       return;
     }
+    const foreignArtistId = mbid;
 
     // Check if already in library
     const cache = new LidarrCache(lidarr);
@@ -301,59 +279,39 @@ discoverRouter.post('/add', validateBody(addArtistSchema), async (req, res) => {
       return;
     }
 
-    // Get defaults from connection config, then fall back to fetching first available
-    let qpId = qualityProfileId || lidarrConfig.qualityProfileId;
-    let mpId = metadataProfileId || lidarrConfig.metadataProfileId;
-    let rfPath = rootFolderPath || lidarrConfig.rootFolderPath;
-
-    if (!qpId) {
-      const profiles = await lidarr.getQualityProfiles();
-      qpId = profiles[0]?.id;
-    }
-
-    if (!mpId) {
-      const profiles = await lidarr.getMetadataProfiles();
-      mpId = profiles[0]?.id;
-    }
-
-    if (!rfPath) {
-      const folders = await lidarr.getRootFolders();
-      rfPath = folders[0]?.path;
-    }
-
-    if (!qpId || !mpId || !rfPath) {
-      res.status(400).json({ error: 'Missing Lidarr configuration (profiles/folders)' });
-      return;
-    }
+    const options = await effectiveAddOptions(lidarr, lidarrConfig, req.body);
+    const { qualityProfileId: qpId, metadataProfileId: mpId, rootFolderPath: rfPath } = options;
 
     // Add to Lidarr with SkyHook cache warming for reliable metadata lookup
     // Use monitorOption from connection config (defaults to 'all' if not set)
-    const { artist: result, refreshCommand } = await lidarr.addArtistWithCacheWarm(
+    const { artist: result, refreshCommand, alreadyInLibrary } = await lidarr.addArtistWithCacheWarm(
       foreignArtistId,
       qpId,
       mpId,
       rfPath,
       true,  // monitored
-      lidarrConfig.searchOnAdd !== false,  // searchForMissingAlbums from config
+      options.searchOnAdd,  // searchForMissingAlbums from config
       false, // waitForRefresh (deprecated)
-      lidarrConfig.monitorOption || 'all',
-      lidarrConfig.monitorNewItems || 'all'
+      options.monitorOption,
+      options.monitorNewItems
     );
 
-    // Log the addition
-    await addLogEntry('info', 'discover', `Added artist "${artistName}" from discover`, {
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
+    await addLogEntry('info', 'discover', alreadyInLibrary ? `Artist "${artistName}" is already in Lidarr` : `Added artist "${artistName}" from discover`, {
+      outcome,
       artistName,
       mbid: foreignArtistId,
       refreshTriggered: !!refreshCommand,
     });
 
     // Send notification
-    await notificationService.send(req.user!.id, 'artist.added', {
+    if (!alreadyInLibrary) await notificationService.send(req.user!.id, 'artist.added', {
       artistName,
-    });
+    }).catch(() => logger.warn('Discover artist notification failed', { userId: req.user!.id }));
 
-    res.json({ success: true, artist: result, refreshTriggered: !!refreshCommand });
+    res.json({ success: true, outcome, artist: result, refreshTriggered: !!refreshCommand });
   } catch (error) {
+    if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     const errorMessage = error instanceof Error ? error.message : 'Failed to add artist';
     logger.error('Discover add error', { errorMessage, error });
     
@@ -408,6 +366,7 @@ discoverRouter.get('/profiles', async (req, res) => {
         metadataProfileId: lidarrConfig.metadataProfileId,
         rootFolderPath: lidarrConfig.rootFolderPath,
         monitorOption: lidarrConfig.monitorOption,
+        monitorNewItems: lidarrConfig.monitorNewItems,
         searchOnAdd: lidarrConfig.searchOnAdd,
       },
     });

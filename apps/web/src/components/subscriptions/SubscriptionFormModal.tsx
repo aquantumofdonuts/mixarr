@@ -102,7 +102,7 @@ interface FormState {
 
 const getDefaultFormState = (): FormState => ({
   type: 'lastfm_chart',
-  name: '',
+  name: getSubscriptionTypeConfig('lastfm_chart')?.label || 'Last.fm Chart',
   schedule: '',
   resultHandling: 'preview',
   limit: '50',
@@ -351,6 +351,11 @@ export function SubscriptionFormModal({
 
   const descriptorPreview = buildSubscriptionDescriptor(form.type, buildConfig(), typeConfig?.label || form.type);
 
+  const errorProps = (field: string) => ({
+    'aria-invalid': validationErrors[field] ? true : undefined,
+    'aria-describedby': validationErrors[field] ? `sub-error-${field}` : undefined,
+  });
+
   // Handlers
   const handleSave = async () => {
     if (isSubmitting) return;
@@ -358,6 +363,13 @@ export function SubscriptionFormModal({
     const errors = validateForm();
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
+      const fieldIds: Record<string, string> = {
+        name: 'sub-name', limit: 'sub-limit', tag: 'sub-tag', playlistId: 'sub-playlist-id',
+        publicPlaylistUrl: 'sub-playlist-url', listenbrainzPlaylistId: 'sub-lb-playlist-id',
+        listenbrainzSeedMbid: 'sub-seed-artist', labelId: 'sub-label-id', discogsStyle: 'sub-discogs-style',
+        bandcampTag: 'sub-bandcamp-tag',
+      };
+      document.getElementById(fieldIds[Object.keys(errors)[0]])?.focus();
       return;
     }
     setValidationErrors({});
@@ -524,6 +536,7 @@ export function SubscriptionFormModal({
               <div className="flex gap-2">
                 <Input
                   id="sub-name"
+                  {...errorProps('name')}
                   value={form.name || descriptorPreview || typeConfig?.label || ''}
                   readOnly
                   className="bg-muted cursor-not-allowed flex-1"
@@ -534,6 +547,7 @@ export function SubscriptionFormModal({
                   size="sm"
                   onClick={() => setIsNameEditing(true)}
                   title="Rename subscription"
+                  aria-label="Rename subscription"
                   className="shrink-0"
                 >
                   <Pencil className="h-4 w-4" />
@@ -542,7 +556,8 @@ export function SubscriptionFormModal({
             ) : (
               <Input
                 id="sub-name"
-                value={form.name || (editingSubscription ? '' : typeConfig?.label || '')}
+                {...errorProps('name')}
+                value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder={descriptorPreview}
                 autoFocus={isNameEditing}
@@ -550,7 +565,7 @@ export function SubscriptionFormModal({
               />
             )}
             {validationErrors.name && (
-              <p className="text-xs text-destructive mt-1">{validationErrors.name}</p>
+              <p id="sub-error-name" className="text-xs text-destructive mt-1">{validationErrors.name}</p>
             )}
           </div>
 
@@ -591,6 +606,7 @@ export function SubscriptionFormModal({
             <label className="text-sm font-medium" htmlFor="sub-limit">Limit</label>
             <Input
               id="sub-limit"
+              {...errorProps('limit')}
               type="number"
               value={form.limit}
               onChange={(e) => setForm({ ...form, limit: e.target.value })}
@@ -599,7 +615,7 @@ export function SubscriptionFormModal({
               max="200"
             />
             {validationErrors.limit && (
-              <p className="text-xs text-destructive mt-1">{validationErrors.limit}</p>
+              <p id="sub-error-limit" className="text-xs text-destructive mt-1">{validationErrors.limit}</p>
             )}
           </div>
 
@@ -621,24 +637,25 @@ export function SubscriptionFormModal({
           )}
 
           {/* Last.fm Tag */}
-          {(form.type === 'lastfm_tag' || form.type === 'lastfm_tag_albums' || form.type === 'lastfm_tag_similar') && (
+          {(form.type === 'lastfm_tag' || form.type === 'lastfm_tag_albums' || form.type === 'lastfm_tag_similar' || form.type === 'spotify_category') && (
             <div>
               <label className="text-sm font-medium" htmlFor="sub-tag">
-                Tag
+                {form.type === 'spotify_category' ? 'Category' : 'Tag'}
                 {REQUIRED_FIELDS[form.type]?.some((r) => r.field === 'tag') && (
                   <span className="text-destructive ml-1">*</span>
                 )}
               </label>
               <Input
                 id="sub-tag"
+                {...errorProps('tag')}
                 value={form.tag}
                 onChange={(e) => setForm({ ...form, tag: e.target.value })}
-                placeholder="e.g., rock, metal, jazz"
+                placeholder={form.type === 'spotify_category' ? 'e.g., jazz' : 'e.g., rock, metal, jazz'}
               />
               {selectedFromPreset && form.tag && (
                 <p className="text-xs text-muted-foreground mt-1">Pre-filled from preset — change to any tag you like</p>
               )}
-              {validationErrors.tag && <p className="text-xs text-destructive mt-1">{validationErrors.tag}</p>}
+              {validationErrors.tag && <p id="sub-error-tag" className="text-xs text-destructive mt-1">{validationErrors.tag}</p>}
             </div>
           )}
 
@@ -653,12 +670,13 @@ export function SubscriptionFormModal({
               </label>
               <Input
                 id="sub-playlist-id"
+                {...errorProps('playlistId')}
                 value={form.playlistId}
                 onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                 placeholder="Spotify playlist ID"
               />
               {validationErrors.playlistId && (
-                <p className="text-xs text-destructive mt-1">{validationErrors.playlistId}</p>
+                <p id="sub-error-playlistId" className="text-xs text-destructive mt-1">{validationErrors.playlistId}</p>
               )}
             </div>
           )}
@@ -675,6 +693,7 @@ export function SubscriptionFormModal({
                 </label>
                 <Input
                   id="sub-playlist-url"
+                  {...errorProps('publicPlaylistUrl')}
                   value={form.publicPlaylistUrl}
                   onChange={(e) => setForm({ ...form, publicPlaylistUrl: e.target.value })}
                   placeholder="https://open.spotify.com/playlist/..."
@@ -683,7 +702,7 @@ export function SubscriptionFormModal({
                   Paste any public Spotify playlist URL (no login required)
                 </p>
                 {validationErrors.publicPlaylistUrl && (
-                  <p className="text-xs text-destructive mt-1">{validationErrors.publicPlaylistUrl}</p>
+                  <p id="sub-error-publicPlaylistUrl" className="text-xs text-destructive mt-1">{validationErrors.publicPlaylistUrl}</p>
                 )}
               </div>
               <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-container">
@@ -732,12 +751,13 @@ export function SubscriptionFormModal({
               </label>
               <Input
                 id="sub-playlist-id"
+                {...errorProps('playlistId')}
                 value={form.playlistId}
                 onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                 placeholder="Deezer playlist ID"
               />
               {validationErrors.playlistId && (
-                <p className="text-xs text-destructive mt-1">{validationErrors.playlistId}</p>
+                <p id="sub-error-playlistId" className="text-xs text-destructive mt-1">{validationErrors.playlistId}</p>
               )}
             </div>
           )}
@@ -753,12 +773,13 @@ export function SubscriptionFormModal({
               </label>
               <Input
                 id="sub-playlist-id"
+                {...errorProps('playlistId')}
                 value={form.playlistId}
                 onChange={(e) => setForm({ ...form, playlistId: e.target.value })}
                 placeholder="TIDAL playlist UUID"
               />
               {validationErrors.playlistId && (
-                <p className="text-xs text-destructive mt-1">{validationErrors.playlistId}</p>
+                <p id="sub-error-playlistId" className="text-xs text-destructive mt-1">{validationErrors.playlistId}</p>
               )}
             </div>
           )}
@@ -832,6 +853,7 @@ export function SubscriptionFormModal({
               </label>
               <Input
                 id="sub-lb-playlist-id"
+                {...errorProps('listenbrainzPlaylistId')}
                 value={form.listenbrainzPlaylistId}
                 onChange={(e) => setForm({ ...form, listenbrainzPlaylistId: e.target.value })}
                 placeholder="e.g., abc123-def456-..."
@@ -840,7 +862,7 @@ export function SubscriptionFormModal({
                 The playlist MBID from the ListenBrainz playlist URL.
               </p>
               {validationErrors.listenbrainzPlaylistId && (
-                <p className="text-xs text-destructive mt-1">{validationErrors.listenbrainzPlaylistId}</p>
+                <p id="sub-error-listenbrainzPlaylistId" className="text-xs text-destructive mt-1">{validationErrors.listenbrainzPlaylistId}</p>
               )}
             </div>
           )}
@@ -858,6 +880,7 @@ export function SubscriptionFormModal({
                 <div className="relative">
                   <Input
                     id="sub-seed-artist"
+                    {...errorProps('listenbrainzSeedMbid')}
                     role="combobox"
                     aria-expanded={showArtistDropdown && artistResults.length > 0}
                     aria-controls="seed-artist-listbox"
@@ -954,7 +977,7 @@ export function SubscriptionFormModal({
                   )}
 
                 {validationErrors.listenbrainzSeedMbid && (
-                  <p className="text-xs text-destructive mt-1">{validationErrors.listenbrainzSeedMbid}</p>
+                  <p id="sub-error-listenbrainzSeedMbid" className="text-xs text-destructive mt-1">{validationErrors.listenbrainzSeedMbid}</p>
                 )}
               </div>
 
@@ -964,7 +987,9 @@ export function SubscriptionFormModal({
                   Advanced: Enter MBID directly
                 </summary>
                 <div className="mt-2">
+                  <label className="text-sm font-medium" htmlFor="sub-seed-mbid">Seed Artist MBID</label>
                   <Input
+                    id="sub-seed-mbid"
                     value={form.listenbrainzSeedMbid}
                     onChange={(e) => {
                       setForm({ ...form, listenbrainzSeedMbid: e.target.value });
@@ -1007,6 +1032,7 @@ export function SubscriptionFormModal({
                 </label>
                 <Input
                   id="sub-label-id"
+                  {...errorProps('labelId')}
                   value={form.labelId}
                   onChange={(e) => setForm({ ...form, labelId: e.target.value })}
                   placeholder="Discogs label ID (e.g., 1234)"
@@ -1014,7 +1040,7 @@ export function SubscriptionFormModal({
                 <p className="text-xs text-muted-foreground mt-1">
                   Find the label ID from the Discogs URL: discogs.com/label/<strong>1234</strong>-Label-Name
                 </p>
-                {validationErrors.labelId && <p className="text-xs text-destructive mt-1">{validationErrors.labelId}</p>}
+                {validationErrors.labelId && <p id="sub-error-labelId" className="text-xs text-destructive mt-1">{validationErrors.labelId}</p>}
               </div>
               <div>
                 <label className="text-sm font-medium" htmlFor="sub-label-name">Label Name (for display)</label>
@@ -1039,6 +1065,7 @@ export function SubscriptionFormModal({
               </label>
               <Select
                 id="sub-discogs-style"
+                {...errorProps('discogsStyle')}
                 value={form.discogsStyle}
                 onChange={(e) => setForm({ ...form, discogsStyle: e.target.value })}
                 options={[
@@ -1061,7 +1088,7 @@ export function SubscriptionFormModal({
                 ]}
               />
               {validationErrors.discogsStyle && (
-                <p className="text-xs text-destructive mt-1">{validationErrors.discogsStyle}</p>
+                <p id="sub-error-discogsStyle" className="text-xs text-destructive mt-1">{validationErrors.discogsStyle}</p>
               )}
             </div>
           )}
@@ -1078,13 +1105,14 @@ export function SubscriptionFormModal({
                 </label>
                 <Input
                   id="sub-bandcamp-tag"
+                  {...errorProps('bandcampTag')}
                   value={form.bandcampTag}
                   onChange={(e) => setForm({ ...form, bandcampTag: e.target.value })}
                   placeholder="e.g., electronic, metal, ambient"
                 />
                 <p className="text-xs text-muted-foreground mt-1">Browse tags at bandcamp.com/tags</p>
                 {validationErrors.bandcampTag && (
-                  <p className="text-xs text-destructive mt-1">{validationErrors.bandcampTag}</p>
+                  <p id="sub-error-bandcampTag" className="text-xs text-destructive mt-1">{validationErrors.bandcampTag}</p>
                 )}
               </div>
               {form.type === 'bandcamp_tag' && (
@@ -1143,7 +1171,7 @@ export function SubscriptionFormModal({
 
           {/* Footer */}
           {submitError && (
-            <p className="text-sm text-destructive flex items-center gap-1">
+            <p role="alert" className="text-sm text-destructive flex items-center gap-1">
               <AlertTriangle className="h-4 w-4 shrink-0" /> {submitError}
             </p>
           )}

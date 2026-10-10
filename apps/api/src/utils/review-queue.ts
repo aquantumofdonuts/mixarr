@@ -6,6 +6,8 @@
  */
 
 import prisma from '../lib/db.js';
+import { DecisionError, nextRevision } from '../lib/decision.js';
+import type { Prisma, ReviewItem } from '@prisma/client';
 import { normalizeArtistName } from './deduplication.js';
 
 export interface ReviewItemInput {
@@ -29,6 +31,16 @@ export interface ReviewItemInput {
   dedupStrategy?: 'default' | 'relaxed';
 }
 
+async function updateReviewMetadata(item: ReviewItem, userId: number, data: Prisma.ReviewItemUpdateManyMutationInput): Promise<void> {
+  await prisma.$transaction(async tx => {
+    const changed = await tx.reviewItem.updateMany({
+      where: { id: item.id, userId, status: 'pending', updatedAt: item.updatedAt },
+      data: { ...data, updatedAt: nextRevision([item.updatedAt]) },
+    });
+    if (changed.count !== 1) throw new DecisionError(409, 'DECISION_CONFLICT', 'Review item changed during metadata update');
+  }, { timeout: 5_000 });
+}
+
 /**
  * Find existing review item or create new one
  * Matches by: MBID > SpotifyId > Normalized artist name
@@ -46,10 +58,7 @@ export async function findOrCreateReviewItem(input: ReviewItemInput): Promise<{ 
     if (existing) {
       // Update sources if not already included
       if (!existing.source.includes(source)) {
-        await prisma.reviewItem.update({
-          where: { id: existing.id },
-          data: { source: `${existing.source}, ${source}` },
-        });
+        await updateReviewMetadata(existing, userId, { source: `${existing.source}, ${source}` });
       }
       return { id: existing.id, created: false };
     }
@@ -62,12 +71,9 @@ export async function findOrCreateReviewItem(input: ReviewItemInput): Promise<{ 
     });
     if (existing) {
       if (!existing.source.includes(source)) {
-        await prisma.reviewItem.update({
-          where: { id: existing.id },
-          data: { 
-            source: `${existing.source}, ${source}`,
-            mbid: existing.mbid || mbid, // Fill in MBID if we have it now
-          },
+        await updateReviewMetadata(existing, userId, {
+          source: `${existing.source}, ${source}`,
+          mbid: existing.mbid || mbid, // Fill in MBID if we have it now
         });
       }
       return { id: existing.id, created: false };
@@ -85,13 +91,10 @@ export async function findOrCreateReviewItem(input: ReviewItemInput): Promise<{ 
     for (const item of pending) {
       if (normalizeArtistName(item.artistName) === normalizedName) {
         if (!item.source.includes(source)) {
-          await prisma.reviewItem.update({
-            where: { id: item.id },
-            data: { 
-              source: `${item.source}, ${source}`,
-              mbid: item.mbid || mbid,
-              spotifyId: item.spotifyId || spotifyId,
-            },
+          await updateReviewMetadata(item, userId, {
+            source: `${item.source}, ${source}`,
+            mbid: item.mbid || mbid,
+            spotifyId: item.spotifyId || spotifyId,
           });
         }
         return { id: item.id, created: false };

@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConnectionWizard } from '../components/ConnectionWizard';
+import { api } from '@/lib/api';
 import type { Connection } from '../components/ConnectionCard';
 
 // ---------------------------------------------------------------------------
@@ -62,10 +63,11 @@ vi.mock('../components/forms', () => {
   function MockForm(props: {
     onConfigReady: (c: Record<string, unknown>) => void;
     onConfigInvalid: () => void;
+    initialConfig?: Record<string, unknown>;
   }) {
     return React.createElement(
       'div',
-      { 'data-testid': 'mock-form' },
+      { 'data-testid': 'mock-form', 'data-config': JSON.stringify(props.initialConfig) },
       React.createElement(
         'button',
         {
@@ -130,6 +132,7 @@ describe('ConnectionWizard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSaveConnection.mockResolvedValue(true);
+    mockTestConnection.mockResolvedValue(true);
   });
 
   // --- Step 1: type selection ---
@@ -244,7 +247,7 @@ describe('ConnectionWizard', () => {
       expect(mockTestConnection).toHaveBeenCalledWith(42);
     });
 
-    // Since testingId stays null in the mock, success phase is reached
+    // Only the awaited true provider result allows the tested-success phase
     await waitFor(() => {
       expect(screen.getByText('Connection saved and tested!')).toBeInTheDocument();
     });
@@ -286,6 +289,49 @@ describe('ConnectionWizard', () => {
     await waitFor(() => {
       expect(screen.getByText('Failed to save connection')).toBeInTheDocument();
     });
+  });
+
+  it('does not report tested success before the awaited provider test finishes, and keeps failure retryable', async () => {
+    let resolveTest!: (passed: boolean) => void;
+    mockTestConnection.mockReturnValueOnce(new Promise(done => { resolveTest = done; }));
+    render(<ConnectionWizard {...defaultProps} editingConnection={makeConnection()} />);
+    await screen.findByTestId('mock-form');
+    fireEvent.click(screen.getByTestId('fill-form'));
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    await screen.findByText('Testing connection…');
+    expect(screen.queryByText('Connection saved and tested!')).toBeNull();
+    resolveTest(false);
+    await screen.findByText('Connection saved but test failed');
+    expect(screen.queryByText('Connection saved and tested!')).toBeNull();
+    mockTestConnection.mockResolvedValueOnce(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await screen.findByText('Connection saved and tested!');
+    expect(mockSaveConnection).toHaveBeenCalledTimes(1);
+    expect(mockTestConnection).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a failed edit read distinct from an empty config and retries the redacted config', async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ data: null, error: 'Config unavailable', status: 503 });
+    render(<ConnectionWizard {...defaultProps} editingConnection={makeConnection({ type: 'spotify' })} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Config unavailable');
+    expect(screen.queryByTestId('mock-form')).toBeNull();
+    expect(mockSaveConnection).not.toHaveBeenCalled();
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { connection: { config: { clientId: 'visible-id' } } }, error: null, status: 200 });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByTestId('mock-form')).toHaveAttribute('data-config', JSON.stringify({ clientId: 'visible-id' }));
+  });
+
+  it('aborts obsolete edit reads and ignores their response after a target change', async () => {
+    let resolveOld!: (value: any) => void;
+    vi.mocked(api.get).mockReturnValueOnce(new Promise(done => { resolveOld = done; }));
+    const { rerender } = render(<ConnectionWizard {...defaultProps} editingConnection={makeConnection({ id: 1 })} />);
+    const signal = vi.mocked(api.get).mock.calls[0][1]?.signal;
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { connection: { config: { url: 'new-target' } } }, error: null, status: 200 });
+    rerender(<ConnectionWizard {...defaultProps} editingConnection={makeConnection({ id: 2 })} />);
+    expect(signal?.aborted).toBe(true);
+    expect(await screen.findByTestId('mock-form')).toHaveAttribute('data-config', JSON.stringify({ url: 'new-target' }));
+    resolveOld({ data: { connection: { config: { url: 'obsolete-target' } } }, error: null, status: 200 });
+    await waitFor(() => expect(screen.getByTestId('mock-form')).toHaveAttribute('data-config', JSON.stringify({ url: 'new-target' })));
   });
 
   // --- Close ---

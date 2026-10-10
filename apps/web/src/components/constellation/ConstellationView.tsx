@@ -2,16 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
+import { flushSync } from 'react-dom';
 import dynamic from 'next/dynamic';
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import type { ForceGraphProps, NodeObject } from 'react-force-graph-2d';
 import {
   useConstellation,
-  mergeNodes,
-  mergeEdges,
   type ConstellationSeed,
 } from '@/hooks/useConstellation';
+import { ResultState } from '@/components/ui/result-state';
 import { useFrontierStream } from '@/hooks/useFrontierStream';
-import type { GraphNode, GraphEdge, StreamPayload } from '@/types/constellation';
 import {
   genreColor,
   genreHighlightAlpha,
@@ -24,6 +24,7 @@ import {
 import { PersonPanel } from './PersonPanel';
 import { ConstellationControls } from './ConstellationControls';
 import { PathFinder } from './PathFinder';
+import { ROLE_BITS, ROLE_LABELS, type BaseRole } from './roleBits';
 
 /**
  * A single visited person in the wander trail (each hop expands in place).
@@ -70,9 +71,14 @@ export interface ConstellationViewProps {
    * node expands it in place (it does not lift the seed back to the parent).
    */
   seed: ConstellationSeed;
+  actorId?: number;
+  requestedFocus?: number | null;
+  pathFrom?: number | null;
+  pathTo?: number | null;
+  pathMode?: 'shortest' | 'interesting';
+  onFocusChange?: (personId: number, replace?: boolean) => void;
+  onPathChange?: (from: number, to: number, mode: 'shortest' | 'interesting') => void;
 }
-
-const EMPTY_STREAM: { nodes: GraphNode[]; edges: GraphEdge[] } = { nodes: [], edges: [] };
 
 /**
  * The dense collaboration field. Node color = genre, radius = prominence, gold
@@ -83,51 +89,76 @@ const EMPTY_STREAM: { nodes: GraphNode[]; edges: GraphEdge[] } = { nodes: [], ed
  * and are merged the same way. The seed (focus) only changes when the parent
  * remounts the view with a new `seed`.
  */
-export function ConstellationView({ seed }: ConstellationViewProps) {
+export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pathTo, pathMode, onFocusChange, onPathChange }: ConstellationViewProps) {
   // Controls-bar state (Design §5). `roleMask` is the SERVER-SIDE role filter —
   // it is passed into the data hook so a change re-seeds through the backend's
   // filtered `subgraph`. `hideHotness` and `genreHighlight` are CLIENT-SIDE paint
   // adjustments only (no re-fetch).
+  const [labelColor, setLabelColor] = useState('#191C1F');
+  useEffect(() => {
+    const root = document.documentElement;
+    const update = () => {
+      const foreground = getComputedStyle(root).getPropertyValue('--foreground').trim();
+      if (foreground) setLabelColor(`hsl(${foreground})`);
+    };
+    update();
+    const observer = new MutationObserver(update);
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+    return () => observer.disconnect();
+  }, []);
+  const canvasContainer = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 1, height: 420 });
+  useEffect(() => {
+    const element = canvasContainer.current;
+    if (!element) return;
+    const measure = () => setCanvasSize({ width: Math.max(1, element.clientWidth), height: Math.max(1, element.clientHeight) });
+    measure();
+    const observer = new ResizeObserver(measure); observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const [roleMask, setRoleMask] = useState<number | undefined>(undefined);
   const [hideHotness, setHideHotness] = useState(false);
   const [genreHighlight, setGenreHighlight] = useState<string | null>(null);
 
-  const { nodes, edges, focusId, streamToken, loading, error, expandMore } =
-    useConstellation(seed, { roleMask });
-
-  // Nodes/edges pushed by the background-expand SSE stream, merged locally on top
-  // of the hook's seed subgraph. Reset whenever the stream token (generation)
-  // changes (a role-filter re-seed), since that supersedes any streamed frontier.
-  const [streamed, setStreamed] = useState(EMPTY_STREAM);
-  const streamKey = streamToken ? `${streamToken.id}:${streamToken.generation}` : null;
-  useEffect(() => {
-    setStreamed(EMPTY_STREAM);
-  }, [streamKey]);
-
-  // The breadcrumb trail of visited persons (the wander).
+  // The full trail stays in view state even when its older graph nodes leave the field.
   const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
+  const [selectedPerson, setSelectedPerson] = useState<(Breadcrumb & { owned: boolean }) | null>(null);
+  // A local walk owns focus until its URL push commits or another URL arrives.
+  const [pendingWalk, setPendingWalk] = useState<{ from: number | null | undefined; to: number } | null>(null);
+  useEffect(() => { setPendingWalk(null); }, [requestedFocus, actorId, seed?.type, seed?.id]);
+  const walkingFocus = pendingWalk && pendingWalk.from === requestedFocus
+    ? pendingWalk.to : requestedFocus !== undefined ? requestedFocus : selectedPerson?.personId;
+  const { nodes: mergedNodes, edges: mergedEdges, focusId, streamToken, loading, error, expandMore,
+    onFrame, onStatus, availability, creditSource } = useConstellation(seed, {
+      roleMask, actorId, walkingFocus,
+      breadcrumbIds: breadcrumbs.map(crumb => crumb.personId),
+    });
+  const streamKey = streamToken ? `${streamToken.id}:${streamToken.generation}` : null;
+  useFrontierStream(streamToken, onFrame, onStatus);
+  useEffect(() => { if (creditSource === 'live') setGenreHighlight(null); }, [creditSource]);
 
-  // The person whose acquisition panel is open. Selecting a node opens this (the
-  // acquisition grain: the node action lands the user in the panel where they
-  // pick artist-vs-album, rather than blind-subscribing).
-  const [selectedPerson, setSelectedPerson] = useState<
-    (Breadcrumb & { owned: boolean }) | null
-  >(null);
+  const names = useMemo(() => new Map(mergedNodes.map(node => [node.personId, node.displayName])), [mergedNodes]);
+  const restored = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading || focusId === null) return;
+    if (!walkingFocus) { onFocusChange?.(focusId, true); setSelectedPerson(null); return; }
+    const key = `${streamKey}:${walkingFocus}`;
+    if (restored.current === key) return;
+    restored.current = key;
+    const node = mergedNodes.find(person => person.personId === walkingFocus);
+    setSelectedPerson({ personId: walkingFocus, displayName: node?.displayName || `Person ${walkingFocus}`, owned: node?.owned ?? false });
+    if (walkingFocus !== focusId) void expandMore(walkingFocus);
+  }, [walkingFocus, focusId, loading, streamKey, mergedNodes, expandMore, onFocusChange]);
 
-  const onFrame = useCallback((payload: StreamPayload) => {
-    const incomingNodes = Array.isArray(payload.nodes) ? (payload.nodes as GraphNode[]) : [];
-    const incomingEdges = Array.isArray(payload.edges) ? (payload.edges as GraphEdge[]) : [];
-    if (incomingNodes.length === 0 && incomingEdges.length === 0) return;
-    setStreamed((prev) => ({
-      nodes: mergeNodes(prev.nodes, incomingNodes),
-      edges: mergeEdges(prev.edges, incomingEdges),
-    }));
-  }, []);
-
-  useFrontierStream(streamToken, onFrame);
-
-  const mergedNodes = useMemo(() => mergeNodes(nodes, streamed.nodes), [nodes, streamed.nodes]);
-  const mergedEdges = useMemo(() => mergeEdges(edges, streamed.edges), [edges, streamed.edges]);
+  useEffect(() => {
+    setSelectedPerson(previous => {
+      if (!previous) return previous;
+      const node = mergedNodes.find(person => person.personId === previous.personId);
+      return node && (node.displayName !== previous.displayName || node.owned !== previous.owned)
+        ? { ...previous, displayName: node.displayName || previous.displayName, owned: node.owned }
+        : previous;
+    });
+  }, [mergedNodes]);
 
   // Stable node objects: reuse the SAME object per personId across renders so the
   // force sim preserves each node's position (x/y) as the graph GROWS. Rebuilding
@@ -136,6 +167,8 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
   const nodeObjs = useRef<Map<number, CanvasNode>>(new Map());
   const graphData = useMemo(() => {
     const map = nodeObjs.current;
+    const retained = new Set(mergedNodes.map(node => node.personId));
+    for (const id of map.keys()) if (!retained.has(id)) map.delete(id);
     for (const n of mergedNodes) {
       const existing = map.get(n.personId);
       if (existing) {
@@ -174,18 +207,22 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       if (!Number.isFinite(personId)) return;
       // Selecting a node ALWAYS opens its acquisition panel (the grain fix): the
       // user chooses artist-vs-album there rather than blind-subscribing.
-      setSelectedPerson({ personId, displayName: node.name, owned: Boolean(node.owned) });
-      setBreadcrumbs((prev) => {
-        if (prev.length > 0 && prev[prev.length - 1].personId === personId) return prev;
-        return [...prev, { personId, displayName: node.name }];
+      restored.current = `${streamKey}:${personId}`;
+      // The canvas callback can run outside React; commit anchors before even an
+      // immediately resolved cached expansion can merge and prune the field.
+      flushSync(() => {
+        setSelectedPerson({ personId, displayName: node.name, owned: Boolean(node.owned) });
+        setPendingWalk({ from: requestedFocus, to: personId });
+        setBreadcrumbs(prev => prev.at(-1)?.personId === personId ? prev : [...prev, { personId, displayName: node.name }]);
       });
+      onFocusChange?.(personId);
       // Expand IN PLACE: fetch this node's collaborators and MERGE them into the
       // current field (the graph grows outward, keeping everything already on
       // screen), rather than replacing the view. This is the "wander down a path"
       // model — the throughline stays visible instead of jarringly redrawing.
       void expandMore(personId);
     },
-    [expandMore],
+    [expandMore, onFocusChange, mergedNodes, streamKey, requestedFocus],
   );
 
   /**
@@ -195,14 +232,18 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
   const handleSelectPerson = useCallback(
     (personId: number) => {
       if (!Number.isFinite(personId)) return;
-      setBreadcrumbs((prev) => {
-        if (prev.length > 0 && prev[prev.length - 1].personId === personId) return prev;
-        return [...prev, { personId, displayName: String(personId) }];
+      const node = mergedNodes.find(person => person.personId === personId);
+      restored.current = `${streamKey}:${personId}`;
+      flushSync(() => {
+        setSelectedPerson({ personId, displayName: node?.displayName || `Person ${personId}`, owned: node?.owned ?? false });
+        setPendingWalk({ from: requestedFocus, to: personId });
+        setBreadcrumbs(prev => prev.at(-1)?.personId === personId ? prev : [...prev, { personId, displayName: node?.displayName || `Person ${personId}` }]);
       });
+      onFocusChange?.(personId);
       // Expand a path hop into the current field (accumulate), same as a node click.
       void expandMore(personId);
     },
-    [expandMore],
+    [expandMore, onFocusChange, mergedNodes, streamKey, requestedFocus],
   );
 
   /** Custom node paint: genre fill, prominence radius, owned ring, label. */
@@ -216,7 +257,7 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       // Genre highlight dims every node whose genre != the highlighted one, so a
       // single genre can be traced across the dense field (client-side only).
       ctx.save();
-      ctx.globalAlpha = genreHighlightAlpha(node.genre, genreHighlight);
+      ctx.globalAlpha = genreHighlightAlpha(node.genre, creditSource === 'live' ? null : genreHighlight);
 
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, 2 * Math.PI);
@@ -247,29 +288,33 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
         ctx.font = `${fontSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillStyle = 'rgba(230, 230, 235, 0.9)';
+        ctx.fillStyle = labelColor;
         ctx.fillText(node.name, x, y + radius + 1);
       }
 
       ctx.restore();
     },
-    [hideHotness, genreHighlight],
+    [hideHotness, genreHighlight, labelColor, creditSource],
   );
 
   return (
-    <div className="relative h-full w-full">
-      <div className="pointer-events-none absolute right-2 top-2 z-10 flex max-h-[calc(100%-1rem)] w-64 max-w-[70%] flex-col gap-2 overflow-auto">
+    <div className="flex min-w-0 flex-col gap-3 lg:flex-row">
+      <div className="min-w-0 space-y-2 lg:w-72 lg:shrink-0">
+        <details className="border bg-background" open><summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 p-3 text-sm font-medium"><ChevronRight className="disclosure-chevron h-4 w-4 shrink-0" aria-hidden="true" />Graph controls and legend</summary>
         <div className="pointer-events-auto">
           <ConstellationControls
+            creditSource={creditSource}
             onRoleMaskChange={setRoleMask}
             onHideHotnessChange={setHideHotness}
             onGenreHighlightChange={setGenreHighlight}
           />
         </div>
-        <div className="pointer-events-auto">
-          <PathFinder onSelectPerson={handleSelectPerson} />
-        </div>
+        </details>
+        <details className="border bg-background"><summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 p-3 text-sm font-medium"><ChevronRight className="disclosure-chevron h-4 w-4 shrink-0" aria-hidden="true" />Find a collaboration path</summary>
+          <PathFinder actorId={actorId} initialFrom={pathFrom} initialTo={pathTo} initialMode={pathMode} onSelectPerson={handleSelectPerson} names={names} onPathChange={onPathChange} />
+        </details>
       </div>
+      <div ref={canvasContainer} className="relative min-h-[420px] min-w-0 shrink-0 overflow-hidden border lg:flex-1" style={{ height: '70vh' }}>
 
       {breadcrumbs.length > 0 && (
         <nav
@@ -282,8 +327,8 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
               {i > 0 && <span aria-hidden="true">/</span>}
               <button
                 type="button"
-                className="rounded px-1 hover:text-foreground"
-                onClick={() => expandMore(crumb.personId)}
+                className="min-h-11 rounded px-1 hover:text-foreground"
+                onClick={() => handleSelectPerson(crumb.personId)}
               >
                 {crumb.displayName}
               </button>
@@ -291,6 +336,13 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
           ))}
         </nav>
       )}
+
+      {availability && <div className="absolute bottom-2 left-2 right-2 z-10 bg-background/95 px-3 text-sm">
+        <ResultState kind="partial-results" message={availability.status === 'budget-exhausted'
+          ? 'Daily Discogs budget used; showing cached collaborators only. Resets 00:00 UTC'
+          : availability.detail || 'Collaborator source is unavailable. Please retry.'}
+          action={availability.status === 'source-unavailable' ? <button type="button" className="min-h-11 text-link underline" onClick={() => void expandMore(availability.focusId)}>Retry</button> : undefined} />
+      </div>}
 
       {error && (
         <div
@@ -313,6 +365,8 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       )}
 
       <ForceGraph2D
+        width={canvasSize.width}
+        height={canvasSize.height}
         graphData={graphData}
         nodeCanvasObject={paintNode}
         nodePointerAreaPaint={(node, color, ctx) => {
@@ -332,11 +386,20 @@ export function ConstellationView({ seed }: ConstellationViewProps) {
       />
 
       <PersonPanel
+        actorId={actorId}
+        credits={selectedPerson && <><h3 className="font-semibold">Credited connections</h3><ul className="divide-y">{mergedEdges.filter(edge => edge.source === selectedPerson.personId || edge.target === selectedPerson.personId).map(edge => <li key={`${edge.source}-${edge.target}`} className="space-y-1 py-2">
+          <p>{names.get(edge.source === selectedPerson.personId ? edge.target : edge.source) || 'Collaborator'}</p>
+          {(Object.keys(ROLE_BITS) as BaseRole[]).filter(role => (edge.roleBitmask & ROLE_BITS[role]) !== 0).length > 0 && <p>{(Object.keys(ROLE_BITS) as BaseRole[]).filter(role => (edge.roleBitmask & ROLE_BITS[role]) !== 0).map(role => ROLE_LABELS[role]).join(' · ')}</p>}
+          {edge.sharedMasterCount !== undefined && <p className="font-mono">{edge.sharedMasterCount} shared releases</p>}
+          {edge.sampleMasterId != null && <a className="inline-flex min-h-11 items-center text-link underline" href={`https://www.discogs.com/master/${edge.sampleMasterId}`} target="_blank" rel="noopener noreferrer">Shared release on Discogs</a>}
+        </li>)}</ul></>}
         personId={selectedPerson?.personId ?? null}
         displayName={selectedPerson?.displayName}
         owned={selectedPerson?.owned}
         onClose={() => setSelectedPerson(null)}
       />
+      </div>
+      <details className="border bg-background p-3 lg:max-w-64"><summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm"><ChevronRight className="disclosure-chevron h-4 w-4 shrink-0" aria-hidden="true" />People in this field</summary><ul>{mergedNodes.map(node => <li key={node.personId}><button type="button" className="min-h-11 max-w-full break-words text-left text-sm text-link" onClick={() => handleSelectPerson(node.personId)}>{node.displayName || `Person ${node.personId}`}</button></li>)}</ul></details>
     </div>
   );
 }

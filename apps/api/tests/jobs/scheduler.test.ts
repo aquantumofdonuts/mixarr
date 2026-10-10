@@ -373,6 +373,21 @@ describe('Scheduler Service', () => {
   // ── startDataRetentionJob ───────────────────────────────────────────────
 
   describe('startDataRetentionJob', () => {
+    it('preserves active claims and recent decision revisions during retention', async () => {
+      const now = new Date('2026-10-08T00:00:00.000Z').getTime();
+      vi.spyOn(Date, 'now').mockReturnValue(now);
+      startDataRetentionJob();
+      const retentionCall = vi.mocked(CronJob).mock.calls.find(call => call[0] === '0 3 * * *');
+      await (retentionCall![1] as Function)();
+      expect(prisma.subscriptionResult.deleteMany).toHaveBeenCalledWith({
+        where: {
+          createdAt: { lt: expect.any(Date) },
+          status: { not: 'adding' },
+          OR: [{ processedAt: null }, { processedAt: { lt: new Date(now - 120_000) } }],
+        },
+      });
+    });
+
     it('should create a CronJob for daily data retention cleanup', () => {
       startDataRetentionJob();
 

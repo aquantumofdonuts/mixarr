@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ConfirmDialog, Skeleton } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
+import { ResultState } from '@/components/ui/result-state';
 import { useAuth } from '@/lib/auth';
 import {
   useSubscriptions,
@@ -33,7 +34,7 @@ export default function SubscriptionsPage() {
   const { addToast } = useToast();
 
   // Data fetching hooks
-  const { data: subscriptions = [], isLoading } = useSubscriptions();
+  const { data: subscriptions = [], isLoading, isError, refetch } = useSubscriptions();
   const { data: presets = [] } = usePresets();
   const { data: hasLidarr = true } = useHasLidarr();
 
@@ -110,7 +111,7 @@ export default function SubscriptionsPage() {
           data: {
             name: data.name,
             config: data.config,
-            schedule: data.schedule || undefined,
+            schedule: data.schedule,
             resultHandling: data.resultHandling as 'preview' | 'queue' | 'auto',
           },
         });
@@ -178,8 +179,10 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
+      {isError && <ResultState kind="error" message="Failed to load subscriptions" action={<Button variant="outline" onClick={() => void refetch()}>Retry</Button>} />}
+
       {/* Empty State */}
-      {!isLoading && subscriptions.length === 0 && (
+      {!isLoading && !isError && subscriptions.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <TrendingUp className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -196,7 +199,7 @@ export default function SubscriptionsPage() {
 
       {/* Subscription List */}
       {!isLoading && subscriptions.length > 0 && (
-        <div className="space-y-4">
+        <div className="border-t border-border">
           {subscriptions.map((sub) => (
             <SubscriptionCard
               key={sub.id}
@@ -217,7 +220,8 @@ export default function SubscriptionsPage() {
         onClose={() => setConfirmTarget(null)}
         onConfirm={confirmDelete}
         title="Delete subscription?"
-        description="This action cannot be undone."
+        description="This removes the subscription’s schedule, saved results, and run history. Artists already added to Lidarr remain there. This action cannot be undone."
+        loading={deleteMutation.isPending}
         confirmLabel="Delete"
         variant="destructive"
       />

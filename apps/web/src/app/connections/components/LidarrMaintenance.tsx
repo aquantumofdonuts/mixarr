@@ -55,10 +55,8 @@ export function LidarrMaintenance({ connectionId }: LidarrMaintenanceProps) {
   // Fetch library stats on mount
   const statsQuery = useQuery({
     queryKey: lidarrMaintenanceKeys.stats(connectionId),
-    queryFn: async () => {
-      const { data, error } = await api.get<LidarrStats>(
-        '/api/search/lidarr/artists',
-      );
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<LidarrStats>('/api/search/lidarr/artists', { signal });
       if (error) throw new Error(error);
       return data!;
     },

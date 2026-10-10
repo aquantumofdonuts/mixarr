@@ -374,3 +374,19 @@ describe('orbit-crawl-worker module import', () => {
     expect(typeof mod.registerOrbitCrawlWorker).toBe('function');
   });
 });
+
+const orbitShell = vi.hoisted(() => ({ process: null as null | ((job: any) => Promise<unknown>), resolve: vi.fn() }));
+vi.mock('bullmq', () => ({ Worker: class {
+  constructor(_name: string, process: (job: any) => Promise<unknown>) { orbitShell.process = process; }
+  on() { return this; }
+} }));
+vi.mock('../../../src/lib/redis.js', () => ({ createRedisConnection: vi.fn() }));
+vi.mock('../../../src/jobs/constellation/queue.js', () => ({ CONSTELLATION_QUEUE_NAMES: { CRAWL: 'orbit-crawl' } }));
+vi.mock('../../../src/services/constellation/resolveCreditSource.js', () => ({ resolveConfiguredCreditSource: orbitShell.resolve }));
+it('the registered orbit wrapper requests only the 80% shared live budget', async () => {
+  const stop = new Error('composition boundary reached'); orbitShell.resolve.mockRejectedValue(stop);
+  const { registerOrbitCrawlWorker } = await import('../../../src/jobs/constellation/orbit-crawl-worker.js');
+  await registerOrbitCrawlWorker();
+  await expect(orbitShell.process!({ data: { userId: 7 } })).rejects.toBe(stop);
+  expect(orbitShell.resolve).toHaveBeenCalledWith(7, { budgetShare: 0.8 });
+});

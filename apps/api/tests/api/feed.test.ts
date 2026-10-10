@@ -155,13 +155,13 @@ describe('Feed Routes', () => {
     });
 
     it('approves feed item and returns artist name', async () => {
-      mockFeedService.approve.mockResolvedValue({ artistName: 'Radiohead' });
+      mockFeedService.approve.mockResolvedValue({ artistName: 'Radiohead', outcome: { artistMbid: 'a', state: 'added', message: 'Confirmed' } });
 
       const response = await request(app).post('/api/feed/feed-1-2-3/approve');
 
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ success: true, artistName: 'Radiohead' });
-      expect(mockFeedService.approve).toHaveBeenCalledWith('feed-1-2-3', 1);
+      expect(response.body).toMatchObject({ success: true, artistName: 'Radiohead', outcome: { state: 'added' } });
+      expect(mockFeedService.approve).toHaveBeenCalledWith('feed-1-2-3', 1, expect.any(AbortSignal), {});
     });
 
     it('returns 404 when feed item not found', async () => {

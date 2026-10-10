@@ -1,103 +1,41 @@
 'use client';
 
+import Link from 'next/link';
 import { useDashboardStats } from '@/lib/hooks';
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-import Users from 'lucide-react/dist/esm/icons/users';
-import Clock from 'lucide-react/dist/esm/icons/clock';
-import Link2 from 'lucide-react/dist/esm/icons/link-2';
-
-interface StatTileProps {
-  icon: React.ReactNode;
-  value: number;
-  label: string;
-  colorClass: string;
-  iconBgClass: string;
-}
-
-function StatTile({ icon, value, label, colorClass, iconBgClass }: StatTileProps) {
-  return (
-    <div className="group relative bg-card border border-border rounded-card px-4 py-3 transition-all duration-300 hover:translate-y-[-2px] hover:shadow-elevation-2 hover:border-primary/20 overflow-hidden">
-      {/* Top accent bar on hover */}
-      <div className={`absolute top-0 left-0 right-0 h-0.5 ${colorClass} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
-      
-      <div className="flex items-center justify-between">
-        {/* Value and Label */}
-        <div>
-          <div className="text-2xl font-bold text-card-foreground">{value.toLocaleString()}</div>
-          <div className="text-xs text-muted-foreground font-medium">{label}</div>
-        </div>
-        
-        {/* Icon */}
-        <div className={`w-10 h-10 rounded-container flex items-center justify-center ${iconBgClass}`}>
-          {icon}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatTileSkeleton() {
-  return (
-    <div className="bg-card border border-border rounded-card px-4 py-3 animate-pulse">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="h-7 w-12 bg-muted rounded mb-1" />
-          <div className="h-3 w-20 bg-muted rounded" />
-        </div>
-        <div className="w-10 h-10 rounded-container bg-muted" />
-      </div>
-    </div>
-  );
-}
+import { useAuth } from '@/lib/auth';
+import { Button } from '@/components/ui/button';
 
 export function DashboardTiles() {
-  const { data: stats, isLoading, error } = useDashboardStats();
+  const { user } = useAuth();
+  const { data, isLoading, error, refetch } = useDashboardStats();
+  const stats = error ? undefined : data;
+  const admin = user?.role === 'admin';
+  const summaries = [
+    { label: 'Pending discovery records', value: stats?.pendingDiscoveryRecords, href: '/', description: 'Pending and queued artist source records; artists may appear in multiple records.' },
+    { label: 'Your pending review records', value: stats?.pendingReviews, href: admin ? undefined : '/queue' },
+    { label: 'Active subscriptions', value: stats?.activeSubscriptions },
+    { label: 'Results marked added (30d)', value: stats?.subscriptionRecordsMarkedAdded, description: 'Your subscription result records, including legacy records. This is not a distinct artist or confirmed library count.' },
+    ...(admin ? [{ label: 'Active connections', value: stats?.activeConnections }] : []),
+  ];
 
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatTileSkeleton />
-        <StatTileSkeleton />
-        <StatTileSkeleton />
-        <StatTileSkeleton />
-      </div>
-    );
-  }
-
-  if (error || !stats) {
-    return null; // Silently fail - not critical for the page
-  }
-
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-      <StatTile
-        icon={<RefreshCw className="w-5 h-5 text-primary" />}
-        value={stats.activeSubscriptions}
-        label="Active Subscriptions"
-        colorClass="bg-primary"
-        iconBgClass="bg-primary/10"
-      />
-      <StatTile
-        icon={<Users className="w-5 h-5 text-secondary" />}
-        value={stats.artistsAdded}
-        label="Artists Added (30d)"
-        colorClass="bg-secondary"
-        iconBgClass="bg-secondary/10"
-      />
-      <StatTile
-        icon={<Clock className="w-5 h-5 text-status-warning" />}
-        value={stats.pendingReviews}
-        label="Pending Reviews"
-        colorClass="bg-status-warning"
-        iconBgClass="bg-status-warning/10"
-      />
-      <StatTile
-        icon={<Link2 className="w-5 h-5 text-status-success" />}
-        value={stats.activeConnections}
-        label="Active Connections"
-        colorClass="bg-status-success"
-        iconBgClass="bg-status-success/10"
-      />
-    </div>
-  );
+  return <section aria-label="Your catalog summary" aria-busy={!!isLoading} className="mb-5 border-y border-border">
+    <ul className="grid grid-cols-2 divide-border sm:grid-cols-4 lg:flex lg:flex-wrap">
+      {summaries.map(({ label, value, href, description }) => {
+        const content = <><span className="block font-mono text-base font-semibold tabular-nums">{value === undefined ? '—' : value.toLocaleString()}</span>{' '}<span className="block text-xs">{label}</span></>;
+        return <li key={label} title={description} className="min-w-0 border-b border-border last:border-b-0 sm:border-b-0 lg:flex-1">
+          {href ? <Link href={href} className="block px-3 py-2 text-primary hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">{content}</Link>
+            : <div className="px-3 py-2">{content}</div>}
+        </li>;
+      })}
+    </ul>
+    {!admin && <nav aria-label="Your record lists" className="border-t border-border px-3 py-2 text-xs">
+      <Link href="/subscriptions" className="text-primary underline">Open your subscriptions</Link>
+    </nav>}
+    {admin && <nav aria-label="Catalog lists" className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border px-3 py-2 text-xs">
+      <Link href="/queue" className="text-primary underline">Open all review records</Link>
+      <Link href="/subscriptions" className="text-primary underline">Open your subscriptions</Link>
+      <Link href="/connections" className="text-primary underline">Manage connections</Link>
+    </nav>}
+    {error && <div role="status" className="flex items-center gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground"><p>Summary unavailable.</p><Button variant="outline" size="sm" onClick={() => void refetch()}>Retry summary</Button></div>}
+  </section>;
 }

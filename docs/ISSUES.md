@@ -1,6 +1,6 @@
 # Mixarr Issues & Technical Debt
 
-> **Last Updated:** October 7, 2026  
+> **Last Updated:** October 9, 2026
 > **Status:** PRODUCTION READY (v2.3.5) — Collaboration Constellation unreleased on `dev`
 > 
 > For completed issues, see [ISSUES-FIXED.md](ISSUES-FIXED.md)  
@@ -12,14 +12,14 @@
 
 ## 🔴 OPEN SECURITY FINDINGS (from the 2026-07-04 adversarial review)
 
-Six merge-blocking items from [plans/2026-07-04-adversarial-code-review.md](plans/2026-07-04-adversarial-code-review.md) are still open as of 2026-10-07 (verified in code; no commit has touched the affected files since):
+The 2026-10-07 snapshot identified six merge-blocking items from [plans/2026-07-04-adversarial-code-review.md](plans/2026-07-04-adversarial-code-review.md). Item 5 and the user-facing ownership portion of item 6 are repaired and verified on the local `feat/music-catalog-ux` branch; they have not been integrated or released. The remaining findings stay open:
 
 1. SAML accepts unsigned assertions and an empty IdP certificate — `apps/api/src/auth/strategies/saml.ts`
 2. Plex `restrictToServerId` is declared but never enforced — `apps/api/src/auth/strategies/plex.ts`
 3. No session regeneration on login (session fixation) — `apps/api/src/auth/passport.ts` and every `logIn` path
 4. Connection config is an open record (`z.record(z.unknown())`), bypassing per-type schemas; SSRF surface on test endpoints — `apps/api/src/schemas/connection.ts`, `apps/api/src/routes/connections.ts`
-5. Result reject is not scoped to the subscription (IDOR) — `apps/api/src/routes/subscriptions.ts` (approve is scoped correctly; mirror it)
-6. slskd routes have no user scoping and the webhook sits behind session auth — `apps/api/src/routes/slskd.ts`
+5. **Resolved locally:** Result rejection reads by result ID, subscription ID, and owner, then conditionally writes with that ownership scope and the expected status/revision — `apps/api/src/routes/subscriptions.ts`. T07 implemented the fix; T15 reverified foreign owners (including admins), foreign result bindings, active claims, and competing decisions in `tests/api/subscription-decisions.test.ts`. Approval uses the same ownership boundary.
+6. **Partially resolved locally:** T25 scopes user-facing slskd search/download operations to owned connections (administrators retain access), rejects foreign tracking mutations before effects, and retries through the record's exact active connection. Independent spec/quality reviews passed actual router/auth tests with mocked external boundaries. The webhook still sits behind session auth and uses unscoped configuration/record matching; those findings remain open — `apps/api/src/routes/slskd.ts`.
 
 Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from that review have shipped.
 
@@ -32,7 +32,33 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ---
 
+## UI/UX catalog redesign (complete with accepted provider deferral)
+
+**Status:** Local product `ffeb12352704b404130fc73c27ff661c032c7733` is independently SPEC/QUALITY reviewed. T28 has explicit five-surface gallery approval and final 22-check authentic Chromium native-200%-zoom proof. T29's regenerated matrix reports 136 COMPLETE and one ACCEPTED_GAP; gate PASS with the owner’s explicit October 10, 2026 decision: “C137 deferred: provider verification will be performed separately”. Genuine provider compatibility remains unverified. T30 integrated code QUALITY is PASS with no open confirmed Critical/Important findings. Root final verification passed 2,592 API tests (39 skipped), 825 web tests, 194 Chromium and 64 Firefox/mobile browser checks; builds/types/uncached lint passed with existing warnings. Independent backend review passed 877 tests including actual disposable MySQL/Redis; web review passed 89 fresh tests. The actual Settings first-dirty-commit race and mobile player occlusion have causal repairs and retained regressions; outcome consumers now distinguish new/existing membership. The owner-approved hard 300-node cap remains intact. The injected Preview-history observation remains latent; baseline account submissions and legacy automatic-import workers are not certified by this scope. Owned runtimes/test containers are removed; the original main-checkout specification edits are preserved. See the [completion matrix](plans/2026-10-07-music-catalog-ux-completion.md), [full review](plans/2026-10-09-music-catalog-ux-full-review.md), [checkpoint](plans/2026-10-08-music-catalog-ux-progress.md) and [visual review](plans/2026-10-09-music-catalog-visual-review.md). Provider verification remains separate work; integration and release are not claimed.
+**Scope:** R01–R28/I01: the 25 UI/UX review recommendations, a distinctive music-catalog identity with the user-confirmed compact artwork-thumbnail feed, and the three October 8 Constellation follow-ups.
+
+- [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
+- [Implementation tasks and verification gates](plans/2026-10-07-music-catalog-ux-plan.md)
+- [Execution checkpoint and resume instructions](plans/2026-10-08-music-catalog-ux-progress.md)
+- [Constellation amendment findings and accepted cap decision](plans/2026-10-08-music-catalog-amendment-review.md)
+
+This initiative includes truthful acquisition feedback, artist/source drilldown, queue pagination, safe reversible decisions, and consistent responsive controls. Existing security findings above remain tracked independently; affected mutations must satisfy their scope checks before being exposed by the new UI.
+
+---
+
 ## 🔧 TECHNICAL DEBT (Deferred)
+
+### Account profile/password client routes do not match the API
+
+**Priority:** Medium
+
+**Status:** Backlog; preexisting functional limitation
+
+**Verified:** October 9, 2026
+
+The account page calls `PUT /api/auth/profile` and `POST /api/auth/password`; the Users page also calls the latter for the current account. `apps/api/src/routes/auth.ts` registers neither endpoint. These same client calls exist at baseline `d1aec6c`, before the catalog rollout. T27 changes their visual treatment only; its screenshot/browser checks do not establish working profile/password submission. Existing admin reset-password routing is a separate operation.
+
+Repair the account forms against an explicitly validated, authenticated server contract in a separate functional change. Do not treat the catalog's visual acceptance as acceptance of these submissions. Evidence: `apps/web/src/app/users/me/page.tsx:38,55`, `apps/web/src/app/users/page.tsx:79`, and the registered `authRouter` methods in `apps/api/src/routes/auth.ts`.
 
 ### TD-009: Unify "Artist Added" Tracking Across Add Paths
 
@@ -44,12 +70,12 @@ Artists can be added to Lidarr through multiple paths, each tracking the additio
 - **Subscriptions/Feed** → `SubscriptionResult` with `status: 'added'`
 - **Review Queue** → `ReviewItem` with `status: 'approved'`
 
-The dashboard stats counter currently sums both tables to get an accurate count, but this is fragile. If a new add path is introduced, the counter must be updated to include it.
+The local catalog implementation no longer sums these decision records as confirmed distinct additions. Its owner-scoped dashboard explicitly counts subscription result records marked added in the last 30 days; repeated artist identities and legacy evidence remain possible. A cross-path ledger of confirmed distinct acquisitions is still a separate backlog item.
 
 **Proposed fix:** Create a unified `artist_additions` audit table (or similar) that all add paths write to, so dashboard stats only need one query. This also enables better analytics (e.g., "added via subscription" vs "added via review queue").
 
 **Files involved:**
-- `apps/api/src/routes/dashboard.ts` — current dual-query workaround
+- `apps/api/src/routes/dashboard.ts` — explicit owner-scoped record counts
 - `apps/api/src/routes/imports.ts` — review queue approval (lines ~305-390)
 - `apps/api/src/services/FeedService.ts` — feed approval
 - `apps/api/src/jobs/subscription-worker.ts` — auto-add

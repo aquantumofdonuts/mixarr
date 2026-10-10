@@ -2,18 +2,12 @@
 
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { EmptyState, Skeleton } from '@/components/ui';
-import { LoadingOverlay } from '@/components/ui/loading';
-import { useToast } from '@/components/ui/toast';
+import { ResultState } from '@/components/ui/result-state';
 import { PageHeader } from '@/components/layout/page-header';
 import { SlskdSearchModal } from '@/components/slskd/SearchModal';
-import { api } from '@/lib/api';
-import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left';
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
-import SearchIcon from 'lucide-react/dist/esm/icons/search';
-
+import { useListContext } from '@/hooks/useListContext';
 import { useSearch } from './hooks/useSearch';
-import { useArtistAdd, isAlreadyExistsError } from './hooks/useArtistAdd';
+import { useArtistAdd } from './hooks/useArtistAdd';
 import type { LabelResult } from './hooks/useSearch';
 import { SearchBar } from './components/SearchBar';
 import { ArtistSearch } from './components/ArtistSearch';
@@ -21,142 +15,50 @@ import { AlbumSearch } from './components/AlbumSearch';
 import { LabelSearch } from './components/LabelSearch';
 import { YearSearch } from './components/YearSearch';
 import { AISearch } from './components/AISearch';
-import { MbidSelectionModal } from './components/MbidSelectionModal';
 import { LabelArtistsModal } from './components/LabelArtistsModal';
 
 export default function SearchPage() {
   const search = useSearch();
-  const artistAdd = useArtistAdd(search.setResults);
-  const { addToast } = useToast();
-
-  const [slskdModalOpen, setSlskdModalOpen] = useState(false);
+  const artistAdd = useArtistAdd(search.setResults, search.scope);
+  const artists = ['artist', 'ai'].includes(search.resultType);
+  const context = useListContext({ ready: search.hasSearched && !search.isStale, selectionOwner: false, restore: !artists });
   const [slskdSearchArtist, setSlskdSearchArtist] = useState<{ name: string; image?: string } | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<LabelResult | null>(null);
-
-  const handleSearchSlskd = useCallback((artist: { name: string; image?: string }) => {
-    setSlskdSearchArtist(artist);
-    setSlskdModalOpen(true);
-  }, []);
-
   const handleAlbumAddArtist = useCallback(async (artistId: string, artistName: string) => {
-    const { error } = await api.post('/api/search/artists/add', { foreignArtistId: artistId });
-    if (error) {
-      if (isAlreadyExistsError(error)) {
-        addToast({ type: 'info', title: 'Already in Library', message: `"${artistName}" is already in your Lidarr library` });
-      } else {
-        addToast({ type: 'error', title: 'Failed to add artist', message: error });
-      }
-    } else {
-      addToast({ type: 'success', title: 'Artist added', message: `${artistName} added to Lidarr` });
-    }
-  }, [addToast]);
+    const result = await artistAdd.handleAddArtist({ foreignArtistId: artistId, artistName });
+    return { success: result === true, error: result === true ? undefined : 'Addition cancelled or unconfirmed' };
+  }, [artistAdd.handleAddArtist]);
+  const disabled = search.isSearching || search.isStale;
+  const artistProps = { results: search.results, addingArtistId: artistAdd.addingArtistId, pendingIds: artistAdd.pendingIds,
+    isBulkAdding: artistAdd.isBulkAdding, disabled, onAddArtist: artistAdd.handleAddArtist, onBatchAdd: artistAdd.handleBatchAdd,
+    onSearchSlskd: setSlskdSearchArtist };
+  return <>
+    <PageHeader title="Search" description="Find artists, albums and labels" />
+    <SearchBar query={search.query} searchType={search.searchType} onQueryChange={search.setQuery} onSearchTypeChange={search.setSearchType}
+      onSearch={() => { void search.performSearch(1); }} isSearching={search.isSearching} sourceToggles={search.enabledSources} onToggleSource={search.toggleSource} aiAvailable={search.aiAvailable} />
+    {search.isSearching && <p role="status" className="py-3 text-sm">Searching…{search.results.length > 0 && ` Showing previous results for “${search.resultQuery}”.`}</p>}
+    {search.error && <ResultState kind="error" message={`${search.error}${search.results.length ? ` Showing previous results for “${search.resultQuery}”.` : ''}`} action={<Button variant="outline" onClick={search.retrySearch}>Retry search</Button>} />}
+    {search.partialErrors.length > 0 && <ResultState kind="partial-results" message={search.partialErrors.join('; ')} action={<Button variant="outline" onClick={search.retrySearch}>Retry search</Button>} />}
+    {search.results.length > 0 && <div className="space-y-3" aria-busy={search.isSearching}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b py-2">
+        <h2 className="text-sm font-semibold"><span className="font-mono">{search.totalCount}</span> results for “{search.resultQuery}”</h2>
+        {search.totalPages > 1 && ['album', 'label', 'year'].includes(search.resultType) && <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={search.page <= 1 || disabled} onClick={() => search.goToPage(search.page - 1)}>Previous page</Button>
+          <span className="font-mono text-xs">Page {search.resultPage} of {search.totalPages}</span>
+          <Button variant="outline" size="sm" disabled={search.page >= search.totalPages || disabled} onClick={() => search.goToPage(search.page + 1)}>Next page</Button>
+        </div>}
+      </div>
+      {search.resultType === 'artist' && <ArtistSearch {...artistProps} />}
+      {search.resultType === 'album' && <AlbumSearch key={search.resultScope} results={search.results} disabled={disabled} onOpen={context.remember} onAddArtist={handleAlbumAddArtist} />}
+      {search.resultType === 'label' && <LabelSearch results={search.results} onViewArtists={setSelectedLabel} />}
+      {search.resultType === 'year' && <YearSearch results={search.results} />}
+      {search.resultType === 'ai' && <AISearch {...artistProps} aiPrompt={search.aiPrompt} aiProviders={search.aiProviders} />}
+    </div>}
+    {!search.committedQuery && <ResultState kind="not-searched" message="Enter an artist, album, label, year or listening prompt, then Search." />}
+    {search.committedQuery && !search.isSearching && !search.error && search.hasSearched && search.results.length === 0 && <ResultState kind="no-matches" message="Try another query or search source." />}
+    {artistAdd.optionsDialog}
 
-  const handleCloseSlskd = useCallback(() => {
-    setSlskdModalOpen(false);
-    setSlskdSearchArtist(null);
-  }, []);
-
-  const handleCloseLabel = useCallback(() => {
-    setSelectedLabel(null);
-  }, []);
-
-  const showPagination = search.totalPages > 1 && ['album', 'label', 'year'].includes(search.searchType);
-
-  return (
-    <>
-      <PageHeader title="Search" description="Find and add artists to your Lidarr library" />
-
-      <SearchBar
-        query={search.query} searchType={search.searchType}
-        onQueryChange={search.setQuery} onSearchTypeChange={search.setSearchType}
-        onSearch={() => search.performSearch(1)} isSearching={search.isSearching}
-        sourceToggles={search.enabledSources} onToggleSource={search.toggleSource}
-        aiAvailable={search.aiAvailable}
-      />
-
-      <LoadingOverlay isLoading={search.isSearching} text="Searching...">
-        {search.isSearching && search.results.length === 0 && (
-          <div className="space-y-3">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 p-4 rounded-container border bg-card">
-                <Skeleton className="w-16 h-16 rounded-md flex-shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-1/3" />
-                  <Skeleton className="h-3 w-2/3" />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {search.results.length > 0 && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">
-                {search.totalCount} result{search.totalCount !== 1 ? 's' : ''} found
-              </h2>
-              {showPagination && (
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" disabled={search.page <= 1 || search.isSearching}
-                    onClick={() => search.performSearch(search.page - 1)}>
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="text-sm">Page {search.page} of {search.totalPages}</span>
-                  <Button variant="outline" size="sm" disabled={search.page >= search.totalPages || search.isSearching}
-                    onClick={() => search.performSearch(search.page + 1)}>
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {search.searchType === 'artist' && (
-              <ArtistSearch results={search.results} addingArtistId={artistAdd.addingArtistId}
-                isBulkAdding={artistAdd.isBulkAdding} onAddArtist={artistAdd.handleAddArtist}
-                onBatchAdd={artistAdd.handleBatchAdd} onSearchSlskd={handleSearchSlskd} />
-            )}
-            {search.searchType === 'album' && (
-              <AlbumSearch results={search.results} onAddArtist={handleAlbumAddArtist} />
-            )}
-            {search.searchType === 'label' && (
-              <LabelSearch results={search.results} onViewArtists={setSelectedLabel} />
-            )}
-            {search.searchType === 'year' && <YearSearch results={search.results} />}
-            {search.searchType === 'ai' && (
-              <AISearch results={search.results} aiPrompt={search.aiPrompt} aiProviders={search.aiProviders}
-                addingArtistId={artistAdd.addingArtistId} isBulkAdding={artistAdd.isBulkAdding}
-                onAddArtist={artistAdd.handleAddArtist} onBatchAdd={artistAdd.handleBatchAdd}
-                onSearchSlskd={handleSearchSlskd} />
-            )}
-          </div>
-        )}
-
-        {!search.isSearching && search.results.length === 0 && search.query && (
-          <EmptyState
-            icon={SearchIcon}
-            title="No results found"
-            description="Try a different search term"
-          />
-        )}
-        {!search.isSearching && !search.query && (
-          <EmptyState
-            icon={SearchIcon}
-            title="Enter a search term"
-            description="Search by artist, album, label, or year"
-          />
-        )}
-      </LoadingOverlay>
-
-      <MbidSelectionModal candidates={artistAdd.mbidCandidates} artist={artistAdd.selectingArtist}
-        onSelect={artistAdd.handleAddWithMbid} onClose={artistAdd.clearMbidModal} />
-      <LabelArtistsModal
-        label={selectedLabel ? { name: selectedLabel.name, id: selectedLabel.id } : null}
-        onClose={handleCloseLabel} />
-      {slskdSearchArtist && (
-        <SlskdSearchModal isOpen={slskdModalOpen} artistName={slskdSearchArtist.name}
-          artistImage={slskdSearchArtist.image}
-          onClose={handleCloseSlskd} />
-      )}
-    </>
-  );
+    <LabelArtistsModal label={selectedLabel ? { name: selectedLabel.name, id: selectedLabel.id } : null} onClose={() => setSelectedLabel(null)} />
+    {slskdSearchArtist && <SlskdSearchModal isOpen artistName={slskdSearchArtist.name} artistImage={slskdSearchArtist.image} onClose={() => setSlskdSearchArtist(null)} />}
+  </>;
 }

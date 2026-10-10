@@ -11,6 +11,7 @@
  */
 
 import prisma from './db.js';
+import { readBeforeDeadline } from './acquisition-deadline.js';
 import { LidarrService } from '../services/lidarr.js';
 import { LastfmService } from '../services/lastfm.js';
 import { LidarrConnectionConfig, normalizeLidarrConfig } from '../types/connections.js';
@@ -64,8 +65,11 @@ export class ConnectionResolver {
    * @param userId - User ID
    * @returns LidarrService instance or null if no connection
    */
-  static async getLidarrService(userId: number): Promise<LidarrService | null> {
-    const connection = await this.getConnection('lidarr', userId);
+  static async getLidarrService(userId: number, signal?: AbortSignal): Promise<LidarrService | null> {
+    signal?.throwIfAborted();
+    const query = this.getConnection('lidarr', userId);
+    const connection = signal ? await readBeforeDeadline(query, signal) : await query;
+    signal?.throwIfAborted();
     if (!connection) return null;
 
     const config = connection.config as { url: string; apiKey: string };
@@ -81,8 +85,11 @@ export class ConnectionResolver {
    * @param userId - User ID
    * @returns Object with service and config, or null if no connection
    */
-  static async getLidarrServiceWithConfig(userId: number): Promise<{ service: LidarrService; config: LidarrConnectionConfig } | null> {
-    const connection = await this.getConnection('lidarr', userId);
+  static async getLidarrServiceWithConfig(userId: number, signal?: AbortSignal): Promise<{ service: LidarrService; config: LidarrConnectionConfig } | null> {
+    signal?.throwIfAborted();
+    const query = this.getConnection('lidarr', userId);
+    const connection = signal ? await readBeforeDeadline(query, signal) : await query;
+    signal?.throwIfAborted();
     if (!connection) return null;
 
     const rawConfig = connection.config as unknown as LidarrConnectionConfig;

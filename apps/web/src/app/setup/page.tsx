@@ -3,19 +3,14 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { PageHeader } from '@/components/layout/page-header';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import Check from 'lucide-react/dist/esm/icons/check';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
-import Globe from 'lucide-react/dist/esm/icons/globe';
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
-import Music2 from 'lucide-react/dist/esm/icons/music-2';
-import Plug from 'lucide-react/dist/esm/icons/plug';
-import Search from 'lucide-react/dist/esm/icons/search';
-import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
-import User from 'lucide-react/dist/esm/icons/user';
 
 type Step = 'welcome' | 'admin' | 'url' | 'success';
 const steps: Step[] = ['welcome', 'admin', 'url', 'success'];
@@ -83,12 +78,12 @@ function SetupPageContent() {
 
   const handleAdminSubmit = async () => {
     setError('');
-    
+
     if (adminForm.password !== adminForm.confirmPassword) {
       setError('Passwords do not match');
       return;
     }
-    
+
     if (adminForm.password.length < 8) {
       setError('Password must be at least 8 characters');
       return;
@@ -109,7 +104,7 @@ function SetupPageContent() {
 
     // Refresh auth state so ProtectedLayout knows we're logged in
     refetchAuth();
-    
+
     setIsLoading(false);
     setStep('url');
   };
@@ -154,16 +149,16 @@ function SetupPageContent() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-lg">
         {/* Progress indicator */}
-        <div className="mb-8 flex justify-center">
+        <div className="mb-4 flex justify-center" aria-label={`Setup step ${steps.indexOf(step) + 1} of ${steps.length}`}>
           <div className="flex items-center gap-2">
             {steps.map((s, i) => (
               <div key={s} className="flex items-center">
                 <div
-                  className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium ${
+                  className={`flex h-8 w-8 items-center justify-center rounded-button font-mono text-sm font-medium ${
                     step === s
                       ? 'bg-primary text-primary-foreground'
                       : i < steps.indexOf(step)
-                      ? 'bg-primary/20 text-primary'
+                      ? 'bg-muted text-foreground'
                       : 'bg-muted text-muted-foreground'
                   }`}
                 >
@@ -190,37 +185,30 @@ function SetupPageContent() {
         {/* Step content */}
         {step === 'welcome' && (
           <Card>
-            <CardHeader className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-                <Music2 className="h-8 w-8 text-primary" />
-              </div>
-              <CardTitle className="text-2xl">Welcome to Mixarr</CardTitle>
+            <CardHeader>
+              <PageHeader title="Set up Mixarr" />
               <CardDescription>
-                Discover and import music from your favorite sources
+                Create an administrator account, set the application URL, then connect your music services.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-container bg-muted p-4 text-sm">
-                <p className="font-medium mb-3">What Mixarr can do:</p>
+                <p className="mb-3 font-medium">After setup:</p>
                 <ul className="space-y-2 text-muted-foreground">
                   <li className="flex items-start gap-2">
-                    <Sparkles className="h-4 w-4 mt-0.5 text-primary shrink-0" />
                     <span>Subscribe to charts, playlists, and new releases</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <Music2 className="h-4 w-4 mt-0.5 text-primary shrink-0" />
                     <span>Import your library from Spotify, TIDAL, Deezer & more</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <Search className="h-4 w-4 mt-0.5 text-primary shrink-0" />
                     <span>Find similar artists based on your listening history</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <Plug className="h-4 w-4 mt-0.5 text-primary shrink-0" />
                     <span>Automatically add artists to Lidarr</span>
                   </li>
                 </ul>
-                <p className="mt-3 text-xs text-muted-foreground/70">
+                <p className="mt-3 text-xs text-muted-foreground">
                   Supports: Spotify, Last.fm, TIDAL, Deezer, Tautulli/Plex, MusicBrainz
                 </p>
               </div>
@@ -233,130 +221,131 @@ function SetupPageContent() {
 
         {step === 'admin' && (
           <Card>
-            <CardHeader className="text-center">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                <User className="h-6 w-6 text-primary" />
-              </div>
-              <CardTitle>Create Admin Account</CardTitle>
+            <CardHeader>
+              <PageHeader title="Create Admin Account" />
               <CardDescription>
                 Set up your administrator credentials
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {error && (
-                <div className="rounded-container bg-destructive/10 p-3 text-sm text-destructive">
-                  {error}
+            <CardContent>
+              <form className="space-y-4" onSubmit={event => { event.preventDefault(); void handleAdminSubmit(); }}>
+                {error && (
+                  <div role="alert" className="rounded-button bg-status-error-surface p-3 text-sm text-status-error">
+                    {error}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Input
+                    label="Username"
+                    required
+                    value={adminForm.username}
+                    onChange={(e) => setAdminForm({ ...adminForm, username: e.target.value })}
+                    placeholder="admin"
+                    autoComplete="username"
+                  />
                 </div>
-              )}
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Username</label>
-                <Input
-                  value={adminForm.username}
-                  onChange={(e) => setAdminForm({ ...adminForm, username: e.target.value })}
-                  placeholder="admin"
-                  autoComplete="username"
-                />
-              </div>
+                <div className="space-y-2">
+                  <Input
+                    label="Display Name"
+                    value={adminForm.displayName}
+                    onChange={(e) => setAdminForm({ ...adminForm, displayName: e.target.value })}
+                    placeholder="Administrator"
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Display Name</label>
-                <Input
-                  value={adminForm.displayName}
-                  onChange={(e) => setAdminForm({ ...adminForm, displayName: e.target.value })}
-                  placeholder="Administrator"
-                />
-              </div>
+                <div className="space-y-2">
+                  <Input
+                    label="Password"
+                    required
+                    minLength={8}
+                    type="password"
+                    value={adminForm.password}
+                    onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
+                    placeholder="Minimum 8 characters"
+                    autoComplete="new-password"
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Password</label>
-                <Input
-                  type="password"
-                  value={adminForm.password}
-                  onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
-                  placeholder="Minimum 8 characters"
-                  autoComplete="new-password"
-                />
-              </div>
+                <div className="space-y-2">
+                  <Input
+                    label="Confirm Password"
+                    required
+                    type="password"
+                    value={adminForm.confirmPassword}
+                    onChange={(e) => setAdminForm({ ...adminForm, confirmPassword: e.target.value })}
+                    placeholder="Repeat password"
+                    autoComplete="new-password"
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Confirm Password</label>
-                <Input
-                  type="password"
-                  value={adminForm.confirmPassword}
-                  onChange={(e) => setAdminForm({ ...adminForm, confirmPassword: e.target.value })}
-                  placeholder="Repeat password"
-                  autoComplete="new-password"
-                />
-              </div>
-
-              <Button className="w-full" onClick={handleAdminSubmit} isLoading={isLoading}>
-                Create Account <ChevronRight className="ml-2 h-4 w-4" />
-              </Button>
+                <Button type="submit" className="w-full" isLoading={isLoading}>
+                  Create Account <ChevronRight className="ml-2 h-4 w-4" />
+                </Button>
+              </form>
             </CardContent>
           </Card>
         )}
 
         {step === 'url' && (
           <Card>
-            <CardHeader className="text-center">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                <Globe className="h-6 w-6 text-primary" />
-              </div>
-              <CardTitle>Application URL</CardTitle>
+            <CardHeader>
+              <PageHeader title="Application URL" />
               <CardDescription>
                 Set the external URL used to access Mixarr
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {error && (
-                <div className="rounded-container bg-destructive/10 p-3 text-sm text-destructive">
-                  {error}
-                </div>
-              )}
+            <CardContent>
+              <form className="space-y-4" onSubmit={event => { event.preventDefault(); void handleUrlSubmit(); }}>
+                {error && (
+                  <div role="alert" className="rounded-button bg-status-error-surface p-3 text-sm text-status-error">
+                    {error}
+                  </div>
+                )}
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Base URL</label>
-                <Input
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="https://mixarr.example.com"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Include the protocol (http/https) and port if needed
-                </p>
-              </div>
-
-              {!baseUrl.startsWith('https://') && (
-                <div className="rounded-container bg-amber-500/10 border border-amber-500/20 p-3 text-sm">
-                  <p className="font-medium text-amber-600 dark:text-amber-400">HTTPS Recommended</p>
-                  <p className="text-muted-foreground mt-1">
-                    Spotify integration requires HTTPS. Use port 3443 for built-in HTTPS or configure a reverse proxy.
+                <div className="space-y-2">
+                  <Input
+                    label="Base URL"
+                    type="url"
+                    aria-describedby="base-url-help"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder="https://mixarr.example.com"
+                  />
+                  <p id="base-url-help" className="text-xs text-muted-foreground">
+                    Include the protocol (http/https) and port if needed
                   </p>
                 </div>
-              )}
 
-              <Button className="w-full" onClick={handleUrlSubmit} isLoading={isLoading}>
-                Continue <ChevronRight className="ml-2 h-4 w-4" />
-              </Button>
+                {!baseUrl.startsWith('https://') && (
+                  <div className="rounded-button border bg-status-warning-surface p-3 text-sm">
+                    <p className="font-medium text-status-warning">HTTPS Recommended</p>
+                    <p className="text-muted-foreground mt-1">
+                      Spotify integration requires HTTPS. Use port 3443 for built-in HTTPS or configure a reverse proxy.
+                    </p>
+                  </div>
+                )}
+
+                <Button type="submit" className="w-full" isLoading={isLoading}>
+                  Continue <ChevronRight className="ml-2 h-4 w-4" />
+                </Button>
+              </form>
             </CardContent>
           </Card>
         )}
 
         {step === 'success' && (
           <Card>
-            <CardHeader className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-status-success/10">
-                <Check className="h-8 w-8 text-status-success" />
-              </div>
-              <CardTitle className="text-2xl">Setup Complete!</CardTitle>
+            <CardHeader>
+              <PageHeader title="Setup complete" />
               <CardDescription>
                 Next, connect your services to get started
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {error && (
-                <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                <div role="alert" className="rounded-button bg-status-error-surface p-3 text-sm text-status-error">
                   {error}
                 </div>
               )}

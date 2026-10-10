@@ -1,8 +1,12 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { ArtistLink } from '@/components/artists/ArtistLink';
+import { useListContext } from '@/hooks/useListContext';
+import { readPage, retainSelection, updateQuery } from '@/lib/list-state';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmDialog, Tabs, Tab, TabPanel, Skeleton } from '@/components/ui';
 import { Input } from '@/components/ui/input';
@@ -17,12 +21,12 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import CheckCircle from 'lucide-react/dist/esm/icons/check-circle';
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up';
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import Copy from 'lucide-react/dist/esm/icons/copy';
 import FileText from 'lucide-react/dist/esm/icons/file-text';
 import Image from 'lucide-react/dist/esm/icons/image';
 import Music from 'lucide-react/dist/esm/icons/music';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-import Search from 'lucide-react/dist/esm/icons/search';
 import Wrench from 'lucide-react/dist/esm/icons/wrench';
 import XCircle from 'lucide-react/dist/esm/icons/x-circle';
 
@@ -68,6 +72,7 @@ type TabType = 'health' | 'duplicates';
 
 export default function LibraryPage() {
   const router = useRouter();
+  const pathname = usePathname(), params = useSearchParams();
   const { user, isLoading: authLoading } = useAuth();
   const { addToast } = useToast();
   const isAdmin = user?.role === 'admin';
@@ -76,11 +81,23 @@ export default function LibraryPage() {
   const [issueStats, setIssueStats] = useState<IssueStats | null>(null);
   const [healthScore, setHealthScore] = useState<number>(100);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<FilterType>('all');
-  const [sortField, setSortField] = useState<SortField>('issues');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [activeTab, setActiveTab] = useState<TabType>('health');
+  const q = (params.get('q') || '').slice(0, 120).trim();
+  const filter: FilterType = ['all', 'needs_refresh', 'no_albums', 'no_poster', 'no_overview', 'no_genres', 'complete'].includes(params.get('filter') || '') ? params.get('filter') as FilterType : 'all';
+  const sortField: SortField = ['name', 'albumCount', 'issues'].includes(params.get('sort') || '') ? params.get('sort') as SortField : 'issues';
+  const sortDirection: SortDirection = params.get('dir') === 'asc' ? 'asc' : 'desc';
+  const activeTab: TabType = params.get('tab') === 'duplicates' ? 'duplicates' : 'health';
+  const [searchQuery, setSearchQuery] = useState(q);
+  const queryString = params.toString();
+  const scope = `${user?.id}:${q}:${filter}:${sortField}:${sortDirection}:${activeTab}`;
+  useEffect(() => setSearchQuery(q), [q, scope]);
+  useEffect(() => {
+    if (searchQuery.slice(0, 120).trim() === q) return;
+    const timer = setTimeout(() => router.replace(`${pathname}${updateQuery(new URLSearchParams(queryString), { q: searchQuery.slice(0, 120).trim(), page: null })}`, { scroll: false }), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, q, queryString, scope, pathname, router]);
+  function navigate(changes: Record<string, string | null>, method: 'push' | 'replace' = 'push') {
+    router[method](`${pathname}${updateQuery(new URLSearchParams(queryString), changes)}`, { scroll: false });
+  }
   const [duplicateCount, setDuplicateCount] = useState<number>(0);
   const [fixJob, setFixJob] = useState<FixJobStatus | null>(null);
   const [isStartingFix, setIsStartingFix] = useState(false);
@@ -280,11 +297,15 @@ export default function LibraryPage() {
   };
 
   // Defer search filtering so typing stays responsive on large libraries
-  const deferredSearch = useDeferredValue(searchQuery);
+  const deferredSearch = useDeferredValue(q);
 
   // Cap rendered rows; "Show more" reveals the rest incrementally
   const RENDER_CHUNK = 250;
-  const [visibleCount, setVisibleCount] = useState(RENDER_CHUNK);
+  const page = readPage(params.get('page'));
+  const visibleCount = page * RENDER_CHUNK;
+  const context = useListContext({ ready: !isLoading });
+  // ponytail: Show more appends rows to this snapshot; other URL changes restore their own saved selection.
+  const expansionSelection = useRef<{ page: number; ids: Set<string> } | null>(null);
 
   // Filter and sort artists
   const filteredArtists = useMemo(() => {
@@ -338,23 +359,20 @@ export default function LibraryPage() {
     return result;
   }, [artists, deferredSearch, filter, sortField, sortDirection]);
 
-  // Reset the render window whenever the visible data set changes
-  useEffect(() => {
-    setVisibleCount(RENDER_CHUNK);
-  }, [deferredSearch, filter, sortField, sortDirection, artists]);
-
   const visibleArtists = useMemo(
     () => filteredArtists.slice(0, visibleCount),
     [filteredArtists, visibleCount]
   );
+  const { setSelected } = context;
+  useEffect(() => {
+    if (isLoading) return;
+    const carried = expansionSelection.current?.page === page ? expansionSelection.current.ids : null;
+    expansionSelection.current = null;
+    setSelected(previous => retainSelection(carried || previous, new Set(visibleArtists.map(artist => String(artist.id)))));
+  }, [visibleArtists, isLoading, setSelected, page]);
 
   const toggleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('desc');
-    }
+    navigate({ sort: field, dir: sortField === field && sortDirection === 'desc' ? 'asc' : 'desc', page: null });
   };
 
   const SortIcon = ({ field }: { field: SortField }) => {
@@ -407,7 +425,7 @@ export default function LibraryPage() {
       <Card className="mb-4">
         <CardContent className="pt-4">
           <div className="flex items-center gap-4">
-            <div className={`text-2xl font-bold ${healthScore >= 80 ? 'text-status-success' : healthScore >= 50 ? 'text-status-warning' : 'text-status-error'}`}>
+            <div className={`text-2xl font-mono font-bold ${healthScore >= 80 ? 'text-status-success' : healthScore >= 50 ? 'text-status-warning' : 'text-status-error'}`}>
               {healthScore}%
             </div>
             <div className="flex-1">
@@ -475,7 +493,7 @@ export default function LibraryPage() {
       )}
 
       {/* Tabs */}
-      <Tabs value={activeTab} onChange={(v) => setActiveTab(v as TabType)} className="mb-6">
+      <Tabs value={activeTab} onChange={tab => navigate({ tab })} className="mb-6">
         <Tab value="health" label="Health Issues" icon={<AlertTriangle className="w-4 h-4" />} />
         <Tab value="duplicates" label="Duplicates" badge={duplicateCount > 0 ? duplicateCount : undefined} icon={<Copy className="w-4 h-4" />} />
         <TabPanel value="duplicates">
@@ -486,13 +504,13 @@ export default function LibraryPage() {
           <div className="grid gap-4 md:grid-cols-5 mb-6">
             <Card>
               <CardContent className="pt-4">
-                <div className="text-2xl font-bold">{artists.length}</div>
+                <div className="text-2xl font-mono font-bold">{artists.length}</div>
                 <p className="text-xs text-muted-foreground">Total Artists</p>
               </CardContent>
             </Card>
         <Card className={issueStats?.noAlbums ? 'border-status-warning/50' : ''}>
           <CardContent className="pt-4">
-            <div className={`text-2xl font-bold ${issueStats?.noAlbums ? 'text-status-warning' : 'text-status-success'}`}>
+            <div className={`text-2xl font-mono font-bold ${issueStats?.noAlbums ? 'text-status-warning' : 'text-status-success'}`}>
               {issueStats?.noAlbums || 0}
             </div>
             <p className="text-xs text-muted-foreground">No Albums</p>
@@ -500,7 +518,7 @@ export default function LibraryPage() {
         </Card>
         <Card className={issueStats?.noPoster ? 'border-status-warning/50' : ''}>
           <CardContent className="pt-4">
-            <div className={`text-2xl font-bold ${issueStats?.noPoster ? 'text-status-warning' : 'text-status-success'}`}>
+            <div className={`text-2xl font-mono font-bold ${issueStats?.noPoster ? 'text-status-warning' : 'text-status-success'}`}>
               {issueStats?.noPoster || 0}
             </div>
             <p className="text-xs text-muted-foreground">No Poster</p>
@@ -508,7 +526,7 @@ export default function LibraryPage() {
         </Card>
         <Card className={issueStats?.noOverview ? 'border-status-warning/50' : ''}>
           <CardContent className="pt-4">
-            <div className={`text-2xl font-bold ${issueStats?.noOverview ? 'text-status-warning' : 'text-status-success'}`}>
+            <div className={`text-2xl font-mono font-bold ${issueStats?.noOverview ? 'text-status-warning' : 'text-status-success'}`}>
               {issueStats?.noOverview || 0}
             </div>
             <p className="text-xs text-muted-foreground">No Bio</p>
@@ -516,7 +534,7 @@ export default function LibraryPage() {
         </Card>
         <Card className={issueStats?.noGenres ? 'border-status-warning/50' : ''}>
           <CardContent className="pt-4">
-            <div className={`text-2xl font-bold ${issueStats?.noGenres ? 'text-status-warning' : 'text-status-success'}`}>
+            <div className={`text-2xl font-mono font-bold ${issueStats?.noGenres ? 'text-status-warning' : 'text-status-success'}`}>
               {issueStats?.noGenres || 0}
             </div>
             <p className="text-xs text-muted-foreground">No Genres</p>
@@ -524,49 +542,36 @@ export default function LibraryPage() {
         </Card>
       </div>
 
-      {/* Filters and Actions */}
-      <Card className="mb-6">
-        <CardContent className="pt-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            {/* Search */}
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search artists..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            
-            {/* Filter */}
-            <div className="w-full md:w-48">
-              <Select
-                value={filter}
-                onChange={(e) => setFilter(e.target.value as FilterType)}
-                options={[
-                  { value: 'all', label: 'All Artists' },
-                  { value: 'needs_refresh', label: 'Needs Refresh' },
-                  { value: 'no_albums', label: 'No Albums' },
-                  { value: 'no_poster', label: 'No Poster' },
-                  { value: 'no_overview', label: 'No Bio' },
-                  { value: 'no_genres', label: 'No Genres' },
-                  { value: 'complete', label: 'Complete' },
-                ]}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="mb-4 grid gap-3 md:grid-cols-2">
+        <details open className="group border-b pb-3">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+            <ChevronRight aria-hidden="true" className="disclosure-chevron h-4 w-4" />Search
+          </summary>
+          <Input label="Search library snapshot" placeholder="Artist name" maxLength={120} value={searchQuery} onChange={event => setSearchQuery(event.target.value)} />
+        </details>
+        <details open className="group border-b pb-3">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+            <ChevronRight aria-hidden="true" className="disclosure-chevron h-4 w-4" />Metadata status
+          </summary>
+          <Select label="Filter library snapshot" value={filter} onChange={event => navigate({ filter: event.target.value, page: null }, 'replace')} options={[
+            { value: 'all', label: 'All Artists' }, { value: 'needs_refresh', label: 'Needs Refresh' },
+            { value: 'no_albums', label: 'No Albums' }, { value: 'no_poster', label: 'No Poster' },
+            { value: 'no_overview', label: 'No Bio' }, { value: 'no_genres', label: 'No Genres' }, { value: 'complete', label: 'Complete' },
+          ]} />
+        </details>
+      </div>
 
       {/* Artists Table */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">
-            Artists ({filteredArtists.length})
+            Artists <span className="font-mono">({filteredArtists.length})</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
+          <p className="mb-3 text-xs text-muted-foreground">Search, filters and sorting apply to the returned Lidarr health snapshot. Show more reveals another 250 rows from this snapshot.</p>
+          <p className="mb-3 text-xs font-mono">{isLoading ? 'Loading library snapshot…' : `${Math.min(visibleCount, filteredArtists.length)} of ${filteredArtists.length} matching artists shown · ${context.selected.size} selected`}</p>
+          {context.selected.size > 0 && <Button variant="outline" className="mb-3" onClick={() => setSelected(new Set())}>Clear selection</Button>}
           {isLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 8 }).map((_, i) => (
@@ -587,42 +592,39 @@ export default function LibraryPage() {
               {artists.length === 0 ? 'No artists found in Lidarr' : 'No artists match your filters'}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div role="region" aria-label="Library artists table, scroll horizontally for metadata and actions" tabIndex={0} className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <table className="w-full min-w-[640px]">
                 <thead>
-                  <tr className="border-b">
-                    <th 
-                      className="text-left py-3 px-2 cursor-pointer hover:bg-muted/50"
-                      onClick={() => toggleSort('name')}
-                    >
-                      Artist <SortIcon field="name" />
+                  <tr className="border-b bg-muted font-mono text-xs uppercase text-muted-foreground">
+                    <th scope="col" className="px-2 py-3 w-11">
+                      <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                        <Checkbox aria-label="Select shown library artists" checked={visibleArtists.length > 0 && visibleArtists.every(artist => context.selected.has(String(artist.id)))} indeterminate={visibleArtists.some(artist => context.selected.has(String(artist.id))) && !visibleArtists.every(artist => context.selected.has(String(artist.id)))} onCheckedChange={checked => setSelected(checked ? new Set(visibleArtists.map(artist => String(artist.id))) : new Set())} />
+                      </label>
                     </th>
-                    <th 
-                      className="text-center py-3 px-2 cursor-pointer hover:bg-muted/50 w-24"
-                      onClick={() => toggleSort('albumCount')}
-                    >
-                      Albums <SortIcon field="albumCount" />
+                    <th scope="col" aria-sort={sortField === 'name' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="text-left px-2">
+                      <button type="button" className="min-h-11 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort('name')}>Artist <SortIcon field="name" /></button>
                     </th>
-                    <th className="text-center py-3 px-2 w-32">Status</th>
-                    <th 
-                      className="text-center py-3 px-2 cursor-pointer hover:bg-muted/50 w-24"
-                      onClick={() => toggleSort('issues')}
-                    >
-                      Issues <SortIcon field="issues" />
+                    <th scope="col" aria-sort={sortField === 'albumCount' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="text-center px-2 w-24">
+                      <button type="button" className="min-h-11 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort('albumCount')}>Albums <SortIcon field="albumCount" /></button>
                     </th>
-                    <th className="text-center py-3 px-2 w-24">Actions</th>
+                    <th scope="col" className="text-center py-3 px-2 w-32">Status</th>
+                    <th scope="col" aria-sort={sortField === 'issues' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="text-center px-2 w-24">
+                      <button type="button" className="min-h-11 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort('issues')}>Issues <SortIcon field="issues" /></button>
+                    </th>
+                    <th scope="col" className="text-center py-3 px-2 w-24">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleArtists.map((artist) => (
                     <tr key={artist.id} className="border-b hover:bg-muted/50">
+                      <td className="py-1 px-2"><label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center"><Checkbox aria-label={`Select library artist ${artist.id}`} checked={context.selected.has(String(artist.id))} onCheckedChange={checked => setSelected(previous => { const next = new Set(previous); if (checked) next.add(String(artist.id)); else next.delete(String(artist.id)); return next; })} /></label></td>
                       <td className="py-3 px-2">
-                        <div className="font-medium">{artist.name}</div>
-                        <div className="text-xs text-muted-foreground">
+                        <ArtistLink mbid={artist.foreignArtistId} onOpen={context.remember} className="font-medium">{artist.name}</ArtistLink>
+                        <div className="text-xs font-mono text-muted-foreground">
                           {artist.trackFileCount} / {artist.trackCount} tracks
                         </div>
                       </td>
-                      <td className="text-center py-3 px-2">
+                      <td className="text-center py-3 px-2 font-mono">
                         <span className={artist.albumCount === 0 ? 'text-status-warning font-medium' : ''}>
                           {artist.albumCount}
                         </span>
@@ -640,7 +642,7 @@ export default function LibraryPage() {
                           </span>
                         </div>
                       </td>
-                      <td className="text-center py-3 px-2">
+                      <td className="text-center py-3 px-2 font-mono">
                         {artist.issues.length === 0 ? (
                           <Badge variant="default" className="bg-status-success">
                             <CheckCircle className="h-3 w-3 mr-1" />
@@ -653,14 +655,14 @@ export default function LibraryPage() {
                           </Badge>
                         )}
                       </td>
-                      <td className="text-center py-3 px-2">
+                      <td className="text-center py-3 px-2 font-mono">
                         {artist.needsRefresh && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleFixArtist(artist.id)}
                             disabled={fixingArtistId !== null || fixJob?.status === 'running' || isLoading}
-                            title="Fix artist metadata"
+                            aria-label={`Fix metadata for ${artist.name}`} title="Fix artist metadata"
                           >
                             <Wrench className={`h-4 w-4 ${fixingArtistId === artist.id ? 'animate-spin' : ''}`} />
                           </Button>
@@ -675,7 +677,7 @@ export default function LibraryPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setVisibleCount(c => c + RENDER_CHUNK)}
+                    onClick={() => { expansionSelection.current = { page: page + 1, ids: new Set(context.selected) }; navigate({ page: String(page + 1) }); }}
                   >
                     Show more ({filteredArtists.length - visibleCount} remaining)
                   </Button>

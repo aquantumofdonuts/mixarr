@@ -1,290 +1,71 @@
-/**
- * Dashboard API Tests
- * 
- * Tests:
- * - Dashboard stats endpoint
- * - Activity feed endpoint
- * - Connections summary endpoint
- * - Multi-tenant data isolation
- */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import express from 'express';
+import request from 'supertest';
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import {
-  createMockPrisma,
-  createMockUser,
-  createMockAdminUser,
-  createMockSubscription,
-  resetIdCounter,
-} from '../utils/fixtures.js';
-
-describe('Dashboard API', () => {
-  let mockPrisma: ReturnType<typeof createMockPrisma>;
-  let testUser: ReturnType<typeof createMockUser>;
-  let adminUser: ReturnType<typeof createMockAdminUser>;
-
-  beforeEach(() => {
-    resetIdCounter();
-    mockPrisma = createMockPrisma();
-    testUser = createMockUser();
-    adminUser = createMockAdminUser();
+const db = vi.hoisted(() => ({
+  subscription: { count: vi.fn() }, subscriptionResult: { count: vi.fn() },
+  reviewItem: { count: vi.fn() }, subscriptionRun: { count: vi.fn(), findMany: vi.fn() },
+  connection: { count: vi.fn(), findMany: vi.fn() },
+}));
+vi.mock('../../src/lib/db.js', () => ({ default: db }));
+import { dashboardRouter } from '../../src/routes/dashboard.js';
+const app = express();
+app.use((req, _res, next) => {
+  req.isAuthenticated = (() => !req.headers['x-anonymous']) as typeof req.isAuthenticated;
+  (req as any).user = req.headers['x-anonymous'] ? undefined : { id: Number(req.headers['x-user'] || 1), role: req.headers['x-role'] || 'user' }; next();
+});
+app.use('/api/dashboard', dashboardRouter);
+beforeEach(() => {
+  vi.resetAllMocks(); db.subscription.count.mockResolvedValue(2); db.subscriptionResult.count.mockResolvedValue(4);
+  db.reviewItem.count.mockResolvedValue(3); db.subscriptionRun.count.mockResolvedValue(1); db.connection.count.mockResolvedValue(5);
+  db.subscriptionRun.findMany.mockResolvedValue([]); db.connection.findMany.mockResolvedValue([]);
+});
+describe('authenticated dashboard stats router', () => {
+  it('returns separately named record counts and never sums review decisions into artist additions', async () => {
+    const response = await request(app).get('/api/dashboard/stats');
+    expect(response.status).toBe(200);
+    expect(response.body.stats).toEqual({ activeSubscriptions: 2, subscriptionRecordsMarkedAdded: 4, pendingDiscoveryRecords: 4, pendingReviews: 3, runningJobs: 1, activeConnections: 5 });
+    expect(db.reviewItem.count).toHaveBeenCalledExactlyOnceWith({ where: { userId: 1, status: 'pending' } });
   });
-
-  describe('GET /api/dashboard/stats', () => {
-    it('should return stats for authenticated user', async () => {
-      mockPrisma.subscription.count.mockResolvedValue(5);
-      mockPrisma.subscriptionResult.count.mockResolvedValue(120); // artists added via subscriptions/feed
-      mockPrisma.reviewItem.count.mockResolvedValueOnce(30);  // artists added via review queue
-      mockPrisma.reviewItem.count.mockResolvedValueOnce(23);  // pending reviews
-      mockPrisma.subscriptionRun.count.mockResolvedValue(2);
-
-      const [subCount, addedViaSubs, addedViaReview, pendingReviews, runningJobs] = await Promise.all([
-        mockPrisma.subscription.count({ where: { userId: testUser.id, isActive: true } }),
-        mockPrisma.subscriptionResult.count({ where: { subscription: { userId: testUser.id }, status: 'added' } }),
-        mockPrisma.reviewItem.count({ where: { userId: testUser.id, status: 'approved' } }),
-        mockPrisma.reviewItem.count({ where: { userId: testUser.id, status: 'pending' } }),
-        mockPrisma.subscriptionRun.count({ where: { subscription: { userId: testUser.id }, status: 'running' } }),
-      ]);
-
-      expect(subCount).toBe(5);
-      expect(addedViaSubs + addedViaReview).toBe(150); // 120 + 30 = combined count
-      expect(pendingReviews).toBe(23);
-      expect(runningJobs).toBe(2);
-    });
-
-    it('should only count active subscriptions', async () => {
-      mockPrisma.subscription.count.mockResolvedValue(3);
-
-      const count = await mockPrisma.subscription.count({
-        where: { userId: testUser.id, isActive: true },
-      });
-
-      expect(mockPrisma.subscription.count).toHaveBeenCalledWith({
-        where: { userId: testUser.id, isActive: true },
-      });
-      expect(count).toBe(3);
-    });
-
-    it('should return zero for users with no data', async () => {
-      mockPrisma.subscription.count.mockResolvedValue(0);
-      mockPrisma.subscriptionResult.count.mockResolvedValue(0);
-      mockPrisma.reviewItem.count.mockResolvedValue(0); // covers both approved + pending
-      mockPrisma.subscriptionRun.count.mockResolvedValue(0);
-
-      const [addedViaSubs, addedViaReview] = await Promise.all([
-        mockPrisma.subscriptionResult.count({ where: { subscription: { userId: testUser.id }, status: 'added' } }),
-        mockPrisma.reviewItem.count({ where: { userId: testUser.id, status: 'approved' } }),
-      ]);
-      
-      expect(addedViaSubs + addedViaReview).toBe(0);
-    });
-
-    it('should filter artists added by date range (30 days)', async () => {
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      
-      mockPrisma.subscriptionResult.count.mockResolvedValue(40);
-      mockPrisma.reviewItem.count.mockResolvedValue(10);
-
-      const [viaSubs, viaReview] = await Promise.all([
-        mockPrisma.subscriptionResult.count({
-          where: {
-            subscription: { userId: testUser.id },
-            status: 'added',
-            processedAt: { gte: thirtyDaysAgo },
-          },
-        }),
-        mockPrisma.reviewItem.count({
-          where: {
-            userId: testUser.id,
-            status: 'approved',
-            updatedAt: { gte: thirtyDaysAgo },
-          },
-        }),
-      ]);
-
-      expect(mockPrisma.subscriptionResult.count).toHaveBeenCalled();
-      expect(mockPrisma.reviewItem.count).toHaveBeenCalled();
-      expect(viaSubs + viaReview).toBe(50);
-    });
-
-    it('should count active connections', async () => {
-      mockPrisma.connection.count.mockResolvedValue(4);
-
-      const count = await mockPrisma.connection.count({
-        where: { userId: testUser.id, isActive: true },
-      });
-
-      expect(mockPrisma.connection.count).toHaveBeenCalledWith({
-        where: { userId: testUser.id, isActive: true },
-      });
-      expect(count).toBe(4);
-    });
+  it.each(['user', 'admin'])('scopes every stats query to the requesting %s', async role => {
+    await request(app).get('/api/dashboard/stats').set('x-user', '7').set('x-role', role);
+    expect(db.subscription.count).toHaveBeenCalledWith({ where: { userId: 7, isActive: true } });
+    expect(db.subscriptionResult.count).toHaveBeenCalledWith({ where: { subscription: { userId: 7 }, status: 'added', processedAt: { gte: expect.any(Date) } } });
+    expect(db.subscriptionResult.count).toHaveBeenCalledWith({ where: { subscription: { userId: 7 }, itemType: 'artist', status: { in: ['pending', 'queued'] } } });
+    expect(db.reviewItem.count).toHaveBeenCalledWith({ where: { userId: 7, status: 'pending' } });
+    expect(db.subscriptionRun.count).toHaveBeenCalledWith({ where: { subscription: { userId: 7 }, status: 'running' } });
+    expect(db.connection.count).toHaveBeenCalledWith({ where: { userId: 7, isActive: true } });
   });
-
-  describe('GET /api/dashboard/activity', () => {
-    it('should return recent subscription runs', async () => {
-      const mockRuns = [
-        {
-          id: 1,
-          status: 'completed',
-          addedCount: 10,
-          skippedCount: 5,
-          startedAt: new Date(),
-          completedAt: new Date(),
-          subscription: { name: 'Weekly Discoveries', type: 'spotify_playlist' },
-        },
-        {
-          id: 2,
-          status: 'running',
-          addedCount: 0,
-          skippedCount: 0,
-          startedAt: new Date(),
-          completedAt: null,
-          subscription: { name: 'Last.fm Charts', type: 'lastfm_chart' },
-        },
-      ];
-
-      mockPrisma.subscriptionRun.findMany.mockResolvedValue(mockRuns);
-
-      const runs = await mockPrisma.subscriptionRun.findMany({
-        where: { subscription: { userId: testUser.id } },
-        orderBy: { startedAt: 'desc' },
-        take: 10,
-        include: { subscription: { select: { name: true, type: true } } },
-      });
-
-      expect(runs).toHaveLength(2);
-      expect(runs[0].subscription.name).toBe('Weekly Discoveries');
-    });
-
-    it('should respect limit parameter', async () => {
-      mockPrisma.subscriptionRun.findMany.mockResolvedValue([]);
-
-      await mockPrisma.subscriptionRun.findMany({
-        where: { subscription: { userId: testUser.id } },
-        take: 5,
-      });
-
-      expect(mockPrisma.subscriptionRun.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ take: 5 })
-      );
-    });
-
-    it('should format activity correctly for completed runs', () => {
-      const run = {
-        id: 1,
-        status: 'completed',
-        addedCount: 10,
-        skippedCount: 5,
-        startedAt: new Date(),
-        completedAt: new Date(),
-        subscription: { name: 'Test Sub', type: 'spotify_playlist' },
-      };
-
-      const activity = {
-        id: run.id,
-        type: 'subscription_run',
-        title: run.subscription.name,
-        description: `Added ${run.addedCount} artists, skipped ${run.skippedCount}`,
-        status: run.status,
-        timestamp: run.completedAt || run.startedAt,
-      };
-
-      expect(activity.description).toBe('Added 10 artists, skipped 5');
-      expect(activity.status).toBe('completed');
-    });
-
-    it('should format activity correctly for failed runs', () => {
-      const run = {
-        id: 1,
-        status: 'failed',
-        errorMessage: 'Connection timeout',
-        addedCount: 0,
-        skippedCount: 0,
-        startedAt: new Date(),
-        completedAt: new Date(),
-        subscription: { name: 'Test Sub', type: 'lastfm_chart' },
-      };
-
-      const description = run.status === 'failed'
-        ? `Failed: ${run.errorMessage}`
-        : `Added ${run.addedCount} artists, skipped ${run.skippedCount}`;
-
-      expect(description).toBe('Failed: Connection timeout');
-    });
-
-    it('should format activity correctly for running jobs', () => {
-      const run = {
-        id: 1,
-        status: 'running',
-        startedAt: new Date(),
-        completedAt: null,
-        subscription: { name: 'Test Sub', type: 'spotify_liked_songs' },
-      };
-
-      const description = run.status === 'running' ? 'Running...' : 'Completed';
-      expect(description).toBe('Running...');
-    });
+  it('bounds added-result record counts to the preceding 30 days', async () => {
+    const before = Date.now(); await request(app).get('/api/dashboard/stats'); const after = Date.now();
+    const since = db.subscriptionResult.count.mock.calls[0][0].where.processedAt.gte.getTime();
+    const days = 30 * 24 * 60 * 60 * 1000; expect(since).toBeGreaterThanOrEqual(before - days); expect(since).toBeLessThanOrEqual(after - days);
   });
-
-  describe('GET /api/dashboard/connections', () => {
-    it('should return user connections summary', async () => {
-      const mockConnections = [
-        { id: 1, type: 'lidarr', name: 'Lidarr', isActive: true },
-        { id: 2, type: 'spotify', name: 'Spotify', isActive: true },
-        { id: 3, type: 'lastfm', name: 'Last.fm', isActive: false },
-      ];
-
-      mockPrisma.connection.findMany.mockResolvedValue(mockConnections);
-
-      const connections = await mockPrisma.connection.findMany({
-        where: { userId: testUser.id },
-        select: { id: true, type: true, name: true, isActive: true },
-      });
-
-      expect(connections).toHaveLength(3);
-      expect(connections.filter((c: any) => c.isActive)).toHaveLength(2);
-    });
+  it('returns actual zeroes for an empty actor', async () => {
+    for (const model of [db.subscription, db.subscriptionResult, db.reviewItem, db.subscriptionRun, db.connection]) model.count.mockResolvedValue(0);
+    const response = await request(app).get('/api/dashboard/stats'); expect(Object.values(response.body.stats)).toEqual([0, 0, 0, 0, 0, 0]);
   });
-
-  describe('Multi-tenant Isolation', () => {
-    it('should only return data for the requesting user', async () => {
-      const user1 = createMockUser({ id: 1 });
-      const user2 = createMockUser({ id: 2 });
-
-      // User 1's subscriptions
-      const user1Subs = [createMockSubscription({ userId: user1.id })];
-      // User 2's subscriptions
-      const user2Subs = [
-        createMockSubscription({ userId: user2.id }),
-        createMockSubscription({ userId: user2.id }),
-      ];
-
-      mockPrisma.subscription.findMany.mockImplementation(async (args: any) => {
-        const userId = args?.where?.userId;
-        if (userId === user1.id) return user1Subs;
-        if (userId === user2.id) return user2Subs;
-        return [];
-      });
-
-      const user1Result = await mockPrisma.subscription.findMany({ where: { userId: user1.id } });
-      const user2Result = await mockPrisma.subscription.findMany({ where: { userId: user2.id } });
-
-      expect(user1Result).toHaveLength(1);
-      expect(user2Result).toHaveLength(2);
-    });
-
-    it('should not leak data between users', async () => {
-      mockPrisma.reviewItem.count.mockImplementation(async (args: any) => {
-        const userId = args?.where?.userId;
-        if (userId === testUser.id) return 10;
-        return 0;
-      });
-
-      const ownCount = await mockPrisma.reviewItem.count({ where: { userId: testUser.id } });
-      const otherCount = await mockPrisma.reviewItem.count({ where: { userId: 999 } });
-
-      expect(ownCount).toBe(10);
-      expect(otherCount).toBe(0);
-    });
+  it('rejects an anonymous actor before reading counts', async () => {
+    expect((await request(app).get('/api/dashboard/stats').set('x-anonymous', '1')).status).toBe(401);
+    expect(db.subscription.count).not.toHaveBeenCalled();
+  });
+  it('reports count failures without exposing database errors or manufacturing a zero summary', async () => {
+    db.subscription.count.mockRejectedValue(new Error('private database details'));
+    const response = await request(app).get('/api/dashboard/stats'); expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'Failed to fetch stats' });
+  });
+});
+describe('other dashboard reads', () => {
+  it('scopes activity to its actor and passes the requested limit', async () => {
+    db.subscriptionRun.findMany.mockResolvedValue([{ id: 1, status: 'running', subscription: { name: 'Source' }, startedAt: new Date() }]);
+    const response = await request(app).get('/api/dashboard/activity?limit=5').set('x-user', '7');
+    expect(response.body.activities[0].title).toBe('Source');
+    expect(db.subscriptionRun.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { subscription: { userId: 7 } }, take: 5 }));
+  });
+  it('counts only returned actor connections', async () => {
+    db.connection.findMany.mockResolvedValue([{ name: 'Lidarr', type: 'lidarr', isActive: true }, { name: 'Other', type: 'lastfm', isActive: false }]);
+    const response = await request(app).get('/api/dashboard/connections/summary').set('x-user', '7');
+    expect(response.body.summary).toMatchObject({ total: 2, active: 1 });
+    expect(db.connection.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 7 } }));
   });
 });

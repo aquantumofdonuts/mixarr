@@ -1,138 +1,73 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { act, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-
-// Mock the api wrapper so no real fetch happens.
-vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn() },
-}));
-
+vi.mock('@/lib/api', () => ({ api: { get: vi.fn() } }));
 import { api } from '@/lib/api';
 import { PathFinder } from '../PathFinder';
-import type { PathResult } from '@/types/constellation';
-
-const mockGet = api.get as unknown as Mock;
-
-function pathOk(result: PathResult) {
-  return { data: result, error: null, status: 200 };
+const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+let pathResponse: any;
+const ok = (data: unknown) => ({ data, error: null, status: 200 });
+beforeEach(() => {
+  vi.resetAllMocks(); pathResponse = ok({ nodes: [1, 42, 7], degrees: 2, mode: 'shortest' });
+  vi.mocked(api.get).mockImplementation(async url => {
+    if (url.includes('/path?')) return await pathResponse;
+    if (url.includes('/identity?mbid=')) { const index = ids.indexOf(url.split('=')[1]); return ok({ mbid: ids[index], personId: index ? 7 : 1, needsManual: false }) as any; }
+    if (url.includes('/identity?personId=')) { const personId = Number(url.split('=')[1]); return ok({ mbid: personId === 1 ? ids[0] : ids[1], personId, displayName: personId === 1 ? 'From Name' : 'To Name', needsManual: false }) as any; }
+    return ok({ results: ids.map((id, index) => ({ id, name: index ? 'To Name' : 'From Name', disambiguation: index ? 'Canadian ensemble' : 'British artist' })) }) as any;
+  });
+});
+async function choose(label: string, index: number) {
+  await userEvent.type(screen.getByLabelText(label), 'Name');
+  const input = screen.getByLabelText(label); const region = input.parentElement!.parentElement!;
+  await userEvent.click(within(region).getByRole('button', { name: 'Search' }));
+  await userEvent.click((await within(region).findAllByRole('radio'))[index]);
+  await within(region).findByText(`${index ? 'To Name' : 'From Name'} selected`);
 }
-
-async function fillIds(from: string, to: string) {
-  await userEvent.type(screen.getByLabelText(/from artist id/i), from);
-  await userEvent.type(screen.getByLabelText(/to artist id/i), to);
-}
-
-describe('PathFinder', () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-  });
-
-  it('submits a shortest-path query to the correct endpoint and renders the chain', async () => {
-    mockGet.mockResolvedValue(
-      pathOk({ nodes: [1, 42, 7], degrees: 2, mode: 'shortest' }),
-    );
-    render(<PathFinder />);
-
-    await fillIds('1', '7');
-    await userEvent.click(screen.getByRole('button', { name: /find path/i }));
-
-    expect(mockGet).toHaveBeenCalledWith(
-      '/api/constellation/path?from=1&to=7&mode=shortest',
-    );
-
-    const chain = await screen.findByTestId('path-finder-chain');
-    // Each hop id appears as a clickable button.
-    expect(within(chain).getByRole('button', { name: '1' })).toBeInTheDocument();
-    expect(within(chain).getByRole('button', { name: '42' })).toBeInTheDocument();
-    expect(within(chain).getByRole('button', { name: '7' })).toBeInTheDocument();
-    // Degrees are reported.
-    expect(screen.getByTestId('path-finder-result')).toHaveTextContent(/2 degrees/i);
-    // Shortest mode carries no totalBridge.
-    expect(screen.queryByTestId('path-finder-total-bridge')).not.toBeInTheDocument();
-  });
-
-  it('shows a "Searching…" state for the (slower) interesting mode, then the chain + totalBridge', async () => {
-    let resolve!: (v: unknown) => void;
-    mockGet.mockReturnValue(new Promise((r) => (resolve = r)));
-    render(<PathFinder />);
-
-    // Switch to interesting mode.
-    await userEvent.click(screen.getByRole('radio', { name: /interesting/i }));
-    await fillIds('1', '9');
-    await userEvent.click(screen.getByRole('button', { name: /find path/i }));
-
-    // In-flight: the honest "Searching…" state is shown.
-    expect(await screen.findByTestId('path-finder-searching')).toBeInTheDocument();
-
-    expect(mockGet).toHaveBeenCalledWith(
-      '/api/constellation/path?from=1&to=9&mode=interesting',
-    );
-
-    // Resolve the request.
-    resolve(pathOk({ nodes: [1, 5, 9], degrees: 2, mode: 'interesting', totalBridge: 1.5 }));
-
-    const chain = await screen.findByTestId('path-finder-chain');
-    expect(within(chain).getByRole('button', { name: '5' })).toBeInTheDocument();
-    // Interesting mode reports the total bridge score.
-    expect(screen.getByTestId('path-finder-total-bridge')).toHaveTextContent(/1\.5/);
-    // The searching state is gone.
-    expect(screen.queryByTestId('path-finder-searching')).not.toBeInTheDocument();
-  });
-
-  it('shows the honest "no path" message on a 404 (not a generic error)', async () => {
-    mockGet.mockResolvedValue({ data: null, error: 'no path within 6 degrees', status: 404 });
-    render(<PathFinder />);
-
-    await fillIds('1', '99999');
-    await userEvent.click(screen.getByRole('button', { name: /find path/i }));
-
-    const empty = await screen.findByTestId('path-finder-empty');
-    expect(empty).toHaveTextContent(/no path within 6 degrees/i);
-    // Not surfaced as a generic error banner.
-    expect(screen.queryByTestId('path-finder-error')).not.toBeInTheDocument();
-  });
-
-  it('shows an error state on a non-404 failure', async () => {
-    mockGet.mockResolvedValue({ data: null, error: 'boom', status: 500 });
-    render(<PathFinder />);
-
-    await fillIds('1', '2');
-    await userEvent.click(screen.getByRole('button', { name: /find path/i }));
-
-    expect(await screen.findByTestId('path-finder-error')).toHaveTextContent('boom');
-    expect(screen.queryByTestId('path-finder-empty')).not.toBeInTheDocument();
-  });
-
-  it('calls onSelectPerson with the hop id when a chain node is clicked', async () => {
-    mockGet.mockResolvedValue(pathOk({ nodes: [1, 42, 7], degrees: 2, mode: 'shortest' }));
-    const onSelectPerson = vi.fn();
-    render(<PathFinder onSelectPerson={onSelectPerson} />);
-
-    await fillIds('1', '7');
-    await userEvent.click(screen.getByRole('button', { name: /find path/i }));
-
-    const chain = await screen.findByTestId('path-finder-chain');
-    await userEvent.click(within(chain).getByRole('button', { name: '42' }));
-    expect(onSelectPerson).toHaveBeenCalledWith(42);
-  });
-
-  it('does not query when the ids are incomplete', async () => {
-    render(<PathFinder />);
-    await userEvent.type(screen.getByLabelText(/from artist id/i), '1');
-    await userEvent.click(screen.getByRole('button', { name: /find path/i }));
-    expect(mockGet).not.toHaveBeenCalled();
-  });
-
-  it('blocks a from==to request (disabled button + hint, no query)', async () => {
-    render(<PathFinder />);
-    await fillIds('42', '42');
-
-    // The button is disabled and an honest hint is shown.
-    expect(screen.getByRole('button', { name: /find path/i })).toBeDisabled();
-    expect(screen.getByTestId('path-finder-same')).toBeInTheDocument();
-
-    // Even a forced click sends nothing.
-    await userEvent.click(screen.getByRole('button', { name: /find path/i }));
-    expect(mockGet).not.toHaveBeenCalled();
-  });
+it('submits resolved numeric people and displays names, keeping choice groups independent', async () => {
+  const selected = vi.fn(), persisted = vi.fn(); render(<PathFinder onSelectPerson={selected} onPathChange={persisted} names={new Map([[42, 'Credited Collaborator']])} />);
+  await choose('From artist', 0); await choose('To artist', 1);
+  expect(within(screen.getByRole('group', { name: 'Choose from artist identity' })).getByRole('radio', { name: /From Name.*British/ })).toBeChecked();
+  expect(within(screen.getByRole('group', { name: 'Choose to artist identity' })).getByRole('radio', { name: /To Name.*Canadian/ })).toBeChecked();
+  await userEvent.click(screen.getByRole('button', { name: 'Find path' }));
+  expect(api.get).toHaveBeenCalledWith('/api/constellation/path?from=1&to=7&mode=shortest', { signal: expect.any(AbortSignal) });
+  expect(persisted).toHaveBeenCalledWith(1, 7, 'shortest');
+  const chain = await screen.findByTestId('path-finder-chain');
+  expect(within(chain).getByRole('button', { name: 'From Name' })).toBeInTheDocument();
+  await userEvent.click(within(chain).getByRole('button', { name: 'Credited Collaborator' })); expect(selected).toHaveBeenCalledWith(42);
+});
+it('does not query a path from unselected names or identical resolved endpoints', async () => {
+  render(<PathFinder />); await userEvent.type(screen.getByLabelText('From artist'), 'Name');
+  expect(screen.getByRole('button', { name: 'Find path' })).toBeDisabled();
+  await choose('From artist', 0); await choose('To artist', 0);
+  expect(screen.getByRole('button', { name: 'Find path' })).toBeDisabled(); expect(screen.getByText('Pick two different artists.')).toBeInTheDocument();
+  expect(vi.mocked(api.get).mock.calls.some(([url]) => url.includes('/path?'))).toBe(false);
+});
+it.each([404, 500])('shows honest no-path/error response %s', async status => {
+  pathResponse = { data: null, error: status === 404 ? 'no path within 6 degrees' : 'boom', status };
+  render(<PathFinder />); await choose('From artist', 0); await choose('To artist', 1); await userEvent.click(screen.getByRole('button', { name: 'Find path' }));
+  expect(await screen.findByTestId(status === 404 ? 'path-finder-empty' : 'path-finder-error')).toHaveTextContent(pathResponse.error);
+});
+it('restores numeric endpoints through verified reverse identity and reruns the saved path', async () => {
+  pathResponse = ok({ nodes: [1, 7], degrees: 1, mode: 'interesting', totalBridge: 1.5 });
+  render(<PathFinder initialFrom={1} initialTo={7} initialMode="interesting" />);
+  expect(await screen.findByTestId('path-finder-result')).toHaveTextContent('From Name');
+  expect(screen.getByTestId('path-finder-total-bridge')).toHaveTextContent('1.5');
+  expect(api.get).toHaveBeenCalledWith('/api/constellation/path?from=1&to=7&mode=interesting', { signal: expect.any(AbortSignal) });
+});
+it('aborts and ignores a pending path when an endpoint changes', async () => {
+  let complete!: (value: any) => void; pathResponse = new Promise(resolve => { complete = resolve; });
+  render(<PathFinder />); await choose('From artist', 0); await choose('To artist', 1); await userEvent.click(screen.getByRole('button', { name: 'Find path' }));
+  const signal = vi.mocked(api.get).mock.calls.find(([url]) => url.includes('/path?'))![1]!.signal!;
+  await userEvent.type(screen.getByLabelText('To artist'), 'edited'); expect(signal.aborted).toBe(true);
+  await act(async () => complete(ok({ nodes: [1, 7], degrees: 1, mode: 'shortest' })));
+  expect(screen.queryByTestId('path-finder-result')).toBeNull(); expect(screen.getByRole('button', { name: 'Find path' })).toBeDisabled();
+});
+it('keeps selected names and path when URL commit echoes resolved IDs without cached display names', async () => {
+  const view = render(<PathFinder />); await choose('From artist', 0); await choose('To artist', 1);
+  await userEvent.click(screen.getByRole('button', { name: 'Find path' })); await screen.findByTestId('path-finder-result');
+  vi.mocked(api.get).mockClear();
+  view.rerender(<PathFinder initialFrom={1} initialTo={7} />);
+  await waitFor(() => expect(screen.getByTestId('path-finder-result')).toHaveTextContent('From Name'));
+  expect(screen.getByLabelText('From artist')).toHaveValue('From Name');
+  expect(vi.mocked(api.get).mock.calls.some(([url]) => url.includes('/identity?personId'))).toBe(false);
 });
