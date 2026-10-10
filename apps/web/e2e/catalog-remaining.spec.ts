@@ -157,6 +157,31 @@ test.describe('public routes', () => {
       await expect(page.getByLabel('Confirm Password', { exact: true })).toBeVisible();
     });
   }
+  for (const theme of ['light', 'dark'] as const) {
+    test(`enabled Google sign-in renders and supports keyboard handoff in ${theme}`, async ({ catalogPage: page }) => {
+      await mkdir(evidence, { recursive: true });
+      await page.addInitScript(value => localStorage.setItem('theme', value), theme);
+      await page.route('**/api/auth/sso/enabled', route => route.fulfill({ json: { providers: [{ type: 'google', name: 'Google' }] } }));
+      let handoffs = 0;
+      await page.route('**/api/auth/sso/google', route => {
+        expect(route.request().method()).toBe('GET');
+        handoffs++;
+        return route.fulfill({ contentType: 'text/html', body: '<h1>Google sign-in handoff</h1>' });
+      });
+      await page.goto('/login');
+      await waitForTheme(page, theme);
+      const google = page.getByRole('button', { name: 'Login with Google', exact: true });
+      await expect(google).toBeVisible();
+      await expect(google.locator('svg')).toBeVisible();
+      await page.screenshot({ path: `${evidence}/login-google-${theme}.png` });
+      await google.focus();
+      await page.keyboard.press('Enter');
+      await expect(page).toHaveURL(/\/api\/auth\/sso\/google$/);
+      await expect(page.getByRole('heading', { name: 'Google sign-in handoff', exact: true })).toBeVisible();
+      expect(handoffs).toBe(1);
+    });
+  }
+
   test('resumes at application URL and preserves prerequisite guidance', async ({ catalogPage: page }) => {
     await page.route('**/api/auth/setup-required', route => route.fulfill({ json: { setupRequired: true, adminExists: true, baseUrlExists: false } }));
     await page.goto('/setup');
