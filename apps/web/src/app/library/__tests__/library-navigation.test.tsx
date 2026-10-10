@@ -61,12 +61,13 @@ it('renders unknown identities as plain names and uses native ID-specific select
   expect(screen.queryByRole('link', { name: 'Unknown' })).toBeNull(); fireEvent.click(screen.getByRole('checkbox', { name: 'Select library artist 3' }));
   expect(screen.getByRole('checkbox', { name: 'Select library artist 3' })).toBeChecked(); expect(screen.getByRole('checkbox', { name: 'Select library artist 1' })).not.toBeChecked();
 });
-it('debounces typing with replace, uses push for filters, and cancels an obsolete draft on filter navigation', async () => {
+it('debounces typing with replace, replaces filter refinements, and cancels an obsolete draft on filter navigation', async () => {
+  navigation.push.mockClear(); navigation.replace.mockClear();
   navigation.query = 'keep=value&page=2'; mount(); await screen.findByRole('link', { name: 'Alpha' });
   fireEvent.change(screen.getByRole('textbox', { name: 'Search library snapshot' }), { target: { value: 'Alpha' } });
   await waitFor(() => expect(new URLSearchParams(navigation.query).get('q')).toBe('Alpha')); expect(navigation.replace).toHaveBeenCalled(); expect(new URLSearchParams(navigation.query).has('page')).toBe(false);
   fireEvent.change(screen.getByRole('textbox', { name: 'Search library snapshot' }), { target: { value: 'Discarded draft' } }); fireEvent.change(screen.getByRole('combobox', { name: 'Filter library snapshot' }), { target: { value: 'complete' } });
-  await new Promise(resolve => setTimeout(resolve, 350)); expect(new URLSearchParams(navigation.query).get('q')).toBe('Alpha'); expect(new URLSearchParams(navigation.query).get('filter')).toBe('complete'); expect(new URLSearchParams(navigation.query).get('keep')).toBe('value'); expect(navigation.push).toHaveBeenCalled();
+  await new Promise(resolve => setTimeout(resolve, 350)); expect(new URLSearchParams(navigation.query).get('q')).toBe('Alpha'); expect(new URLSearchParams(navigation.query).get('filter')).toBe('complete'); expect(new URLSearchParams(navigation.query).get('keep')).toBe('value'); expect(navigation.push).not.toHaveBeenCalled(); expect(navigation.replace).toHaveBeenCalledTimes(2);
 });
 it('validates unsupported URL values and exposes a labeled, keyboard-focusable narrow table region', async () => {
   navigation.query = 'page=Infinity&filter=bogus&sort=bogus&dir=bogus&tab=bogus'; mount();

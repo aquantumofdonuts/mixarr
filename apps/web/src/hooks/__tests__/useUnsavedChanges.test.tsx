@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { StrictMode, useEffect } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UnsavedChangesProvider, useUnsavedChanges } from '../useUnsavedChanges';
@@ -18,7 +18,7 @@ describe('settings dirty registry', () => {
     rerender(<UnsavedChangesProvider><Draft dirty={false} /><Status /></UnsavedChangesProvider>);
     expect(screen.getByText('clean')).toBeVisible();
   });
-  it('attaches native beforeunload only while a draft is dirty and cleans up on unmount', () => {
+  it('prompts native beforeunload only while a draft is dirty and cleans up on unmount', () => {
     const { rerender, unmount } = render(<UnsavedChangesProvider><Draft dirty={false} /></UnsavedChangesProvider>);
     const unload = () => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; };
     expect(unload()).toBe(false);
@@ -45,4 +45,28 @@ describe('settings dirty registry', () => {
     const event = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }); screen.getByText('Settings').dispatchEvent(event); expect(event.defaultPrevented).toBe(false);
     const external = new MouseEvent('click', { bubbles: true, cancelable: true }); screen.getByText('External').dispatchEvent(external); expect(external.defaultPrevented).toBe(false);
   });
+});
+
+
+it('protects the first dirty commit before passive draft effects and cleans up in StrictMode', () => {
+  const protections: boolean[] = [];
+  function FirstCommit({ dirty }: { dirty: boolean }) {
+    useUnsavedChanges(dirty);
+    useEffect(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      protections.push(event.defaultPrevented);
+    }, [dirty]);
+    return <output>{dirty ? 'unsaved draft' : 'saved draft'}</output>;
+  }
+  const { rerender, unmount } = render(<StrictMode><UnsavedChangesProvider><FirstCommit dirty={false} /></UnsavedChangesProvider></StrictMode>);
+  protections.length = 0;
+  rerender(<StrictMode><UnsavedChangesProvider><FirstCommit dirty /></UnsavedChangesProvider></StrictMode>);
+  expect(protections).toEqual([true]);
+  rerender(<StrictMode><UnsavedChangesProvider><FirstCommit dirty={false} /></UnsavedChangesProvider></StrictMode>);
+  expect(protections).toEqual([true, false]);
+  unmount();
+  const event = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
 });

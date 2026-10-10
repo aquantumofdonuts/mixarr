@@ -30,14 +30,17 @@ async function downloadFixture(page: Page, initial: SlskdDownload[]) {
   return state;
 }
 
-test('filters persist in the URL, browser Back restores them, invalid values stay bounded, and statistics describe the loaded set',async({catalogPage:page})=>{
+test('filters replace history, reload restores them, invalid values stay bounded, and statistics describe the loaded set',async({catalogPage:page})=>{
   const state=await downloadFixture(page,Array.from({length:105},(_,index)=>record(index+1,index%2?'completed':'failed')));
+  await page.goto('/search?q=Earlier');
   await page.goto('/downloads?keep=value&status=not-real');
+  const initialLength = await page.evaluate(() => history.length);
   await expect(page.getByRole('article')).toHaveCount(100); await expect(page.getByText(/100 loaded records/)).toBeVisible(); await expect(page.getByText(/Counts describe this loaded set only/)).toBeVisible();
   const filter=page.getByRole('combobox',{name:'Download status',exact:true}); await expect(filter).toHaveValue('all');expect(state.reads[0].searchParams.has('status')).toBe(false);
   await filter.selectOption('failed');await expect(page).toHaveURL(/status=failed/);await expect(page.getByRole('article')).toHaveCount(53);expect(new URL(page.url()).searchParams.get('keep')).toBe('value');
-  await filter.selectOption('completed');await expect(page.getByRole('article')).toHaveCount(52);await page.goBack();await expect(filter).toHaveValue('failed');await expect(page.getByRole('article')).toHaveCount(53);
-  await page.reload();await expect(filter).toHaveValue('failed');await expect(page.getByRole('article')).toHaveCount(53);expect(state.reads.every(url=>url.searchParams.get('limit')==='100')).toBe(true);
+  await filter.selectOption('completed');await expect(page.getByRole('article')).toHaveCount(52);expect(await page.evaluate(() => history.length)).toBe(initialLength);
+  await Promise.all([page.waitForEvent('load'), page.evaluate(() => window.location.reload())]);await expect(filter).toHaveValue('completed');await expect(page.getByRole('article')).toHaveCount(52);expect(state.reads.every(url=>url.searchParams.get('limit')==='100')).toBe(true);
+  await page.goBack();await expect(page).toHaveURL('/search?q=Earlier');
 });
 
 test('loading, empty, failure, and explicit retry remain distinct',async({catalogPage:page})=>{

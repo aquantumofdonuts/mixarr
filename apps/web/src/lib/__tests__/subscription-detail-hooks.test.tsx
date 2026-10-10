@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import {
   useSubscriptionResults,
+  useToggleSubscription,
   useApproveResult,
   RESULTS_PAGE_SIZE,
   queryKeys,
@@ -11,7 +12,7 @@ import {
 } from '../hooks';
 
 vi.mock('../api', () => ({
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn() },
 }));
 
 import { api } from '../api';
@@ -173,4 +174,20 @@ it('does not automatically repeat an acquisition when the global mutation retry 
   await waitFor(() => expect(result.current.isError).toBe(true));
   expect(api.post).toHaveBeenCalledTimes(1);
   expect(result.current.error).toMatchObject({ code: 'IN_PROGRESS', status: 409 });
+});
+
+
+describe('subscription schedule route contract', () => {
+  beforeEach(() => vi.clearAllMocks());
+  it.each([false, true])('uses the mounted PUT endpoint to set isActive=%s and refreshes subscriptions', async isActive => {
+    const qc = createClient();
+    qc.setQueryData(queryKeys.subscriptions, []);
+    vi.mocked(api.put).mockResolvedValue({ data: { subscription: { id: 11, isActive } }, error: null, status: 200 });
+    const { result } = renderHook(() => useToggleSubscription(), { wrapper: createWrapper(qc) });
+    act(() => result.current.mutate({ id: 11, isActive }));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(api.put).toHaveBeenCalledExactlyOnceWith('/api/subscriptions/11', { isActive });
+    expect(api.patch).not.toHaveBeenCalled();
+    expect(qc.getQueryState(queryKeys.subscriptions)?.isInvalidated).toBe(true);
+  });
 });

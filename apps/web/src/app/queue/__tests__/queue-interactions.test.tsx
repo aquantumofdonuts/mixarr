@@ -123,3 +123,49 @@ it('does not report zero matching records before the first queue response', asyn
   const original = request.getMockImplementation()!; let finish!: (value: Response) => void;
   request.mockImplementation(async (url,options) => String(url).startsWith('/api/imports/review/queue?') ? new Promise(resolve=>{finish=resolve;}) : original(url,options)); mount(); await waitFor(()=>expect(request).toHaveBeenCalled()); expect(screen.queryByText(/matching review items/)).toBeNull(); expect(screen.getByText('Matching review count is loading.')).toBeInTheDocument(); await act(async ()=>finish(json({items:[],total:0,nextCursor:null}))); await screen.findByText('No pending review items.'); expect(screen.getByText(/matching review items/)).toHaveTextContent('0 matching review items');
 });
+
+
+it('replaces status and item type refinements, resetting cursors and retaining unrelated URL state', async () => {
+  navigation.push.mockClear(); navigation.replace.mockClear();
+  navigation.query = 'cursor=opaque&keep=value';
+  mount();
+  await screen.findByRole('region', { name: 'Review items' });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Review status' }), { target: { value: 'approved' } });
+  await waitFor(() => expect(new URLSearchParams(navigation.query).get('status')).toBe('approved'));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Review item type' }), { target: { value: 'album' } });
+  await waitFor(() => expect(new URLSearchParams(navigation.query).get('itemType')).toBe('album'));
+  expect(new URLSearchParams(navigation.query).has('cursor')).toBe(false);
+  expect(new URLSearchParams(navigation.query).get('keep')).toBe('value');
+  expect(navigation.push).not.toHaveBeenCalled();
+  expect(navigation.replace).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls.some(([url]) => String(url) === '/api/imports/review/queue?status=approved&limit=50&itemType=album')).toBe(true);
+});
+
+it('replaces empty-state filter recovery', async () => {
+  rows = [];
+  navigation.query = 'q=Missing&itemType=album&status=rejected&keep=value';
+  navigation.push.mockClear(); navigation.replace.mockClear();
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Clear queue filters' }));
+  await screen.findByRole('button', { name: 'View pending items' });
+  fireEvent.click(screen.getByRole('button', { name: 'View pending items' }));
+  await screen.findByText('No pending review items.');
+  expect(navigation.push).not.toHaveBeenCalled();
+  expect(navigation.replace).toHaveBeenCalledTimes(2);
+  expect(new URLSearchParams(navigation.query).get('keep')).toBe('value');
+});
+
+
+it('pushes cursor pagination without replacing its history entry', async () => {
+  navigation.push.mockClear(); navigation.replace.mockClear();
+  const original = request.getMockImplementation()!;
+  request.mockImplementation(async (url, options) => String(url).startsWith('/api/imports/review/queue?')
+    ? json({ items: rows, total: 4, nextCursor: 'next-cursor' }) : original(url, options));
+  mount();
+  const next = await screen.findByRole('button', { name: 'Next page' });
+  await waitFor(() => expect(next).toBeEnabled());
+  fireEvent.click(next);
+  expect(new URLSearchParams(navigation.query).get('cursor')).toBe('next-cursor');
+  expect(navigation.push).toHaveBeenCalledOnce();
+  expect(navigation.replace).not.toHaveBeenCalled();
+});

@@ -92,7 +92,7 @@ export default function DownloadsPage() {
   const setStatus = (value: string) => {
     const next = new URLSearchParams(params.toString());
     if (value === 'all') next.delete('status'); else next.set('status', value);
-    router.push(`${pathname}${next.size ? `?${next}` : ''}`, { scroll: false });
+    router.replace(`${pathname}${next.size ? `?${next}` : ''}`, { scroll: false });
   };
   return <>
     <PageHeader title="slskd Downloads" description="Track Soulseek downloads and recover failed transfers" />

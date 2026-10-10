@@ -1,6 +1,21 @@
 import { test, expect } from './catalog-fixtures';
 import type { Page } from '@playwright/test';
 
+async function settingsNavigation(page: Page, name: 'Settings' | 'Search') {
+  const menu = page.getByRole('button', { name: 'Open menu', exact: true });
+  const account = page.getByRole('button', { name: 'Account menu', exact: true });
+  await expect.poll(async () => await menu.isVisible() || await account.isVisible()).toBe(true);
+  if (await menu.isVisible()) {
+    await menu.click();
+    const drawer = page.getByRole('dialog', { name: 'Mixarr navigation', exact: true });
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole('link', { name, exact: true }).last().click();
+  } else {
+    if (name === 'Settings') await account.click();
+    await page.locator('aside').getByRole('link', { name, exact: true }).last().click();
+  }
+}
+
 async function settingsApi(page: Page) {
   const writes: { path: string; body: Record<string, any> }[] = [];
   let failPersonal = false;
@@ -51,13 +66,13 @@ test('failed saves retain drafts and restore defaults requires an explicit perso
 
 test('native entry and browser Back prompt protect drafts; cancel retains edits', async ({ catalogPage: page }) => {
   await settingsApi(page); await page.goto('/');
-  await page.getByRole('button', { name: 'Account menu' }).click(); await page.locator('aside').getByRole('link', { name: 'Settings', exact: true }).last().click();
+  await settingsNavigation(page, 'Settings');
   await expect(page).toHaveURL(/\/settings$/); await page.getByLabel('Max Concurrent Jobs', { exact: true }).click(); await page.getByLabel('Max Concurrent Jobs', { exact: true }).fill('8'); await expect(page.getByText('Unsaved personal settings changes')).toBeVisible();
   const dialogs: string[] = []; page.on('dialog', dialog => { dialogs.push(dialog.type()); void dialog.dismiss(); });
   void page.goBack().catch(() => {}); await expect.poll(() => dialogs).toEqual(['beforeunload']); await expect(page).toHaveURL(/\/settings$/); await expect(page.getByLabel('Max Concurrent Jobs', { exact: true })).toHaveValue('8');
   expect(dialogs).toEqual(['beforeunload']);
-  await page.locator('aside').getByRole('link', { name: 'Search', exact: true }).click(); await expect(page).toHaveURL(/\/settings$/); await expect(page.getByLabel('Max Concurrent Jobs', { exact: true })).toHaveValue('8'); expect(dialogs).toEqual(['beforeunload', 'beforeunload']);
-  void page.reload().catch(() => {}); await expect.poll(() => dialogs.length).toBe(3); await expect(page.getByLabel('Max Concurrent Jobs', { exact: true })).toHaveValue('8'); expect(dialogs.at(-1)).toBe('beforeunload');
+  await settingsNavigation(page, 'Search'); await expect(page).toHaveURL(/\/settings$/); await expect(page.getByLabel('Max Concurrent Jobs', { exact: true })).toHaveValue('8'); expect(dialogs).toEqual(['beforeunload', 'beforeunload']);
+  void page.evaluate(() => window.location.reload()).catch(() => {}); await expect.poll(() => dialogs.length).toBe(3); await expect(page.getByLabel('Max Concurrent Jobs', { exact: true })).toHaveValue('8'); expect(dialogs.at(-1)).toBe('beforeunload');
 });
 
 test('notification modal cancel and invalid JSON retain drafts and focus the invalid input', async ({ catalogPage: page }) => {
@@ -199,4 +214,29 @@ test('saved webhook header masks survive rename; replacement JSON is validated a
   expect(writes).toHaveLength(1); expect(writes[0].config.headers).toBe('••••••••');
   await edit(); await page.getByLabel('Headers (JSON, optional)').fill('{"X-Fixture":"replacement"}'); await page.getByRole('button', { name: 'Save channel changes', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0); expect(writes[1].config.headers).toEqual({ 'X-Fixture': 'replacement' });
   await edit(); await page.getByLabel('Headers (JSON, optional)').fill('"arbitrary string"'); await page.getByRole('button', { name: 'Save channel changes', exact: true }).click(); await expect(page.getByRole('alert').filter({ hasText: 'Headers must be a JSON object with string values.' })).toBeVisible(); await expect(page.getByLabel('Headers (JSON, optional)')).toBeFocused(); expect(writes).toHaveLength(2);
+});
+
+
+test('Back at the first visible dirty commit prompts before leaving and retains the draft', async ({ catalogPage: page }) => {
+  await settingsApi(page);
+  await page.goto('/');
+  await settingsNavigation(page, 'Settings');
+  await expect(page).toHaveURL(/\/settings$/);
+  const field = page.getByLabel('Max Concurrent Jobs', { exact: true });
+  await field.click();
+  await page.evaluate(() => {
+    const observer = new MutationObserver(() => {
+      if (!document.body.innerText.includes('Unsaved personal settings changes')) return;
+      observer.disconnect();
+      history.back();
+    });
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  const dialogs: string[] = [];
+  page.on('dialog', async dialog => { dialogs.push(dialog.type()); await dialog.dismiss(); });
+  await field.fill('8');
+  await expect.poll(() => dialogs).toEqual(['beforeunload']);
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(field).toHaveValue('8');
+  await expect(page.getByText('Unsaved personal settings changes', { exact: true })).toBeVisible();
 });

@@ -63,9 +63,8 @@ export function resolveCreditSource(
 /**
  * Runtime composition: read the constellation settings and return the configured
  * {@link CreditSource}. On the live path, resolve a Discogs connection (user-owned
- * preferred, else global) into a {@link DiscogsService}. Not unit-tested (it
- * touches settings + the connections table); the selection logic it delegates to
- * is covered by {@link resolveCreditSource}'s tests.
+ * preferred, else global; background workers use global only) into a {@link DiscogsService}.
+ * Runtime composition tests cover credential scope separately from the pure selector.
  */
 export async function resolveConfiguredCreditSource(userId?: number, options: { budgetShare?: number } = {}): Promise<CreditSource> {
   const { SettingsService } = await import('../settings.service.js');
@@ -104,7 +103,7 @@ async function resolveDiscogsBackend(
     where: {
       type: 'discogs',
       isActive: true,
-      ...(userId != null ? { OR: [{ userId }, { userId: null }] } : {}),
+      ...(userId != null ? { OR: [{ userId }, { userId: null }] } : { userId: null }),
     },
     // User-owned first (non-null userId), else the global connection.
     orderBy: { userId: 'desc' },

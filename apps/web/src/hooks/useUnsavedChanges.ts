@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, createElement, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, createElement, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 interface DirtyRegistry {
   hasUnsavedChanges: boolean;
@@ -40,15 +40,15 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
     }
     return true;
   }, [confirmDiscard]);
-  useEffect(() => {
-    if (!hasUnsavedChanges) return;
+  useLayoutEffect(() => {
+    // ponytail: read the live registry so protection does not wait for a second render.
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (bypassUnload.current) return;
+      if (bypassUnload.current || ![...entries.current.values()].some(Boolean)) return;
       event.preventDefault(); event.returnValue = '';
     };
     window.addEventListener('beforeunload', beforeUnload);
     return () => window.removeEventListener('beforeunload', beforeUnload);
-  }, [hasUnsavedChanges]);
+  }, []);
   useEffect(() => {
     const boundary = (event: MouseEvent) => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -73,6 +73,6 @@ export function useUnsavedChanges(dirty?: boolean) {
   const context = useContext(UnsavedChangesContext);
   const { register } = context;
   const id = useRef(Symbol('settings draft'));
-  useEffect(() => dirty === undefined ? undefined : register(id.current, dirty), [register, dirty]);
+  useLayoutEffect(() => dirty === undefined ? undefined : register(id.current, dirty), [register, dirty]);
   return context;
 }

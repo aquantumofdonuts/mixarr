@@ -102,3 +102,19 @@ test('replacing the query keeps selected identities still present in the new res
   await expect(selections).toBeChecked();
   await expect(page.getByRole('button', { name: 'Add selected artists', exact: true })).toBeVisible();
 });
+
+
+test('source refinements replace history while committed searches keep their Back entry', async ({ catalogPage: page }) => {
+  await page.goto('/search?q=Earlier&tab=artist&sources=deezer');
+  await expect(page.getByRole('link', { name: 'Common Name', exact: true })).toHaveCount(2);
+  await page.getByRole('textbox', { name: 'Search query', exact: true }).fill('Committed query');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('Committed query');
+  const committedLength = await page.evaluate(() => history.length);
+  await page.getByRole('button', { name: 'Spotify', exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get('sources')).toBe('spotify,deezer');
+  expect(await page.evaluate(() => history.length)).toBe(committedLength);
+  await page.goBack();
+  await expect(page.getByRole('textbox', { name: 'Search query', exact: true })).toHaveValue('Earlier');
+  expect(new URL(page.url()).searchParams.get('sources')).toBe('deezer');
+});

@@ -99,14 +99,14 @@ export function useSearch() {
     return () => controller.abort();
   }, []);
 
-  const navigate = useCallback((patch: Record<string, string | null>) => {
-    router.push(`${pathname}${updateQuery(new URLSearchParams(paramsRef.current), patch)}`, { scroll: false });
+  const navigate = useCallback((patch: Record<string, string | null>, method: 'push' | 'replace' = 'push') => {
+    router[method](`${pathname}${updateQuery(new URLSearchParams(paramsRef.current), patch)}`, { scroll: false });
   }, [pathname, router]);
   const setSearchType = useCallback((type: SearchType) => navigate({ tab: type, page: null }), [navigate]);
   const toggleSource = useCallback((source: SearchSource) => {
     const next = new Set(sourcesKey.split(',') as SearchSource[]);
     if (next.has(source)) next.delete(source); else next.add(source);
-    if (next.size) navigate({ sources: SOURCES.filter(item => next.has(item)).join(','), page: null });
+    if (next.size) navigate({ sources: SOURCES.filter(item => next.has(item)).join(','), page: null }, 'replace');
   }, [navigate, sourcesKey]);
   const performSearch = useCallback(async (pageNum = 1) => {
     if (!query.trim()) return;

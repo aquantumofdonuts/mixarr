@@ -106,9 +106,20 @@ describe('committed search lifecycle', () => {
     await waitFor(() => expect(result.current.results).toHaveLength(1));
     act(() => result.current.toggleSource('spotify'));
     expect(navigation.push).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
     expect(request.mock.calls.some(([url]) => String(url).includes('sources=spotify'))).toBe(true);
     act(() => result.current.toggleSource('deezer'));
-    expect(new URL(navigation.push.mock.calls[0][0], 'https://mixarr.invalid').searchParams.get('sources')).toBe('spotify,deezer');
+    expect(navigation.push).not.toHaveBeenCalled();
+    expect(new URL(navigation.replace.mock.calls[0][0], 'https://mixarr.invalid').searchParams.get('sources')).toBe('spotify,deezer');
+  });
+  it('pushes explicit tab navigation and clears pagination', () => {
+    navigation.query = 'q=first&tab=artist&page=3';
+    const { result } = renderHook(() => useSearch());
+    act(() => result.current.setSearchType('album'));
+    const destination = new URL(navigation.push.mock.calls[0][0], 'https://mixarr.invalid');
+    expect(destination.searchParams.get('tab')).toBe('album');
+    expect(destination.searchParams.has('page')).toBe(false);
+    expect(navigation.replace).not.toHaveBeenCalled();
   });
   it('treats AI errors with zero results as a provider failure rather than no matches', async () => {
     navigation.query = 'q=quiet&tab=ai';

@@ -433,7 +433,7 @@ export function useToggleSubscription() {
   
   return useMutation({
     mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
-      const { error } = await api.patch(`/api/subscriptions/${id}`, { isActive });
+      const { error } = await api.put(`/api/subscriptions/${id}`, { isActive });
       if (error) throw new Error(error);
     },
     onSuccess: () => {

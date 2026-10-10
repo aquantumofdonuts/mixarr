@@ -129,3 +129,27 @@ test('a restoration finishing after logout cannot publish feedback into the repl
   } else { await page.getByRole('button', {name:'Account menu',exact:true}).click(); await page.getByRole('button', {name:'Logout',exact:true}).click(); }
   await expect(page).toHaveURL(/\/login(?:\?|$)/); await expect(page.getByRole('button', {name:'Undo',exact:true})).toHaveCount(0); const completed=page.waitForResponse('**/api/imports/review/restore'); await finish(); await (await completed).finished(); await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))); await expect(page.getByText('Rejection restored', {exact:true})).toHaveCount(0); await expect(page.getByText('Could not restore rejection', {exact:true})).toHaveCount(0); expect(restores).toBe(1);
 });
+
+
+test('queue status, item type and empty-state recovery replace filters without consuming Back history', async ({ catalogPage: page }) => {
+  await page.goto('/search?q=Earlier');
+  await page.goto('/queue?keep=value');
+  await expect(page.getByText('Queue Artist 520', { exact: true })).toBeVisible();
+  const initialLength = await page.evaluate(() => history.length);
+  await page.getByRole('combobox', { name: 'Review status', exact: true }).selectOption('rejected');
+  await expect(page.getByText('No rejected review items.', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => history.length)).toBe(initialLength);
+  await page.getByRole('combobox', { name: 'Review item type', exact: true }).selectOption('album');
+  await expect(page.getByText('No review items match your search or item type.', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => history.length)).toBe(initialLength);
+  await page.getByRole('button', { name: 'Clear queue filters', exact: true }).click();
+  await expect(page.getByText('No rejected review items.', { exact: true })).toBeVisible();
+  expect(new URL(page.url()).searchParams.has('itemType')).toBe(false);
+  expect(await page.evaluate(() => history.length)).toBe(initialLength);
+  await page.getByRole('button', { name: 'View pending items', exact: true }).click();
+  await expect(page.getByText('Queue Artist 520', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => history.length)).toBe(initialLength);
+  expect(new URL(page.url()).searchParams.get('keep')).toBe('value');
+  await page.goBack();
+  await expect(page).toHaveURL('/search?q=Earlier');
+});

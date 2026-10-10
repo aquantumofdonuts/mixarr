@@ -149,7 +149,7 @@ export const test = base.extend<CatalogFixtures>({
           case '/api/settings/base-url': return reply({ baseUrl: 'http://localhost' });
         }
       }
-      if (method === 'PATCH' && path === '/api/subscriptions/11') {
+      if (method === 'PUT' && path === '/api/subscriptions/11') {
         subscription.isActive = request.postDataJSON().isActive;
         return reply({ subscription });
       }

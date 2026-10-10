@@ -76,7 +76,7 @@ test('keyboard inspector keeps source and chronology accessible, traps focus and
 test('keyboard subscription run, schedule and original result run reference stay separate', async ({ catalogPage: page }) => {
   const actions: { path: string; body: unknown }[] = [];
   page.on('request', request => {
-    if (new URL(request.url()).pathname === '/api/subscriptions/11' && request.method() === 'PATCH') actions.push({ path: '/api/subscriptions/11', body: request.postDataJSON() });
+    if (new URL(request.url()).pathname === '/api/subscriptions/11' && request.method() === 'PUT') actions.push({ path: '/api/subscriptions/11', body: request.postDataJSON() });
   });
   page.on('request', request => { if (request.url().endsWith('/jobs/run/subscription/11')) actions.push({ path: '/api/jobs/run/subscription/11', body: request.postData() }); });
   await page.goto('/subscriptions');
@@ -88,6 +88,10 @@ test('keyboard subscription run, schedule and original result run reference stay
   expect(actions[0].path).toBe('/api/jobs/run/subscription/11');
   expect(actions[1].body).toEqual({ isActive: false });
   await expect(page.getByRole('button', { name: 'Resume schedule', exact: true })).toBeVisible();
+  await keyboardActivate(page, page.getByRole('button', { name: 'Resume schedule', exact: true }));
+  await expect.poll(() => actions.length).toBe(3);
+  expect(actions[2].body).toEqual({ isActive: true });
+  await expect(page.getByRole('button', { name: 'Pause schedule', exact: true })).toBeVisible();
   await keyboardActivate(page, page.getByRole('link', { name: 'View results', exact: true }));
   const result = page.getByRole('article', { name: 'Result 102', exact: true });
   await keyboardActivate(page, result.getByRole('link', { name: 'Run 71', exact: true }));

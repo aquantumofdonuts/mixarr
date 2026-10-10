@@ -46,12 +46,17 @@ test('library artist closure and browser Back retain filters, selected IDs, scro
   await expect.poll(() => main.evaluate(element => element.scrollTop)).toBe(top); await expect(link).toBeFocused();
 });
 
-test('library search replaces its draft and discrete filters preserve unrelated parameters', async ({ catalogPage: page }) => {
-  await page.goto('/library?page=2&keep=value&seed=one&seed=two'); await page.getByRole('textbox', { name: 'Search library snapshot' }).fill('Library Artist 519');
+test('library search and filter refinements replace history and preserve unrelated parameters', async ({ catalogPage: page }) => {
+  await page.goto('/search?q=Earlier');
+  await page.goto('/library?page=2&keep=value&seed=one&seed=two');
+  const initialLength = await page.evaluate(() => history.length); await page.getByRole('textbox', { name: 'Search library snapshot' }).fill('Library Artist 519');
   await expect(page).toHaveURL(/q=Library\+Artist\+519/); await expect(page.getByText('1 of 1 matching artists shown · 0 selected')).toBeVisible();
   await page.getByRole('combobox', { name: 'Filter library snapshot' }).selectOption('complete');
   await expect(page).toHaveURL(/filter=complete/); expect(new URL(page.url()).searchParams.getAll('seed')).toEqual(['one', 'two']); expect(new URL(page.url()).searchParams.get('keep')).toBe('value');
-  await page.goBack(); await expect(page.getByRole('combobox', { name: 'Filter library snapshot' })).toHaveValue('all'); await expect(page.getByRole('textbox', { name: 'Search library snapshot' })).toHaveValue('Library Artist 519');
+  expect(await page.evaluate(() => history.length)).toBe(initialLength);
+  await Promise.all([page.waitForEvent('load'), page.evaluate(() => window.location.reload())]);
+  await expect(page.getByRole('combobox', { name: 'Filter library snapshot' })).toHaveValue('complete');
+  await page.goBack(); await expect(page).toHaveURL('/search?q=Earlier');
 });
 
 test('library narrow table provides labeled horizontal scrolling without page overflow', async ({ catalogPage: page }) => {

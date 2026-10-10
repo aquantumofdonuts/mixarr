@@ -95,8 +95,8 @@ export default function LibraryPage() {
     const timer = setTimeout(() => router.replace(`${pathname}${updateQuery(new URLSearchParams(queryString), { q: searchQuery.slice(0, 120).trim(), page: null })}`, { scroll: false }), 300);
     return () => clearTimeout(timer);
   }, [searchQuery, q, queryString, scope, pathname, router]);
-  function navigate(changes: Record<string, string | null>) {
-    router.push(`${pathname}${updateQuery(new URLSearchParams(queryString), changes)}`, { scroll: false });
+  function navigate(changes: Record<string, string | null>, method: 'push' | 'replace' = 'push') {
+    router[method](`${pathname}${updateQuery(new URLSearchParams(queryString), changes)}`, { scroll: false });
   }
   const [duplicateCount, setDuplicateCount] = useState<number>(0);
   const [fixJob, setFixJob] = useState<FixJobStatus | null>(null);
@@ -553,7 +553,7 @@ export default function LibraryPage() {
           <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-semibold [&::-webkit-details-marker]:hidden">
             <ChevronRight aria-hidden="true" className="disclosure-chevron h-4 w-4" />Metadata status
           </summary>
-          <Select label="Filter library snapshot" value={filter} onChange={event => navigate({ filter: event.target.value, page: null })} options={[
+          <Select label="Filter library snapshot" value={filter} onChange={event => navigate({ filter: event.target.value, page: null }, 'replace')} options={[
             { value: 'all', label: 'All Artists' }, { value: 'needs_refresh', label: 'Needs Refresh' },
             { value: 'no_albums', label: 'No Albums' }, { value: 'no_poster', label: 'No Poster' },
             { value: 'no_overview', label: 'No Bio' }, { value: 'no_genres', label: 'No Genres' }, { value: 'complete', label: 'Complete' },
