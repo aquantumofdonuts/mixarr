@@ -75,6 +75,7 @@ jobs:
 
       - name: Build API and web
         run: |
+          npm run build --workspace=@mixarr/shared-types
           npm run build --workspace=@mixarr/api
           npm run build --workspace=@mixarr/web
 
