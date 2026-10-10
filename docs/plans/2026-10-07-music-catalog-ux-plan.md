@@ -3,14 +3,16 @@
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 > **For Codex:** Read the repository's executing-plans skill, or subagent-driven-development when executing an approved same-session plan. This document authorizes planning, not an automatic start of implementation.
 
-**Goal:** Implement all 25 UI/UX recommendations and a distinctive music-catalog identity built around artwork, source provenance, release chronology, collaborator credits, and truthful acquisition outcomes.
+**Goal:** Implement all 25 UI/UX recommendations and a distinctive music-catalog identity built around artwork, source provenance, release chronology, collaborator credits, and truthful acquisition outcomes, plus the three Constellation follow-ups R26–R28 added on October 8, 2026 (settings section, bounded wander field, visible budget/source availability).
 
 **Architecture:** Extend the existing Next application, shared primitives, TanStack Query hooks, and authenticated Express routers. Add one shared artist inspector and narrow typed contracts; retain existing identity resolution, Lidarr operations, graph lifecycle, and authorization. Use existing records and Node crypto for recovery; no new UI framework, dependency, universal event ledger, or database migration is planned.
 
 **Tech Stack:** Next 15 / React 18, TypeScript, Tailwind 3, next-themes, TanStack Query 5, Lucide, Express, Prisma, Zod, existing Redis/Lidarr/provider services, Vitest, Testing Library, Playwright.
 
-**Design:** [Music catalog visual and interaction design](2026-10-07-music-catalog-ux-design.md). Its R01–R25 and I01 acceptance table is the immutable requirement set for the completion audit.
-**Status:** Independently reviewed; ready for execution. No implementation task is complete.
+**Design:** [Music catalog visual and interaction design](2026-10-07-music-catalog-ux-design.md). Its R01–R28 and I01 acceptance table is the immutable requirement set for the completion audit.
+**Status:** T01–T32 implemented; final independent SPEC/QUALITY review passed at `ffeb12352704b404130fc73c27ff661c032c7733`. The [completion matrix](2026-10-07-music-catalog-ux-completion.md) validates all 137 commitments: 136 COMPLETE and C137 ACCEPTED_GAP. Owner reason on October 10, 2026: “C137 deferred: provider verification will be performed separately”. The [execution checkpoint](2026-10-08-music-catalog-ux-progress.md) records task-by-task verification and the [full review](2026-10-09-music-catalog-ux-full-review.md) records code QUALITY PASS. Original planning-review text below remains historical; integration/deployment and owner post-merge testing are separate.
+
+**Binding T32/R27 amendment:** The [owner-approved hard-cap contract and independent amendment review](2026-10-08-music-catalog-amendment-review.md) supersede unconditional neighbour preservation in the original task text. Retain the original seed, current focus and last five breadcrumb identities; prune oldest-merged non-mandatory nodes outside anchor neighbourhoods first, then non-mandatory neighbours as necessary to keep the hard 300-node limit. Neighbour preservation is conditional on capacity. T31/T32 amendment review and execution are complete as recorded in the linked evidence.
 **Planning source revision:** `1e785fd`; refresh HEAD and relevant diffs at execution start. Other work landed during planning.
 
 ---
@@ -28,8 +30,10 @@ The tasks below are grouped by dependency, not by the order the critique was del
 | C | T11–T15 | Inspector, feed, summaries and subscription navigation |
 | D | T16–T19 | Search/add behavior, label traversal and seed discovery |
 | E | T20–T22 | Full queue and library navigation |
-| F | T23–T27 | Settings, services, downloads, named graph entry and remaining screens |
+| F | T23–T27, T31–T32 | Settings (including Constellation section), services, downloads, named graph entry, bounded wander field and availability states, remaining screens |
 | G | T28–T30 | Browser evidence, completion matrix, full review and fresh verification |
+
+T31 and T32 keep their out-of-sequence numbers so the existing task references in the design table and review dispositions stay valid. Within batch F run T23 → T31 and T26 → T32; T27 runs last because it sweeps the routes those tasks touch.
 
 Execute batches sequentially. Within a batch, shared hooks/primitives/source files are serial work. Use requesting-code-review and the repository's four lenses after each task/batch. Do not merge a half-migrated palette or expose Undo before its authenticated restore route exists. Feature commits can remain local until the integrated batch is reviewed; external publication is a separate action.
 
@@ -495,9 +499,33 @@ Label `GET /api/search/label/:mbid/artists` keeps its route but returns `LabelAr
 4. Run web typecheck, the existing targeted tests for changed behavior, and T01 smoke spec; inspect both themes on the named remaining routes. Pure style edits do not get implementation-mirroring unit tests.
 5. Commit: `style(web): complete catalog language across remaining screens`.
 
+### T31: Add the admin Constellation settings section
+
+**Requirements:** R26. **Depends on:** T23 (save-scope pattern, dirty registry) and T03.
+
+**Files:** Create `apps/web/src/components/settings/constellation-settings.tsx`, `apps/web/src/components/settings/__tests__/constellation-settings.test.tsx`. Modify `apps/web/src/app/settings/page.tsx` (mount inside the existing `isAdmin` block beside Global Settings), `apps/web/src/lib/hooks.ts`, `apps/web/src/lib/api.ts` if endpoint types are held there, `README.md` (replace the “no settings page yet” paragraph and the raw `PUT` example with the UI location, keeping the API lines as the automation path). Modify `apps/api/src/routes/settings.ts`, `apps/api/src/services/constellation/DailyApiBudget.ts`, `apps/api/tests/api/settings.test.ts`, `apps/api/tests/services/constellation/DailyApiBudget.test.ts` for the usage read. Read `apps/api/src/schemas/settings.ts` (`updateConstellationSettingsSchema` is a strict partial: positive integers, `indexRefresh` enum) and `apps/api/src/services/settings.service.ts` (`DEFAULT_CONSTELLATION_SETTINGS`) first; the section must not invent keys.
+
+1. Add `DailyApiBudget.used()` (read today's counter, 0 when absent) and `GET /api/settings/constellation/usage` behind `requireAdmin`, returning `{ day, used, limit }` from the same key the budget charges. No new state; the counter already exists.
+2. Hooks: `useConstellationSettings`, `useUpdateConstellationSettings` (PUT with only the changed keys, since the schema is a partial), `useConstellationUsage`. Admin-only query keys; non-admins never fetch.
+3. Section: index on/off with the README's honest cost sentence beside the toggle, index path, orbit edge budget, daily API budget, fan-out, path max degrees, index refresh (`monthly`/`off`). Mono numerals; one plain sentence per budget saying what it bounds; today's usage as `used / limit` with the UTC reset time. Client validation mirrors the Zod schema and the first invalid field receives focus. Uses the T23 baseline/draft/saving/error pattern and registers with the dirty registry; Save writes only this section.
+4. Tests: renders stored values, submits only changed keys, rejects a non-positive budget before the request, shows server validation errors inline, hides for non-admin, usage read handles a missing counter. Run `npm exec --workspace @mixarr/web -- vitest run src/components/settings/__tests__/constellation-settings.test.tsx`, `npm exec --workspace @mixarr/api -- vitest run tests/api/settings.test.ts tests/services/constellation/DailyApiBudget.test.ts`, both typechecks.
+5. Commit: `feat(settings): add constellation section with budget usage`.
+
+### T32: Bound the wander field and surface budget and source availability
+
+**Requirements:** R27/R28/R22. **Depends on:** T26 (named entry, stale-response handling) and T06 (result-state pattern).
+
+**Files:** Modify `apps/web/src/hooks/useConstellation.ts`, `apps/web/src/hooks/useFrontierStream.ts`, `apps/web/src/types/constellation.ts`, `apps/web/src/components/constellation/ConstellationView.tsx`, `ConstellationControls.tsx` (legend), their existing tests under `__tests__`. Modify `apps/api/src/routes/constellation.ts` (seed/expand responses gain `creditSource: 'index' | 'live'` read from `SettingsService.getConstellationSettings().constellationIndexEnabled`), `apps/api/src/jobs/constellation/constellation-expand-worker.ts` (publish status frames), `apps/api/src/services/constellation/resolveCreditSource.ts` and `orbit-crawl-worker.ts` (crawl budget share), `apps/api/src/services/constellation/DailyApiBudget.ts`, and their tests (`tests/routes/constellation.test.ts`, `tests/jobs/constellation/constellation-expand.test.ts`, `tests/services/constellation/DailyApiBudget.test.ts`, `tests/jobs/constellation/orbit-crawl.test.ts`). Read the current `expandMore`/`mergeSubgraph` and the `nodeObjs` map before editing; the field cap lives in the hook's state, the map eviction in the view.
+
+1. Field cap in the hook: export `MAX_FIELD_NODES = 300` and `ANCHOR_BREADCRUMBS = 5`. After every merge (expand or streamed frame) exceeding the cap, prune nodes that are not the focus, not one of the anchor person ids the view passes in (the last five breadcrumbs), and not adjacent to any anchor, oldest-merged first (track merge order in the hook; do not sort by id), until at or under the cap; drop edges touching pruned nodes. The view evicts pruned ids from `nodeObjs` so a restored node gets a fresh position; surviving nodes keep theirs. Breadcrumbs are state in the view and are never pruned. Tests: cap holds after repeated merges, anchors and their neighbours survive, a streamed frame respects the cap, re-expanding a pruned breadcrumb restores it, node identity of survivors is unchanged across a prune.
+2. Status frames: the expand worker publishes `{ focusId, nodes: [], edges: [], status: 'budget-exhausted' }` on budget exhaustion (where it currently only logs) and `{ …, status: 'source-unavailable', detail }` when `expandPerson` throws any other error, then returns the existing non-throwing result. `useFrontierStream` passes a frame with `status` to a new `onStatus` callback instead of `onFrame`. The seed/expand routes include `creditSource`. Tests: worker publishes the right frame per failure class and still closes the index handle; the stream hook routes status frames separately; the route reports the configured source.
+3. View states using the T06 result-state pattern inside the graph region, non-blocking: budget spent shows “Daily Discogs budget used; showing cached collaborators only. Resets 00:00 UTC” with no Retry; source unavailable shows the sanitized detail with Retry that re-calls `expandMore` for the same person; live source adds “Genre colour unavailable on the live Discogs source” to the legend and the controls' genre highlight is disabled with that reason. A status never clears the existing graph. Tests: each state renders from a status frame, Retry targets the same person id, legend text follows `creditSource`, no state is shown merely because the stream is idle.
+4. Crawl headroom: `DailyApiBudget` accepts a `share` (0 < share ≤ 1, default 1) that lowers the limit it enforces without changing the key; `resolveConfiguredCreditSource(userId, { budgetShare: 0.8 })` is used by the orbit crawl only, the expand worker keeps the full limit. Tests: a share of 0.8 refuses at 80% while a full-share budget on the same counter still allows the remainder; the crawl wrapper passes the share.
+5. Run `npm exec --workspace @mixarr/web -- vitest run src/hooks/__tests__/useConstellation.test.tsx src/hooks/__tests__/useFrontierStream.test.tsx src/components/constellation/__tests__/ConstellationView.test.tsx src/components/constellation/__tests__/ConstellationControls.test.tsx` and `npm exec --workspace @mixarr/api -- vitest run tests/routes/constellation.test.ts tests/jobs/constellation tests/services/constellation/DailyApiBudget.test.ts`; both typechecks. Commit: `feat(constellation): bound the wander field and show budget and source state`.
+
 ### T28: Verify responsive, keyboard and signature workflows
 
-**Requirements:** R08/R09/R24/R25/I01 plus cross-route integration. **Depends on:** T12–T27.
+**Requirements:** R08/R09/R24/R25/I01 plus cross-route integration. **Depends on:** T12–T27, T31, T32.
 
 **Files:** Create `apps/web/e2e/catalog-accessibility.spec.ts`, `catalog-workflows.spec.ts`, `catalog-visual.spec.ts`. Modify fixture helpers from T01 and `apps/web/playwright.config.ts` only to isolate deterministic catalog tests from real-backend tests.
 
@@ -513,7 +541,7 @@ Label `GET /api/search/label/:mbid/artists` keeps its route but returns `LabelAr
 
 **Files:** Create `docs/plans/2026-10-07-music-catalog-ux-completion.md`; update this plan's task status with real evidence only. Read local `.github/skills/completion-audit/SKILL.md`; if absent, use the installed `completion-audit` skill rather than omitting it.
 
-1. Extract granular checklist items from design/plan, including endpoints, scopes, state machine, sources, UI routes, responsive behavior, Undo, dirty navigation and lifecycle cleanup. Count using a deterministic TypeScript array/script; R01–R25/I01 remain the parent denominator.
+1. Extract granular checklist items from design/plan, including endpoints, scopes, state machine, sources, UI routes, responsive behavior, Undo, dirty navigation, lifecycle cleanup, the constellation field cap, status frames and settings section. Count using a deterministic TypeScript array/script; R01–R28/I01 remain the parent denominator.
 2. For every item record Exists → Not a stub → Wired → End-to-end reachable, with source/test/runtime evidence. Trace browser action through route/service/provider/database and back for acquisitions, queue search and Undo. Mocked screenshots are not provider or authorization evidence.
 3. Use the isolated test database and controlled provider adapters to prove real router/database scope and mutation transitions, including two users, missing identity/connection, timeout and stale revision. A sandbox Lidarr run can separately confirm provider integration when available; describe precisely which real-provider paths were exercised.
 4. Mark gaps explicitly and leave their parent requirements incomplete. No automatic acceptance of a gap because a provider/test environment is unavailable. Human visual review and genuine external-provider evidence remain labeled pending until supplied.
@@ -545,6 +573,9 @@ Label `GET /api/search/label/:mbid/artists` keeps its route but returns `LabelAr
 | Navigation | Browser Back loses search/draft/selection | URL-first list state; scroll restoration; dirty Back test with actual browser history |
 | Dependencies | New framework or new ledger needed for visual refresh | Existing stack/services/fields; no new dependency or migration |
 | Integrity | Administrative or acquisition counts overstate evidence | Scope labels, canonical IDs, rule/query-derived counts, no assumed history |
+| Lifecycle | Expand-in-place field grows until the force simulation stalls | T32 cap of 300 nodes with breadcrumb anchors; prune oldest-merged; survivors keep identity; tests over repeated merges and streamed frames |
+| Integrity | Spent Discogs budget or dead source looks like a settled graph | T32 server status frames and `creditSource`; client renders only what the server reports; crawl keeps 20% headroom |
+| Configuration | Constellation settings exist only as an API | T31 admin section over the existing endpoints with usage read; no new keys; README points at the UI |
 
 **Design/plan attack corrections incorporated:** release counts are not artist totals; lastTest is not health; feed success waits for confirmation; unresolved names are not canonical identities; reversible decisions retain records; cursor ordering includes IDs; unmounted mobile navigation is not trusted; source pagination/tenant scope are explicit; uncertain external outcomes cannot be silently retried as if no side effect occurred.
 
@@ -568,3 +599,5 @@ The requesting-code-review skill's read-only reviewer checked the design, plan, 
 These are planning corrections. No mutation implementation or runtime acceptance is claimed by this review.
 
 **Final planning review verdict:** Ready for execution, with no remaining critical or important planning findings. This verdict covers the documents only; implementation, runtime verification, and human visual acceptance remain pending.
+
+**Post-review additions (October 8, 2026):** R26–R28 and T31–T32 came from the constellation cleanup session (commits `da26fb3`, `171adda`, `1e785fd`) and were not part of the reviewed set. They reuse existing endpoints, the T06/T23 patterns and the existing stream token; no new dependency, key or migration. Run the same read-only reviewer over them before batch F and record its dispositions here. The reviewer should specifically attack: whether a status frame can be mistaken for a graph frame by an older client, whether pruning can ever remove the focus, and whether the usage endpoint leaks anything beyond a count.
