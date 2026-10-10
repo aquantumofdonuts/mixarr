@@ -771,9 +771,11 @@ export class FeedService {
         outcome = { artistMbid, state: 'already-in-library', message: 'Artist is already in Lidarr' };
       } else {
         const options = await effectiveAddOptions(lidarr, this.lidarrConfig || {}, input, signal);
-        await lidarr.addArtistWithCacheWarm(artistMbid, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, true,
+        const result = await lidarr.addArtistWithCacheWarm(artistMbid, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, true,
           options.searchOnAdd, false, options.monitorOption, options.monitorNewItems, signal);
-        outcome = { artistMbid, state: 'added', message: 'Artist added to Lidarr' };
+        outcome = result.alreadyInLibrary
+          ? { artistMbid, state: 'already-in-library', message: 'Artist is already in Lidarr' }
+          : { artistMbid, state: 'added', message: 'Artist added to Lidarr' };
       }
     } catch (error) {
       // Duplicate responses only count as success after an exact identity lookup.

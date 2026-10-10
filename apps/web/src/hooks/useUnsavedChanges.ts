@@ -21,14 +21,29 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   const bypassUnload = useRef(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const unloadAttached = useRef(false);
+  const beforeUnload = useCallback((event: BeforeUnloadEvent) => {
+    if (bypassUnload.current || ![...entries.current.values()].some(Boolean)) return;
+    event.preventDefault(); event.returnValue = '';
+  }, []);
+  const updateDirty = useCallback(() => {
+    const dirty = [...entries.current.values()].some(Boolean);
+    // ponytail: synchronize the native guard in the same commit as draft registration.
+    if (dirty !== unloadAttached.current) {
+      if (dirty) window.addEventListener('beforeunload', beforeUnload);
+      else window.removeEventListener('beforeunload', beforeUnload);
+      unloadAttached.current = dirty;
+    }
+    setHasUnsavedChanges(dirty);
+  }, [beforeUnload]);
   const register = useCallback((id: symbol, dirty: boolean) => {
     entries.current.set(id, dirty);
-    setHasUnsavedChanges([...entries.current.values()].some(Boolean));
+    updateDirty();
     return () => {
       entries.current.delete(id);
-      setHasUnsavedChanges([...entries.current.values()].some(Boolean));
+      updateDirty();
     };
-  }, []);
+  }, [updateDirty]);
   const confirmDiscard = useCallback(() => ![...entries.current.values()].some(Boolean) || window.confirm('Discard unsaved settings changes?'), []);
   const guardedNavigation = useCallback((action: () => void) => {
     if (!confirmDiscard()) return false;
@@ -40,15 +55,6 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
     }
     return true;
   }, [confirmDiscard]);
-  useLayoutEffect(() => {
-    // ponytail: read the live registry so protection does not wait for a second render.
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (bypassUnload.current || ![...entries.current.values()].some(Boolean)) return;
-      event.preventDefault(); event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', beforeUnload);
-    return () => window.removeEventListener('beforeunload', beforeUnload);
-  }, []);
   useEffect(() => {
     const boundary = (event: MouseEvent) => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -64,8 +70,13 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
       window.location.assign(target.href);
     };
     document.addEventListener('click', boundary, true);
-    return () => { document.removeEventListener('click', boundary, true); clearTimeout(resetTimer.current); };
-  }, []);
+    return () => {
+      document.removeEventListener('click', boundary, true);
+      window.removeEventListener('beforeunload', beforeUnload);
+      unloadAttached.current = false;
+      clearTimeout(resetTimer.current);
+    };
+  }, [beforeUnload]);
   return createElement(UnsavedChangesContext.Provider, { value: { hasUnsavedChanges, register, confirmDiscard, guardedNavigation } }, children);
 }
 

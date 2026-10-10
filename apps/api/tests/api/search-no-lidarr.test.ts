@@ -427,3 +427,48 @@ describe('Label release traversal through the search route', () => {
     expect(mockGetLabelArtists).not.toHaveBeenCalled();
   });
 });
+
+
+describe('confirmed Search additions and ancillary notifications', () => {
+  it.each([false, true])('returns provider confirmation with one addition when notification fails=%s', async failNotification => {
+    const { notificationService } = await import('../../src/services/notifications.js');
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    const artist = { foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', artistName: 'Confirmed Artist' };
+    const add = vi.fn().mockResolvedValue({ artist, refreshCommand: { id: 1 } });
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never);
+    vi.mocked(LidarrService).mockImplementationOnce(function () { return { addArtistWithCacheWarm: add } as unknown as LidarrService; });
+    if (failNotification) vi.mocked(notificationService.send).mockRejectedValueOnce(new Error('Notification database unavailable'));
+    else vi.mocked(notificationService.send).mockResolvedValueOnce(undefined);
+    const response = await request(app).post('/api/search/artists/add').send({ foreignArtistId: artist.foreignArtistId });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ success: true, artist, refreshTriggered: true });
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+  it('preserves an actual provider failure without sending a notification or retrying the addition', async () => {
+    const { notificationService } = await import('../../src/services/notifications.js');
+    vi.mocked(notificationService.send).mockClear();
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    const add = vi.fn().mockRejectedValue(new Error('Provider rejected addition'));
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never);
+    vi.mocked(LidarrService).mockImplementationOnce(function () { return { addArtistWithCacheWarm: add } as unknown as LidarrService; });
+    const response = await request(app).post('/api/search/artists/add').send({ foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe('Provider rejected addition');
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(notificationService.send).not.toHaveBeenCalled();
+  });
+});
+
+
+it('classifies mixed batch helper confirmations as skipped or added after the cache initially misses both', async () => {
+  const existing = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', added = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+  const add = vi.fn().mockResolvedValueOnce({ artist: { foreignArtistId: existing }, alreadyInLibrary: true }).mockResolvedValueOnce({ artist: { foreignArtistId: added }, alreadyInLibrary: false });
+  vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never).mockResolvedValueOnce(connection as never);
+  const provider = function () { return { addArtistWithCacheWarm: add } as unknown as LidarrService; };
+  vi.mocked(LidarrService).mockImplementationOnce(provider).mockImplementationOnce(provider);
+  const response = await request(app).post('/api/search/batch').send({ artistIds: [existing, added] });
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ added: [added], skipped: [existing], failed: [] });
+  expect(add.mock.calls.map(call => call[0])).toEqual([existing, added]);
+});

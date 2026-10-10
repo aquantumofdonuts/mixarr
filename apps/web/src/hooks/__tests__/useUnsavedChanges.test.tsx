@@ -70,3 +70,28 @@ it('protects the first dirty commit before passive draft effects and cleans up i
   window.dispatchEvent(event);
   expect(event.defaultPrevented).toBe(false);
 });
+
+
+it('attaches exactly one native listener only while aggregate drafts are dirty, including StrictMode cleanup', () => {
+  const attached = new Set<EventListenerOrEventListenerObject>();
+  const add = window.addEventListener.bind(window), remove = window.removeEventListener.bind(window);
+  vi.spyOn(window, 'addEventListener').mockImplementation((type, listener, options) => {
+    if (type === 'beforeunload') attached.add(listener);
+    add(type, listener, options);
+  });
+  vi.spyOn(window, 'removeEventListener').mockImplementation((type, listener, options) => {
+    if (type === 'beforeunload') attached.delete(listener);
+    remove(type, listener, options);
+  });
+  const drafts = (first: boolean, second?: boolean) => <StrictMode><UnsavedChangesProvider><Draft dirty={first} />{second !== undefined && <Draft dirty={second} />}</UnsavedChangesProvider></StrictMode>;
+  const { rerender, unmount } = render(drafts(false, false));
+  expect(attached.size).toBe(0);
+  rerender(drafts(true, true)); expect(attached.size).toBe(1);
+  rerender(drafts(false, true)); expect(attached.size).toBe(1);
+  rerender(drafts(false)); expect(attached.size).toBe(0);
+  rerender(drafts(true)); expect(attached.size).toBe(1);
+  unmount(); expect(attached.size).toBe(0);
+  const initiallyDirty = render(drafts(true, true));
+  expect(attached.size).toBe(1);
+  initiallyDirty.unmount(); expect(attached.size).toBe(0);
+});

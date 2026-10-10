@@ -140,6 +140,8 @@ describe('owned subscription result decisions through the actual router', () => 
     } });
     expect((await approve()).status).toBe(200);
     expect(mocks.addArtist.mock.calls[0][5]).toBe(false);
+    expect(mocks.notify).toHaveBeenCalledExactlyOnceWith(1, 'artist.added', { artistName: 'Same Name' });
+    expect(mocks.logEntry.create).toHaveBeenCalledWith({ data: expect.objectContaining({ metadata: expect.objectContaining({ outcome: 'added' }) }) });
   });
   it.each(['album', 'unknown'])('requires valid item identity for %s before claiming', async itemType => {
     row.itemType = itemType; row.albumMbid = null;
@@ -295,7 +297,7 @@ describe('owned subscription result decisions through the actual router', () => 
     let release!: () => void;
     let started!: () => void;
     const start = new Promise<void>(resolve => { started = resolve; });
-    mocks.addArtist.mockImplementation(async () => { started(); await new Promise<void>(resolve => { release = resolve; }); });
+    mocks.addArtist.mockImplementation(async () => { started(); await new Promise<void>(resolve => { release = resolve; }); return { artist: { foreignArtistId: mbid } }; });
     const approval = approve().then(response => response);
     await start;
     const rejection = await reject();
@@ -333,4 +335,21 @@ describe('owned subscription result decisions through the actual router', () => 
     expect(response.body.success).toBe(false); expect(mocks.addArtist).not.toHaveBeenCalled(); expect(row.status).toBe('failed');
   });
 
+});
+
+
+it('reports helper-confirmed existing membership after the initial lookup without claiming a new addition', async () => {
+  mocks.addArtist.mockResolvedValueOnce({ artist: { foreignArtistId: mbid }, alreadyInLibrary: true });
+  const response = await approve();
+  expect(response.status).toBe(200);
+  expect(response.body).toMatchObject({ success: true, outcome: 'already-in-library' });
+  expect(response.body.message).toContain('already in Lidarr');
+  expect(mocks.addArtist).toHaveBeenCalledTimes(1);
+  expect(row.status).toBe('added');
+  expect(mocks.notify).not.toHaveBeenCalled();
+  expect(mocks.logEntry.create).toHaveBeenCalledExactlyOnceWith({ data: {
+    level: 'info', category: 'subscription',
+    message: '"Same Name" is already in Lidarr from subscription "Daily"',
+    metadata: { mbid, albumMbid: null, subscriptionId: 2, outcome: 'already-in-library' },
+  } });
 });

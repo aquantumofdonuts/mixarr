@@ -153,3 +153,14 @@ describe('Feed acquisition claims', () => {
   });
 
 });
+
+
+it('reports helper-confirmed membership appearing after the initial lookup as already in library', async () => {
+  const s = setup();
+  s.lidarr.addArtistWithCacheWarm.mockResolvedValueOnce({ artist: { foreignArtistId: mbid }, alreadyInLibrary: true } as never);
+  const result = await s.service.approve('feed-1', 1);
+  expect(await s.lidarr.getArtistByMbid.mock.results[0].value).toBeNull();
+  expect(s.lidarr.addArtistWithCacheWarm).toHaveBeenCalledTimes(1);
+  expect(result.outcome).toMatchObject({ state: 'already-in-library', message: 'Artist is already in Lidarr' });
+  expect(s.rows()[0].status).toBe('added');
+});

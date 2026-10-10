@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Modal, ModalFooter } from '@/components/ui/modal';
 import { useToast } from '@/components/ui/toast';
+import { ArtistLink } from '@/components/artists/ArtistLink';
 import { ExternalLinks } from '@/components/ExternalLinks';
 import { api } from '@/lib/api';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
@@ -168,10 +169,10 @@ export function LabelArtistsModal({ label, onClose }: LabelArtistsModalProps) {
         <div className="divide-y border-y">
           {displayedArtists.map(artist => <div key={artist.id} className="flex items-center gap-3 py-2">
             <input type="checkbox" aria-label={`Select ${artist.name}`} checked={selectedIds.has(artist.id)} disabled={isAddingBatch} onChange={() => toggleSelect(artist.id)} className="h-5 w-5 shrink-0" />
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-button bg-muted">
+            <ArtistLink mbid={artist.id} aria-label={`Open artist ${artist.name}`} className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-button bg-muted">
               {artist.imageUrl ? <img src={artist.imageUrl} alt="" className="h-full w-full object-cover" /> : <Music aria-hidden="true" className="h-5 w-5 text-muted-foreground" />}
-            </div>
-            <div className="min-w-0 flex-1"><span className="block break-words text-sm font-medium">{artist.name}</span><ExternalLinks mbid={artist.id} artistName={artist.name} size="sm" /></div>
+            </ArtistLink>
+            <div className="min-w-0 flex-1"><ArtistLink mbid={artist.id} className="block break-words text-sm font-medium">{artist.name}</ArtistLink><ExternalLinks mbid={artist.id} artistName={artist.name} size="sm" /></div>
           </div>)}
         </div>
         {!isLoading && nextReleaseOffset === null && <p className="text-xs text-muted-foreground">All reported releases checked.</p>}

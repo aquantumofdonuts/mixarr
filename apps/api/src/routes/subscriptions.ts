@@ -272,8 +272,9 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
         if (isAlbum) {
           await lidarr.addAlbumWithCacheWarm(mbid, result.albumMbid!, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, signal, options.searchOnAdd);
         } else {
-          await lidarr.addArtistWithCacheWarm(mbid, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, true, options.searchOnAdd, false,
+          const acquisition = await lidarr.addArtistWithCacheWarm(mbid, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, true, options.searchOnAdd, false,
             options.monitorOption, options.monitorNewItems, signal);
+          alreadyInLibrary = acquisition.alreadyInLibrary === true;
         }
       }
       outcome = alreadyInLibrary ? 'already-in-library' : 'added';
@@ -318,12 +319,12 @@ subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
       return;
     }
     // Respond after confirmation; channel delivery must not extend the acquisition response deadline.
-    res.json({ success: true, outcome, message: `Added "${result.name}" to Lidarr` });
+    res.json({ success: true, outcome, message: outcome === 'already-in-library' ? `"${result.name}" is already in Lidarr` : `Added "${result.name}" to Lidarr` });
     try {
       await prisma.logEntry.create({ data: { level: 'info', category: 'subscription',
-        message: `Added "${result.name}" to Lidarr from subscription "${subscription.name}"`,
-        metadata: { mbid, albumMbid: result.albumMbid, subscriptionId: id } } });
-      await notificationService.send(ownerId, 'artist.added', { artistName: result.name });
+        message: outcome === 'already-in-library' ? `"${result.name}" is already in Lidarr from subscription "${subscription.name}"` : `Added "${result.name}" to Lidarr from subscription "${subscription.name}"`,
+        metadata: { mbid, albumMbid: result.albumMbid, subscriptionId: id, outcome } } });
+      if (outcome === 'added') await notificationService.send(ownerId, 'artist.added', { artistName: result.name });
     } catch { logger.warn('Confirmed subscription acquisition notification or log failed', { resultId }); }
   } catch (error) {
     if (error instanceof DecisionError) {

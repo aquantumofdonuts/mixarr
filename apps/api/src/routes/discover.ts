@@ -306,7 +306,7 @@ discoverRouter.post('/add', validateBody(addArtistSchema), async (req, res) => {
     // Send notification
     await notificationService.send(req.user!.id, 'artist.added', {
       artistName,
-    });
+    }).catch(() => logger.warn('Discover artist notification failed', { userId: req.user!.id }));
 
     res.json({ success: true, artist: result, refreshTriggered: !!refreshCommand });
   } catch (error) {

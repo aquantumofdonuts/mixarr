@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { LabelArtistPage } from '@mixarr/shared-types';
+const navigation = vi.hoisted(() => ({ query: 'q=Catalog&tab=label', push: vi.fn(), replace: vi.fn() }));
+vi.mock('next/navigation', () => ({ usePathname: () => '/search', useSearchParams: () => new URLSearchParams(navigation.query), useRouter: () => navigation }));
+vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: 7 } }) }));
 const { mockAddToast, mockApiGet, mockApiPost, chosenOptions } = vi.hoisted(() => ({
   mockAddToast: vi.fn(), mockApiGet: vi.fn(), mockApiPost: vi.fn(),
   chosenOptions: { qualityProfileId: 2, metadataProfileId: 3, rootFolderPath: '/music', monitorOption: 'missing', searchOnAdd: false },
@@ -16,7 +19,7 @@ const label = { id: 'cccccccc-cccc-cccc-cccc-cccccccccccc', name: 'Warp Records'
 const response = (artists: LabelArtistPage['artists'], releasesProcessed: number, totalReleases: number, nextReleaseOffset: number | null) => ({ data: { artists, releasesProcessed, totalReleases, nextReleaseOffset }, error: null });
 const initial = () => mockApiGet.mockResolvedValueOnce(response([artistA], 50, 120, 50));
 const ready = () => screen.findByRole('checkbox', { name: 'Select Alpha' });
-beforeEach(() => { vi.resetAllMocks(); });
+beforeEach(() => { vi.resetAllMocks(); navigation.query = 'q=Catalog&tab=label'; });
 
 describe('Label artist release pages', () => {
   it('renders nothing without a label and makes no request', () => {
@@ -141,4 +144,26 @@ describe('Label artist release pages', () => {
     expect(onClose).not.toHaveBeenCalled(); expect(mockApiPost).toHaveBeenCalledTimes(2);
   });
 
+});
+
+
+it('opens each same-name canonical identity while retaining loaded label selections and filters', async () => {
+  const artists = [{ ...artistA, name: 'Common Name' }, { ...artistB, name: 'Common Name' }];
+  mockApiGet.mockResolvedValueOnce(response(artists, 50, 100, 50));
+  const onClose = vi.fn();
+  const view = render(<LabelArtistsModal label={label} onClose={onClose} />);
+  const selections = await screen.findAllByRole('checkbox', { name: 'Select Common Name' });
+  fireEvent.click(selections[1]);
+  fireEvent.change(screen.getByLabelText('Search loaded artists'), { target: { value: 'Common' } });
+  const names = screen.getAllByRole('link', { name: 'Common Name' });
+  expect(names.map(link => new URL((link as HTMLAnchorElement).href).searchParams.get('artist'))).toEqual([artistA.id, artistB.id]);
+  fireEvent.click(names[1]);
+  expect(new URL(navigation.push.mock.calls[0][0], 'https://mixarr.invalid').searchParams.get('artist')).toBe(artistB.id);
+  navigation.query += '&artist=' + artistB.id;
+  view.rerender(<LabelArtistsModal label={label} onClose={onClose} />);
+  expect(screen.getByLabelText('Search loaded artists')).toHaveValue('Common');
+  expect(screen.getAllByRole('checkbox')[1]).toBeChecked();
+  expect(mockApiGet).toHaveBeenCalledTimes(1);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getAllByRole('link', { name: 'Open artist Common Name' }).map(link => new URL((link as HTMLAnchorElement).href).searchParams.get('artist'))).toEqual([artistA.id, artistB.id]);
 });

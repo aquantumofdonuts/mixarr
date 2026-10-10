@@ -93,6 +93,7 @@ test('label keyboard traversal reaches fields and footer with open and collapsed
   const sort = dialog.getByRole('combobox', { name: 'Sort loaded artists' });
   const add = dialog.getByRole('button', { name: 'Add 1 selected artists' });
   const visibleControls = [searchSummary, field, sortSummary, sort, checkbox,
+    dialog.getByRole('link', { name: 'Open artist Alpha artist', exact: true }), dialog.getByRole('link', { name: 'Alpha artist', exact: true }),
     dialog.getByRole('link', { name: 'Open on Last.fm' }), dialog.getByRole('link', { name: 'Open on MusicBrainz' }),
     dialog.getByRole('button', { name: 'Select all loaded artists' }),
     dialog.getByRole('button', { name: 'Clear selection' }), dialog.getByRole('button', { name: 'Load more' }), add, close];
@@ -118,5 +119,57 @@ test('label keyboard traversal reaches fields and footer with open and collapsed
   await expect(add).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'View Artists', exact: true })).toBeFocused();
+});
+
+
+test('same-name label artists open the common inspector above retained selection, filtering and pending pages', async ({ catalogPage: page }) => {
+  const offsets: number[] = [];
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/search/label/*/artists?**', async route => {
+    const offset = Number(new URL(route.request().url()).searchParams.get('offset'));
+    offsets.push(offset);
+    if (offset === 50) await held;
+    return route.fulfill({ json: { artists: ARTIST_IDS.map(id => artist(id, 'Common Name')), releasesProcessed: 50, totalReleases: 100, nextReleaseOffset: offset === 0 ? 50 : null } });
+  });
+  await openLabel(page);
+  const label = page.getByRole('dialog', { name: 'Catalog Label', exact: true, includeHidden: true });
+  const checks = label.getByRole('checkbox', { name: 'Select Common Name', exact: true });
+  await checks.nth(1).check();
+  await label.getByRole('textbox', { name: 'Search loaded artists', exact: true }).fill('Common');
+  const names = label.getByRole('link', { name: 'Common Name', exact: true });
+  const artwork = label.getByRole('link', { name: 'Open artist Common Name', exact: true }).first();
+  expect((await artwork.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await artwork.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+  await label.getByRole('button', { name: 'Load more', exact: true }).click();
+  await expect(label.getByText('Loading label releases…', { exact: true })).toBeVisible();
+  try {
+    await names.nth(1).click();
+    const inspector = page.getByRole('dialog', { name: 'Common Name', exact: true });
+    await expect(inspector).toBeVisible();
+    expect(new URL(page.url()).searchParams.get('artist')).toBe(ARTIST_IDS[1]);
+    await expect(label).toHaveCount(1);
+    await inspector.getByRole('button', { name: 'Back to list', exact: true }).click();
+    await expect(inspector).toHaveCount(0);
+    await expect(label).toBeVisible();
+    await expect(names.nth(1)).toBeFocused();
+    await expect(checks.nth(1)).toBeChecked();
+    await expect(checks.nth(0)).not.toBeChecked();
+    await expect(label.getByRole('textbox', { name: 'Search loaded artists', exact: true })).toHaveValue('Common');
+    await expect(label.getByText('Loading label releases…', { exact: true })).toBeVisible();
+    await label.getByRole('link', { name: 'Open artist Common Name', exact: true }).first().click();
+    await expect(inspector).toBeVisible();
+    expect(new URL(page.url()).searchParams.get('artist')).toBe(ARTIST_IDS[0]);
+    await page.keyboard.press('Escape');
+    await expect(inspector).toHaveCount(0);
+    await expect(label).toBeVisible();
+    await expect(label.getByRole('link', { name: 'Open artist Common Name', exact: true }).first()).toBeFocused();
+  } finally { release(); }
+  await expect(label.getByText('100 releases checked; 2 artists loaded', { exact: true })).toBeVisible();
+  expect(offsets).toEqual([0, 50]);
+  await expect(checks.nth(1)).toBeChecked();
+  await page.keyboard.press('Escape');
+  await expect(label).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'View Artists', exact: true })).toBeFocused();
 });

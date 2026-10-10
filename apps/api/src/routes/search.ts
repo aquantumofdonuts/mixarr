@@ -462,7 +462,7 @@ searchRouter.post('/artists/add', validateBody(addOptionsSchema.extend({ foreign
     // Send notification
     await notificationService.send(req.user!.id, 'artist.added', {
       artistName,
-    });
+    }).catch(() => log.warn('Search artist notification failed', { userId: req.user!.id }));
     
     res.json({ success: true, artist, refreshTriggered: !!refreshCommand });
   } catch (error) {
@@ -1351,7 +1351,7 @@ searchRouter.post('/batch', validateBody(addOptionsSchema.extend({ artistIds: z.
 
         // Use addArtistWithCacheWarm to warm SkyHook cache (batch mode)
         // Use monitorOption from connection config (defaults to 'all' if not set)
-        await lidarr.addArtistWithCacheWarm(
+        const acquisition = await lidarr.addArtistWithCacheWarm(
           artistId, qpId, mpId, rfPath,
           true,  // monitored
           options.searchOnAdd,  // searchForMissingAlbums from config
@@ -1359,7 +1359,8 @@ searchRouter.post('/batch', validateBody(addOptionsSchema.extend({ artistIds: z.
           options.monitorOption,
           options.monitorNewItems
         );
-        results.added.push(artistId);
+        if (acquisition.alreadyInLibrary) results.skipped.push(artistId);
+        else results.added.push(artistId);
       } catch (error) {
         results.failed.push({
           id: artistId,
