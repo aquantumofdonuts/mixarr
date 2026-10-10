@@ -92,18 +92,18 @@ export default function MyProfilePage() {
           <CardDescription>Your account details</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
+          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+            <div className="min-w-0">
               <p className="text-sm text-muted-foreground flex items-center gap-1">
                 Username
               </p>
-              <p className="font-mono">{user?.username}</p>
+              <p className="break-words font-mono">{user?.username}</p>
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-muted-foreground">Display Name</p>
-              <p className="font-medium">{user?.displayName || user?.username}</p>
+              <p className="break-words font-medium">{user?.displayName || user?.username}</p>
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-muted-foreground flex items-center gap-1">
                 Role
               </p>

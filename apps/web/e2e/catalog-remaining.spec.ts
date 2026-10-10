@@ -21,7 +21,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto(path);
       await expect(page.getByRole('heading', { name: heading, exact: true, level: 1 })).toBeVisible();
       await waitForTheme(page, theme);
-      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await expect.poll(() => page.getByRole('main').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       if (name === 'jobs') await expect(page.getByText('Weekly discoveries', { exact: true })).toBeVisible();
       if (name === 'logs') await expect(page.getByText('Connection needs attention', { exact: true })).toBeVisible();
       if (name === 'users') await expect(page.getByText('Listener', { exact: true })).toBeVisible();
@@ -41,9 +41,32 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto(path);
       await expect(page.getByText(content, { exact: true })).toBeVisible();
       await waitForTheme(page, theme);
-      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await expect.poll(() => page.getByRole('main').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: `${evidence}/${name}-${theme}-320.png` });
     }
+  });
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`schema-valid account names fit the main scroll container in ${theme}`, async ({ catalogPage: page }) => {
+    const username = 'a'.repeat(50);
+    const displayName = 'b'.repeat(100);
+    await mkdir(evidence, { recursive: true });
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.addInitScript(value => localStorage.setItem('theme', value), theme);
+    await page.route('**/api/auth/me', route => route.fulfill({ json: { user: { ...CATALOG_USER, username, displayName }, setupRequired: false } }));
+    await page.route('**/api/admin/users', route => route.fulfill({ json: { users: [] } }));
+    const measurements = [];
+    for (const path of ['/users', '/users/me']) {
+      await page.goto(path);
+      const main = page.getByRole('main');
+      await expect(main.getByText(username, { exact: true })).toBeVisible();
+      await expect(main.getByText(displayName, { exact: true })).toBeVisible();
+      await waitForTheme(page, theme);
+      measurements.push({ path, ...await main.evaluate(element => ({ width: element.clientWidth, content: element.scrollWidth })) });
+      await page.screenshot({ path: `${evidence}/long-account-${path.replaceAll('/', '-')}-${theme}.png` });
+    }
+    for (const result of measurements) expect(result.content, result.path).toBeLessThanOrEqual(result.width);
   });
 }
 
