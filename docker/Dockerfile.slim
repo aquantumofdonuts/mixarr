@@ -37,7 +37,7 @@ COPY . .
 WORKDIR /app/apps/api
 RUN npx prisma generate
 WORKDIR /app
-RUN npm run build --workspace=@mixarr/api
+RUN npm run build --workspace=@mixarr/shared-types && npm run build --workspace=@mixarr/api
 
 # =============================================================================
 # PRODUCTION DEPENDENCIES STAGE - Prune to production deps only

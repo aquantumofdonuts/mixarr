@@ -31,7 +31,7 @@ WORKDIR /app
 
 # Build stage
 FROM development AS builder
-RUN npm run build --workspace=@mixarr/api
+RUN npm run build --workspace=@mixarr/shared-types && npm run build --workspace=@mixarr/api
 
 # Production stage
 FROM node:20-alpine AS production
