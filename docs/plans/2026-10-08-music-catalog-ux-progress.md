@@ -425,7 +425,7 @@ Root logs: `/tmp/catalog-complete-callers-{api,api-types,shared-build,shared-typ
 
 All test fixtures and Redis DB15 keys were verified zero. Root removed only the two exact owned disposable containers and guarded MySQL directory, stopped its production server, and confirmed ports 3027/3108/16379/13306 free. Cleanup evidence: `/tmp/catalog-completion-final-resource-cleanup.json`. Main checkout remains at `d1aec6c` with only its original two dirty specification documents; their SHA256 values are unchanged. No dependency, lockfile, migration, application Docker/environment contract, push, PR, merge, provider mutation or deployment changed.
 
-## Resume
+## Historical handoff before integration
 
 The owner approved the five-surface gallery, preserved HARD300, and explicitly accepted the remaining gap on October 10, 2026: “C137 deferred: provider verification will be performed separately”. Implementation and code review are complete at `ffeb12352704b404130fc73c27ff661c032c7733`; the completion gate passes with C137 recorded as ACCEPTED_GAP. The [completion-audit skill](/home/chris/.codex/skills/skills/completion-audit/SKILL.md) requires: “Human acknowledges specific items as deferred/out-of-scope. Must type the item numbers and reason.” This decision meets that requirement. Genuine provider verification remains separate work. No additional implementation batch is currently identified.
 
@@ -435,3 +435,16 @@ The owner approved the five-surface gallery, preserved HARD300, and explicitly a
 ## Integration authorization — October 10, 2026
 
 The owner authorized reconciliation of the two original main-checkout specification edits, PR publication, merge into `dev` and deployment of the existing local Compose stack. Owner direction: “do steps 1 2 and 3 now. i will do the testing after merge”. The design/plan now include the original R26–R28/T31–T32 amendments, updated execution status and explicit precedence for the approved hard-300 contract; their pre-reconciliation SHA256 snapshots remain in the completion audit. No application source, checklist denominator, verification flag or C137 deferral changed. The earlier instructions to preserve dirty files refer to historical checkpoints; those edits are now incorporated for integration. Post-merge functional testing belongs to the owner.
+
+
+## Integration checkpoint — October 10, 2026
+
+[PR #82](https://github.com/aquantumofdonuts/mixarr/pull/82) merged into `dev` as `205a02538c938c26fe87b27e06f1848da272cfba`. Its merged tree exactly matches reconciled feature head `915793f15f13e1ce7f80c5f9e154fe761f037a9b`. The local deployment checkout is `/home/chris/Github/mixarr` on `dev`; the earlier worktree/dirty-spec preservation instructions above are historical. All original specification paragraphs except stale status are retained in the merged documents, with explicit precedence for the approved hard cap. The original files also remain in `/tmp/catalog-integration-original-specs` and named Git stash `catalog-original-specs-before-pr82-integration`.
+
+The first deployment build exposed a real Docker dependency-order gap: new API type imports resolve `@mixarr/shared-types` through generated `dist` declarations, but the API builders compiled the API before generating that package. The production API build failed with TS2307; log `/tmp/catalog-pr82-deployment-build.log`. All three API image builders now build shared-types before the API, matching the existing web builder. The repaired production API image build exited 0; log `/tmp/catalog-pr82-api-build-order-fix.log`. The web image build completed; it reported the preexisting `flatCache.load` internal lint warning, so no new lint-clean claim is made. Application source, dependency/lockfile, schema, matrix rows and C137 acceptance remain unchanged by the Docker repair. Independent read-only code review of the three Docker builder lines passed with no confirmed findings. Full slim/unified image builds are not claimed.
+
+The existing deployment is Compose project `mixarr`, using the root `docker-compose.yml`. Deployment replaces only API/web after the build repair is merged; database, Redis and Caddy container identities remain unchanged. Post-merge functional testing belongs to the owner, and genuine provider verification remains separately deferred under C137. The final deployment receipt is attached to the integration PR; local logs and exact container/image identities are retained in `/tmp/catalog-pr82-integration-receipt.json`.
+
+## Current integration handoff
+
+Use `/home/chris/Github/mixarr` on `dev`, verify git/PR history and deployment state, and read the completion matrix, full review and integration checkpoint. The original plan is implemented with C137 ACCEPTED_GAP and the hard 300-node cap preserved. The owner authorized PR publication, merge and local deployment and will perform post-merge functional testing. Preserve the existing provider-evidence boundary and original failure logs. No additional feature implementation batch or production-branch promotion is authorized by this handoff.
