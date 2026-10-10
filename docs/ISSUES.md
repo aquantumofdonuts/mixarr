@@ -34,7 +34,7 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ## UI/UX catalog redesign (in progress)
 
-**Status:** T01–T27, T31 and T32 implemented and independently reviewed on local branch `feat/music-catalog-ux`. T28 automated implementation passed independent SPEC and Four-Lens QUALITY at `2999bff`; each freshly passed 96 checks across Chromium, Firefox and emulated mobile WebKit. Final root checks passed 803 web tests and 249 production browser checks; web types, build and uncached lint passed with existing warnings. Actual-token contrast and related unit checks also passed. Integrated evidence repaired verified mobile recommendation/seed readability and subscription failures previously rendered as empty. The owner explicitly approved the five-surface screenshot gallery on October 9 (“looks good, approved”). T29 completion-audit is in progress; native 200% zoom acceptance and T30 full-review remain pending. The owner-approved hard 300-node Constellation cap and truthful acquisition/owned mutation contracts remain intact. The earlier intermittent Settings Back-prompt observation remains unresolved; the injected same-document Preview history observation has no established current UI path and is recorded as latent. Prior API/provider evidence is not renewed by these web-only checks. See [the execution checkpoint](plans/2026-10-08-music-catalog-ux-progress.md) and [visual review](plans/2026-10-09-music-catalog-visual-review.md) for evidence and remaining gates.
+**Status:** Local product `ffeb12352704b404130fc73c27ff661c032c7733` is independently SPEC/QUALITY reviewed. T28 has explicit five-surface gallery approval and final 22-check authentic Chromium native-200%-zoom proof. T29's complete regenerated matrix reports 136/137 COMPLETE, with genuine external-provider acceptance C137 pending; gate INCOMPLETE. T30 integrated code QUALITY is PASS with no open confirmed Critical/Important findings. Root final verification passed 2,592 API tests (39 skipped), 825 web tests, 194 Chromium and 64 Firefox/mobile browser checks; builds/types/uncached lint passed with existing warnings. Independent backend review passed 877 tests including actual disposable MySQL/Redis; web review passed 89 fresh tests. The actual Settings first-dirty-commit race and mobile player occlusion have causal repairs and retained regressions; outcome consumers now distinguish new/existing membership. The owner-approved hard 300-node cap remains intact. The injected Preview-history observation remains latent; baseline account submissions and legacy automatic-import workers are not certified by this scope. Owned runtimes/test containers are removed; the original main-checkout specification edits are preserved. See the [completion matrix](plans/2026-10-07-music-catalog-ux-completion.md), [full review](plans/2026-10-09-music-catalog-ux-full-review.md), [checkpoint](plans/2026-10-08-music-catalog-ux-progress.md) and [visual review](plans/2026-10-09-music-catalog-visual-review.md). No provider waiver, integration or release is claimed.
 **Scope:** R01–R28/I01: the 25 UI/UX review recommendations, a distinctive music-catalog identity with the user-confirmed compact artwork-thumbnail feed, and the three October 8 Constellation follow-ups.
 
 - [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
@@ -47,6 +47,18 @@ This initiative includes truthful acquisition feedback, artist/source drilldown,
 ---
 
 ## 🔧 TECHNICAL DEBT (Deferred)
+
+### Account profile/password client routes do not match the API
+
+**Priority:** Medium
+
+**Status:** Backlog; preexisting functional limitation
+
+**Verified:** October 9, 2026
+
+The account page calls `PUT /api/auth/profile` and `POST /api/auth/password`; the Users page also calls the latter for the current account. `apps/api/src/routes/auth.ts` registers neither endpoint. These same client calls exist at baseline `d1aec6c`, before the catalog rollout. T27 changes their visual treatment only; its screenshot/browser checks do not establish working profile/password submission. Existing admin reset-password routing is a separate operation.
+
+Repair the account forms against an explicitly validated, authenticated server contract in a separate functional change. Do not treat the catalog's visual acceptance as acceptance of these submissions. Evidence: `apps/web/src/app/users/me/page.tsx:38,55`, `apps/web/src/app/users/page.tsx:79`, and the registered `authRouter` methods in `apps/api/src/routes/auth.ts`.
 
 ### TD-009: Unify "Artist Added" Tracking Across Add Paths
 
