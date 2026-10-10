@@ -1,4 +1,4 @@
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, type Page, type Locator } from '@playwright/test';
 import type { FeedItem } from '../src/lib/hooks';
 
 export const CATALOG_USER = { id: 7, username: 'catalog-reader', displayName: 'Catalog Reader', role: 'admin' as const };
@@ -34,7 +34,7 @@ export const test = base.extend<CatalogFixtures>({
   catalogRole: ['admin', { option: true }],
   catalogScenario: ['ready', { option: true }],
   catalogAuthenticated: [true, { option: true }],
-  catalogPage: async ({ page, catalogRole, catalogScenario, catalogAuthenticated }, use) => {
+  catalogPage: async ({ page, catalogRole, catalogScenario, catalogAuthenticated }, runFixture) => {
     let authenticated = catalogAuthenticated;
     const user = { ...CATALOG_USER, role: catalogRole };
     const items = catalogScenario === 'empty' ? [] : [...catalogFeed];
@@ -112,7 +112,7 @@ export const test = base.extend<CatalogFixtures>({
           case '/api/search/ai/status': return reply({ available: false });
           case '/api/search/lidarr/artists': return reply({ artists: [], total: 0, needingRefresh: 0, issueStats: { noAlbums: 0, noPoster: 0, noOverview: 0, noGenres: 0 }, healthScore: 100 });
           case '/api/search/discover': return reply({ results: catalogScenario === 'empty' ? [] : catalogFeed.map((item, index) => ({ name: item.artistName, mbid: item.artistMbid, imageUrl: item.imageUrl, sources: item.sources, spotifyId: `fixture-${index}`, inLibrary: added.has(item.artistMbid || '') })) });
-          case '/api/subscriptions': return reply({ subscriptions: catalogScenario === 'empty' ? [] : [{ id: 11, userId: user.id, name: 'Weekly discoveries', type: 'lastfm_similar', config: { artist: 'Common Name' }, schedule: '0 0 * * 0', resultHandling: 'queue', isActive: true, lastRun: recordedAt, lastRunStatus: 'completed', lastRunCount: 3, nextRun: null }] });
+          case '/api/subscriptions': return reply({ subscriptions: catalogScenario === 'empty' ? [] : [{ ...subscription, userId: user.id, lastRunStatus: 'completed', lastRunCount: 3, nextRun: null }] });
           case '/api/subscriptions/presets/list': return reply({ presets: [] });
           case '/api/connections/has-lidarr': return reply({ hasLidarr: true });
           case '/api/connections': return reply({ connections: catalogScenario === 'empty' ? [] : [{ id: 1, userId: user.id, type: 'lidarr', name: 'Catalog Lidarr', isActive: true, lastTest: null, createdAt: recordedAt }] });
@@ -148,6 +148,16 @@ export const test = base.extend<CatalogFixtures>({
           case '/api/sso/providers': return reply({ providers: [] });
           case '/api/settings/base-url': return reply({ baseUrl: 'http://localhost' });
         }
+      }
+      if (method === 'PATCH' && path === '/api/subscriptions/11') {
+        subscription.isActive = request.postDataJSON().isActive;
+        return reply({ subscription });
+      }
+      if (method === 'PUT' && /^\/api\/imports\/review\/\d+$/.test(path) && request.postDataJSON().status === 'rejected') {
+        const item = queue.find(item => item.id === Number(path.split('/').at(-1)));
+        if (!item) return reply({ error: 'Review item not found' }, 404);
+        item.status = 'rejected';
+        return reply({ success: true, undoToken: `signed-review-${item.id}`, undoExpiresAt: new Date(Date.now() + 120_000).toISOString() });
       }
       if (method === 'POST') {
         const decision = path.match(/^\/api\/subscriptions\/11\/results\/(\d+)\/(approve|reject)$/);
@@ -217,8 +227,34 @@ export const test = base.extend<CatalogFixtures>({
       unhandled.push(`External request: ${url.origin}${url.pathname}`);
       await route.abort();
     });
-    await use(page);
+    await runFixture(page);
     expect(unhandled, 'Every API/provider request needs an explicit catalog fixture').toEqual([]);
   },
 });
 export { expect };
+
+/** Focus by keyboard before activation, including a painted focus indicator. */
+export async function keyboardActivate(page: Page, control: Locator, key = 'Enter') {
+  await expect(control).toBeEnabled();
+  // Establish keyboard modality before focusing the specific control.
+  await page.keyboard.press('Tab');
+  await control.focus();
+  await expect(control).toBeFocused();
+  expect(await control.evaluate(element => {
+    const style = getComputedStyle(element);
+    return element.matches(':focus-visible') && (
+      (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0) || style.boxShadow !== 'none'
+    );
+  }), 'Keyboard focus must have a painted outline or ring').toBe(true);
+  await page.keyboard.press(key);
+}
+
+/** Check the actual scrolling main as well as the shell, which clips overflow. */
+export async function expectCatalogFits(page: Page) {
+  const dimensions = await page.evaluate(() => {
+    const main = document.querySelector('main')!;
+    return { viewport: innerWidth, document: document.documentElement.scrollWidth, main: main.clientWidth, content: main.scrollWidth };
+  });
+  expect(dimensions.document, JSON.stringify(dimensions)).toBeLessThanOrEqual(dimensions.viewport + 1);
+  expect(dimensions.content, JSON.stringify(dimensions)).toBeLessThanOrEqual(dimensions.main + 1);
+}

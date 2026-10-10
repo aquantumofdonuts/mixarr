@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ConfirmDialog, Skeleton } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
+import { ResultState } from '@/components/ui/result-state';
 import { useAuth } from '@/lib/auth';
 import {
   useSubscriptions,
@@ -33,7 +34,7 @@ export default function SubscriptionsPage() {
   const { addToast } = useToast();
 
   // Data fetching hooks
-  const { data: subscriptions = [], isLoading } = useSubscriptions();
+  const { data: subscriptions = [], isLoading, isError, refetch } = useSubscriptions();
   const { data: presets = [] } = usePresets();
   const { data: hasLidarr = true } = useHasLidarr();
 
@@ -178,8 +179,10 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
+      {isError && <ResultState kind="error" message="Failed to load subscriptions" action={<Button variant="outline" onClick={() => void refetch()}>Retry</Button>} />}
+
       {/* Empty State */}
-      {!isLoading && subscriptions.length === 0 && (
+      {!isLoading && !isError && subscriptions.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <TrendingUp className="h-12 w-12 text-muted-foreground/50 mb-4" />
