@@ -134,10 +134,10 @@ export default function DiscoverPage() {
     await optionsAction.runWithOptions({ name: rec.name, mbid: canonicalArtistMbid(rec.mbid) }, async (options, isCurrent) => {
       setAdding(rowKey(rec));
       try {
-        const { data, error } = await api.post<{ success?: boolean }>('/api/discover/add', { artistName: rec.name, ...options });
+        const { data, error } = await api.post<{ success?: boolean; outcome?: 'added' | 'already-in-library' }>('/api/discover/add', { artistName: rec.name, ...options });
         if (!isCurrent()) return;
         if (error || data?.success !== true) throw new Error(error || 'Addition was not confirmed');
-        patchConfirmed(rec, options.mbid); addToast({ type: 'success', title: `Added ${rec.name} to Lidarr` });
+        patchConfirmed(rec, options.mbid); addToast({ type: 'success', title: data.outcome === 'added' ? `Added ${rec.name} to Lidarr` : data.outcome === 'already-in-library' ? `${rec.name} is already in Lidarr` : `${rec.name} is in Lidarr` });
       } finally { if (isCurrent()) setAdding(null); }
     });
   };
@@ -146,18 +146,20 @@ export default function DiscoverPage() {
     const remaining = new Set(selected);
     if (!remaining.size) return;
     await optionsAction.runWithOptions({ name: `Add ${remaining.size} selected artists`, bulk: true }, async (options, isCurrent) => {
-      setBulkAdding(true); let added = 0;
+      setBulkAdding(true); let added = 0, existing = 0;
       try {
         for (const rec of remaining) {
           if (!isCurrent()) return;
           const mbid = canonicalArtistMbid(rec.mbid);
           if (!mbid) continue; // ponytail: unknown recommendations require an individual explicit identity choice.
-          const { data, error } = await api.post<{ success?: boolean }>('/api/discover/add', { artistName: rec.name, ...options, mbid });
+          const { data, error } = await api.post<{ success?: boolean; outcome?: 'added' | 'already-in-library' }>('/api/discover/add', { artistName: rec.name, ...options, mbid });
           if (!isCurrent()) return;
-          if (error || data?.success !== true) continue;
-          remaining.delete(rec); added++; patchConfirmed(rec);
+          if (error || data?.success !== true || (data.outcome !== 'added' && data.outcome !== 'already-in-library')) continue;
+          remaining.delete(rec);
+          if (data.outcome === 'added') added++; else existing++;
+          patchConfirmed(rec);
         }
-        if (added) addToast({ type: 'success', title: `Added ${added} artists to Lidarr` });
+        if (added || existing) addToast({ type: 'success', title: [added ? `Added ${added} artists to Lidarr` : '', existing ? `${existing} already in Lidarr` : ''].filter(Boolean).join('; ') });
         if (remaining.size) throw new Error(`${remaining.size} additions failed. Identify unknown artists individually or confirm again to retry failures.`);
       } finally { if (isCurrent()) setBulkAdding(false); }
     });

@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -88,6 +89,20 @@ export function ConstellationPlayer({ request, onClose }: ConstellationPlayerPro
   // a silent dead end.
   const [previewFailed, setPreviewFailed] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const playerRef = useRef<HTMLDivElement>(null);
+  const [playerHeight, setPlayerHeight] = useState(0);
+  const visible = request !== null;
+
+  useLayoutEffect(() => {
+    const element = playerRef.current;
+    if (!element) return;
+    // The fixed bar can wrap; reserve its measured extent in the route's scroll flow.
+    const measure = () => setPlayerHeight(element.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [visible]);
 
   // Resolve the playback source whenever the request changes.
   useEffect(() => {
@@ -165,7 +180,9 @@ export function ConstellationPlayer({ request, onClose }: ConstellationPlayerPro
   if (!request) return null;
 
   return (
+    <>
     <div
+      ref={playerRef}
       role="region"
       aria-label="Constellation player"
       data-testid="constellation-player"
@@ -325,6 +342,8 @@ export function ConstellationPlayer({ request, onClose }: ConstellationPlayerPro
         <X className="h-5 w-5" />
       </button>
     </div>
+    <div aria-hidden="true" data-testid="player-space" style={{ height: playerHeight }} />
+    </>
   );
 }
 

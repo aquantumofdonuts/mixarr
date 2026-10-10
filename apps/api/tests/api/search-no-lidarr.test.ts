@@ -430,6 +430,25 @@ describe('Label release traversal through the search route', () => {
 
 
 describe('confirmed Search additions and ancillary notifications', () => {
+  it.each(['/artists/add', '/discover/add'].flatMap(path => [false, true].map(alreadyInLibrary => ({ path, alreadyInLibrary }))))('reports helper membership honestly for $path existing=$alreadyInLibrary', async ({ path, alreadyInLibrary }) => {
+    const { notificationService } = await import('../../src/services/notifications.js');
+    const { addLogEntry } = await import('../../src/routes/logs.js');
+    vi.mocked(notificationService.send).mockReset().mockResolvedValue(undefined);
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    const artist = { foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', artistName: 'Confirmed Artist' };
+    const add = vi.fn().mockResolvedValue({ artist, alreadyInLibrary });
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never);
+    vi.mocked(LidarrService).mockImplementationOnce(function () { return { addArtistWithCacheWarm: add } as unknown as LidarrService; });
+    const body = path === '/artists/add' ? { foreignArtistId: artist.foreignArtistId } : { mbid: artist.foreignArtistId, artistName: artist.artistName };
+    const response = await request(app).post(`/api/search${path}`).send(body);
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ success: true, outcome, artist });
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(addLogEntry).toHaveBeenCalledWith('info', 'search', alreadyInLibrary ? 'Artist "Confirmed Artist" is already in Lidarr' : 'Added artist "Confirmed Artist" from search', expect.objectContaining({ outcome, mbid: artist.foreignArtistId }));
+    if (!alreadyInLibrary && path === '/artists/add') expect(notificationService.send).toHaveBeenCalledExactlyOnceWith(1, 'artist.added', { artistName: artist.artistName });
+    else expect(notificationService.send).not.toHaveBeenCalled();
+  });
   it.each([false, true])('returns provider confirmation with one addition when notification fails=%s', async failNotification => {
     const { notificationService } = await import('../../src/services/notifications.js');
     const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
@@ -441,7 +460,7 @@ describe('confirmed Search additions and ancillary notifications', () => {
     else vi.mocked(notificationService.send).mockResolvedValueOnce(undefined);
     const response = await request(app).post('/api/search/artists/add').send({ foreignArtistId: artist.foreignArtistId });
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ success: true, artist, refreshTriggered: true });
+    expect(response.body).toEqual({ success: true, outcome: 'added', artist, refreshTriggered: true });
     expect(add).toHaveBeenCalledTimes(1);
   });
   it('preserves an actual provider failure without sending a notification or retrying the addition', async () => {

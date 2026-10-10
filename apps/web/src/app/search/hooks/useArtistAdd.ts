@@ -43,7 +43,7 @@ export function useArtistAdd(setResults: (updater: (prev: any[]) => any[]) => vo
     markPending(key, true); updateArtist(key, { acquisitionError: undefined });
     try {
       const discovery = !artist.foreignArtistId;
-      const { data, error } = await api.post<{ success?: boolean; artist?: { foreignArtistId?: string } }>(
+      const { data, error } = await api.post<{ success?: boolean; outcome?: 'added' | 'already-in-library'; artist?: { foreignArtistId?: string } }>(
         discovery ? '/api/search/discover/add' : '/api/search/artists/add',
         discovery ? { artistName: artist.artistName, ...options } : { ...options, foreignArtistId: artist.foreignArtistId },
       );
@@ -51,7 +51,7 @@ export function useArtistAdd(setResults: (updater: (prev: any[]) => any[]) => vo
       if (error) throw new Error(error);
       if (data?.success === true) {
         updateArtist(key, { inLibrary: true, foreignArtistId: mbid || data.artist?.foreignArtistId || artist.foreignArtistId, acquisitionError: undefined });
-        addToast({ type: 'success', title: 'Artist added', message: `${artist.artistName} added to Lidarr` });
+        addToast({ type: 'success', title: data.outcome === 'added' ? 'Artist added' : data.outcome === 'already-in-library' ? 'Already in Lidarr' : 'Membership confirmed', message: data.outcome === 'added' ? `${artist.artistName} added to Lidarr` : data.outcome === 'already-in-library' ? `${artist.artistName} is already in Lidarr` : `${artist.artistName} is in Lidarr` });
       } else { const message = 'Addition was not confirmed. Check Lidarr before retrying.'; throw new Error(message); }
       return true;
     } catch (cause) {

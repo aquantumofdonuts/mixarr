@@ -9,8 +9,9 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/discover', useSearchPar
   return new URLSearchParams(query);
 }, useRouter: () => navigation }));
 const session = vi.hoisted(() => ({ actor: 7 }));
+const toast = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/auth', () => ({ useAuth: () => ({ user: { id: session.actor } }) }));
-vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: toast }) }));
 vi.mock('@/components/slskd/SearchModal', () => ({ SlskdSearchModal: () => null }));
 const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
 const recIds = ['33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'];
@@ -23,20 +24,77 @@ function mount(client = new QueryClient({ defaultOptions: { queries: { retry: fa
 function similarCalls() { return request.mock.calls.filter(([url]) => String(url) === '/api/discover/similar'); }
 function addCalls() { return request.mock.calls.filter(([url]) => String(url) === '/api/discover/add'); }
 beforeEach(() => {
-  session.actor = 7; sessionStorage.clear(); navigation.query = ''; navigation.push.mockImplementation(navigate); navigation.replace.mockImplementation(navigate); request.mockReset();
+  session.actor = 7; toast.mockReset(); sessionStorage.clear(); navigation.query = ''; navigation.push.mockImplementation(navigate); navigation.replace.mockImplementation(navigate); request.mockReset();
   request.mockImplementation(async (url, options) => {
     const path = String(url);
     if (path === '/api/connections/has-lidarr') return json({ hasLidarr: true });
     if (path.startsWith('/api/discover/library?')) return json({ artists: ids.map((foreignArtistId, i) => ({ id: i + 1, name: i ? 'Seed Beta' : 'Seed Alpha', foreignArtistId, monitored: true })), pagination: { page: 1, total: 2, totalPages: 1, limit: 50 } });
     if (path === '/api/discover/similar') return json({ recommendations: recommendations(), seedArtists: JSON.parse(String(options?.body)).artistNames, failedSeedArtists: [], total: 2 });
     if (path === '/api/discover/profiles') return json(profiles);
-    if (path === '/api/discover/add') return json({ success: true });
+    if (path === '/api/discover/add') return json({ success: true, outcome: 'added' });
     throw new Error(`Unexpected request ${path}`);
   });
   vi.stubGlobal('fetch', request);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe('discovery flow', () => {
+  it.each(['added', 'already-in-library', undefined])('announces a single confirmed membership with outcome=%s honestly', async outcome => {
+    navigation.query = `seed=${ids[0]}`;
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (url, options) => String(url) === '/api/discover/add' ? json({ success: true, outcome }) : original(url, options));
+    mount();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Add artist Same name' }))[0]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    await screen.findByText('In Lidarr');
+    expect(toast).toHaveBeenCalledExactlyOnceWith({ type: 'success', title: outcome === 'added' ? 'Added Same name to Lidarr' : outcome === 'already-in-library' ? 'Same name is already in Lidarr' : 'Same name is in Lidarr' });
+  });
+  it('counts only new additions in a mixed batch and retries only the failed membership', async () => {
+    navigation.query = `seed=${ids[0]}`;
+    const failedId = '55555555-5555-4555-8555-555555555555';
+    const original = request.getMockImplementation()!;
+    let fail = true;
+    request.mockImplementation(async (url, options) => {
+      if (String(url) === '/api/discover/similar') return json({ recommendations: [...recommendations(), { ...recommendations()[0], mbid: failedId }], seedArtists: ['Seed Alpha'], total: 3 });
+      if (String(url) === '/api/discover/add') {
+        const { mbid } = JSON.parse(String(options?.body));
+        return mbid === failedId && fail ? json({ error: 'Provider offline' }, 503) : json({ success: true, outcome: mbid === recIds[1] ? 'already-in-library' : 'added' });
+      }
+      return original(url, options);
+    });
+    mount(); fireEvent.click(await screen.findByRole('button', { name: 'Select loaded recommendations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add selected artists' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    await screen.findByText(/1 additions failed/);
+    expect(screen.getAllByText('In Lidarr')).toHaveLength(2);
+    expect(screen.getByRole('checkbox', { name: 'Select Same name' })).toBeChecked();
+    expect(toast).toHaveBeenCalledWith({ type: 'success', title: 'Added 1 artists to Lidarr; 1 already in Lidarr' });
+    fail = false; fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    await waitFor(() => expect(screen.getAllByText('In Lidarr')).toHaveLength(3));
+    expect(addCalls().map(([, options]) => JSON.parse(String(options?.body)).mbid)).toEqual([...recIds, failedId, failedId]);
+    expect(screen.queryByRole('region', { name: 'Bulk actions' })).toBeNull();
+  });
+  it('retains unknown outcomes and unresolved identities without announcing or counting new additions', async () => {
+    navigation.query = `seed=${ids[0]}`;
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (url, options) => {
+      if (String(url) === '/api/discover/similar') return json({ recommendations: [recommendations()[0], { name: 'Unresolved recommendation', matchedFrom: ['Seed Alpha'], matchCount: 1, inLibrary: false }], seedArtists: ['Seed Alpha'], total: 2 });
+      if (String(url) === '/api/discover/add') return json({ success: true });
+      return original(url, options);
+    });
+    mount(); fireEvent.click(await screen.findByRole('button', { name: 'Select loaded recommendations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add selected artists' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm add' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm add' }));
+    await screen.findByText(/2 additions failed/);
+    expect(screen.getByRole('checkbox', { name: 'Select Same name' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Unresolved recommendation' })).toBeChecked();
+    expect(screen.queryByText('In Lidarr')).toBeNull();
+    expect(toast).not.toHaveBeenCalled();
+    expect(addCalls()).toHaveLength(1);
+    expect(JSON.parse(String(addCalls()[0][1]?.body)).mbid).toBe(recIds[0]);
+  });
   it('restores canonical seed URLs, uses scoped seed query keys, and persists names for reload', async () => {
     navigation.query = `seed=${ids[0]}&seed=${ids[0]}&keep=value`;
     const { client, unmount } = mount();

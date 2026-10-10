@@ -377,7 +377,7 @@ export async function subscribeToLidarrDefault(
     return { added: true, target: 'album' };
   }
 
-  await lidarr.addArtistWithCacheWarm(
+  const { alreadyInLibrary } = await lidarr.addArtistWithCacheWarm(
     mbid,
     qpId,
     mpId,
@@ -388,7 +388,7 @@ export async function subscribeToLidarrDefault(
     config.monitorOption || 'all',
     config.monitorNewItems || 'all',
   );
-  return { added: true, target: 'artist' };
+  return { added: !alreadyInLibrary, target: 'artist' };
 }
 
 // ---------------------------------------------------------------------------

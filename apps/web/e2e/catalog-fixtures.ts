@@ -181,8 +181,9 @@ export const test = base.extend<CatalogFixtures>({
           const body = request.postDataJSON();
           if (!ARTIST_IDS.includes(body.foreignArtistId)) return reply({ error: 'Unknown fixture identity' }, 422);
           if (catalogScenario === 'add-failed') return reply({ error: 'Lidarr fixture unavailable' }, 503);
+          const outcome = added.has(body.foreignArtistId) ? 'already-in-library' : 'added';
           added.add(body.foreignArtistId);
-          return reply({ success: true, artist: { foreignArtistId: body.foreignArtistId } });
+          return reply({ success: true, outcome, artist: { foreignArtistId: body.foreignArtistId } });
         }
         if (path === '/api/feed/restore') {
           const token = request.postDataJSON().undoToken;

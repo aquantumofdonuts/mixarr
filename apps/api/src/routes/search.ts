@@ -377,7 +377,7 @@ searchRouter.post('/discover/add', validateBody(addOptionsSchema.extend({ artist
 
     // Use addArtistWithCacheWarm to warm SkyHook cache for reliable metadata lookup
     // Use monitorOption from connection config (defaults to 'all' if not set)
-    const { artist, refreshCommand } = await lidarr.addArtistWithCacheWarm(
+    const { artist, refreshCommand, alreadyInLibrary } = await lidarr.addArtistWithCacheWarm(
       resolvedMbid, qpId, mpId, rfPath,
       true,  // monitored
       options.searchOnAdd,  // searchForMissingAlbums from config
@@ -386,8 +386,9 @@ searchRouter.post('/discover/add', validateBody(addOptionsSchema.extend({ artist
       options.monitorNewItems
     );
     
-    // Log the successful artist addition
-    await addLogEntry('info', 'search', `Added artist "${artistName}" from search`, {
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
+    await addLogEntry('info', 'search', alreadyInLibrary ? `Artist "${artistName}" is already in Lidarr` : `Added artist "${artistName}" from search`, {
+      outcome,
       artistName,
       mbid: resolvedMbid,
       source: 'discover-search',
@@ -396,7 +397,7 @@ searchRouter.post('/discover/add', validateBody(addOptionsSchema.extend({ artist
       status: 'success',
     });
     
-    res.json({ success: true, artist, mbid: resolvedMbid, refreshTriggered: !!refreshCommand });
+    res.json({ success: true, outcome, artist, mbid: resolvedMbid, refreshTriggered: !!refreshCommand });
   } catch (error) {
     if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     // Log the failed artist addition
@@ -439,7 +440,7 @@ searchRouter.post('/artists/add', validateBody(addOptionsSchema.extend({ foreign
 
     // Use addArtistWithCacheWarm to warm SkyHook cache for reliable metadata lookup
     // Use monitorOption from connection config (defaults to 'all' if not set)
-    const { artist, refreshCommand } = await lidarr.addArtistWithCacheWarm(
+    const { artist, refreshCommand, alreadyInLibrary } = await lidarr.addArtistWithCacheWarm(
       foreignArtistId, qpId, mpId, rfPath,
       true,  // monitored
       options.searchOnAdd,  // searchForMissingAlbums from config
@@ -448,9 +449,10 @@ searchRouter.post('/artists/add', validateBody(addOptionsSchema.extend({ foreign
       options.monitorNewItems
     );
     
-    // Log the successful artist addition
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
     const artistName = artist.artistName || 'Unknown Artist';
-    await addLogEntry('info', 'search', `Added artist "${artistName}" from search`, {
+    await addLogEntry('info', 'search', alreadyInLibrary ? `Artist "${artistName}" is already in Lidarr` : `Added artist "${artistName}" from search`, {
+      outcome,
       artistName,
       mbid: foreignArtistId,
       source: 'search',
@@ -460,11 +462,11 @@ searchRouter.post('/artists/add', validateBody(addOptionsSchema.extend({ foreign
     });
     
     // Send notification
-    await notificationService.send(req.user!.id, 'artist.added', {
+    if (!alreadyInLibrary) await notificationService.send(req.user!.id, 'artist.added', {
       artistName,
     }).catch(() => log.warn('Search artist notification failed', { userId: req.user!.id }));
     
-    res.json({ success: true, artist, refreshTriggered: !!refreshCommand });
+    res.json({ success: true, outcome, artist, refreshTriggered: !!refreshCommand });
   } catch (error) {
     if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     // Log the failed artist addition

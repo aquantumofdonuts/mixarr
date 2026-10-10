@@ -675,6 +675,22 @@ describe('confirmed Discover additions and ancillary notifications', () => {
     vi.mocked(LidarrCache).mockImplementation(function () { return { refresh: vi.fn().mockResolvedValue(undefined), exists: vi.fn().mockResolvedValue(false) } as never; });
     vi.mocked(notificationService.send).mockReset().mockResolvedValue(undefined);
   });
+  it.each([false, true])('reports helper-confirmed existing membership=%s after the initial cache miss', async alreadyInLibrary => {
+    const { getLidarrServiceWithConfig } = await import('../../src/lib/connection-resolver.js');
+    const { notificationService } = await import('../../src/services/notifications.js');
+    const { addLogEntry } = await import('../../src/routes/logs.js');
+    const artist = { foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', artistName: 'Confirmed Artist' };
+    const add = vi.fn().mockResolvedValue({ artist, alreadyInLibrary });
+    vi.mocked(getLidarrServiceWithConfig).mockResolvedValueOnce({ service: { addArtistWithCacheWarm: add }, config: { qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } } as never);
+    const response = await request(app).post('/api/discover/add').send({ mbid: artist.foreignArtistId, artistName: artist.artistName });
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ success: true, outcome, artist });
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(addLogEntry).toHaveBeenCalledWith('info', 'discover', alreadyInLibrary ? 'Artist "Confirmed Artist" is already in Lidarr' : 'Added artist "Confirmed Artist" from discover', expect.objectContaining({ outcome, mbid: artist.foreignArtistId }));
+    if (alreadyInLibrary) expect(notificationService.send).not.toHaveBeenCalled();
+    else expect(notificationService.send).toHaveBeenCalledExactlyOnceWith(1, 'artist.added', { artistName: artist.artistName });
+  });
   it.each([false, true])('returns provider confirmation with one addition when notification fails=%s', async failNotification => {
     const { getLidarrServiceWithConfig } = await import('../../src/lib/connection-resolver.js');
     const { notificationService } = await import('../../src/services/notifications.js');
@@ -685,7 +701,7 @@ describe('confirmed Discover additions and ancillary notifications', () => {
     else vi.mocked(notificationService.send).mockResolvedValueOnce(undefined);
     const response = await request(app).post('/api/discover/add').send({ mbid: artist.foreignArtistId, artistName: artist.artistName });
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ success: true, artist, refreshTriggered: true });
+    expect(response.body).toEqual({ success: true, outcome: 'added', artist, refreshTriggered: true });
     expect(add).toHaveBeenCalledTimes(1);
   });
   it('preserves an actual provider failure without sending a notification or retrying the addition', async () => {

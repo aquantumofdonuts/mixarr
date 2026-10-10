@@ -284,7 +284,7 @@ discoverRouter.post('/add', validateBody(addArtistSchema), async (req, res) => {
 
     // Add to Lidarr with SkyHook cache warming for reliable metadata lookup
     // Use monitorOption from connection config (defaults to 'all' if not set)
-    const { artist: result, refreshCommand } = await lidarr.addArtistWithCacheWarm(
+    const { artist: result, refreshCommand, alreadyInLibrary } = await lidarr.addArtistWithCacheWarm(
       foreignArtistId,
       qpId,
       mpId,
@@ -296,19 +296,20 @@ discoverRouter.post('/add', validateBody(addArtistSchema), async (req, res) => {
       options.monitorNewItems
     );
 
-    // Log the addition
-    await addLogEntry('info', 'discover', `Added artist "${artistName}" from discover`, {
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
+    await addLogEntry('info', 'discover', alreadyInLibrary ? `Artist "${artistName}" is already in Lidarr` : `Added artist "${artistName}" from discover`, {
+      outcome,
       artistName,
       mbid: foreignArtistId,
       refreshTriggered: !!refreshCommand,
     });
 
     // Send notification
-    await notificationService.send(req.user!.id, 'artist.added', {
+    if (!alreadyInLibrary) await notificationService.send(req.user!.id, 'artist.added', {
       artistName,
     }).catch(() => logger.warn('Discover artist notification failed', { userId: req.user!.id }));
 
-    res.json({ success: true, artist: result, refreshTriggered: !!refreshCommand });
+    res.json({ success: true, outcome, artist: result, refreshTriggered: !!refreshCommand });
   } catch (error) {
     if (error instanceof DecisionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     const errorMessage = error instanceof Error ? error.message : 'Failed to add artist';

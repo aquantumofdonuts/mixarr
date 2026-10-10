@@ -597,6 +597,14 @@ describe('subscribeToLidarrDefault', () => {
     };
   }
 
+  it.each([false, true])('preserves helper-confirmed artist membership existing=%s through the real default wrapper', async alreadyInLibrary => {
+    const lidarr = fakeLidarr();
+    lidarr.addArtistWithCacheWarm.mockResolvedValue({ alreadyInLibrary });
+    (getLidarrServiceWithConfig as any).mockResolvedValue({ service: lidarr, config: { qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } });
+    await expect(subscribeToLidarrDefault({ userId: 7, mbid: 'artist-mbid' })).resolves.toEqual({ added: !alreadyInLibrary, target: 'artist' });
+    expect(lidarr.addArtistWithCacheWarm).toHaveBeenCalledTimes(1);
+  });
+
   it('adds the exact-title album belonging to the resolved artist', async () => {
     const lidarr = fakeLidarr();
     lidarr.searchAlbum.mockResolvedValue([

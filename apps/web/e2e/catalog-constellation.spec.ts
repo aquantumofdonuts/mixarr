@@ -83,6 +83,40 @@ test('deliberate same-name choices, real credit bridges, playback, inspector rou
   expect(new URL(page.url()).searchParams.get('q')).toBe('retained'); expect(fixture.invalid).toEqual([]);
 });
 
+for (const width of [320, 390]) for (const playback of ['ready', 'error'] as const) test(`${width}px bottom field controls remain clickable with persistent ${playback} playback`, async ({ catalogPage: page }) => {
+  const fixture = await constellationFixture(page);
+  await page.setViewportSize({ width, height: 664 });
+  let release!: () => void;
+  const resolution = new Promise<void>(resolve => { release = resolve; });
+  await page.route(/\/api\/constellation\/play\?/, async route => {
+    await resolution;
+    return playback === 'ready'
+      ? route.fulfill({ json: { source: 'youtube', youtubeUrl: 'https://www.youtube.com/results?search_query=fixture' } })
+      : route.fulfill({ status: 503, json: { error: 'Playback is temporarily unavailable for this artist. Please try another artist or return later when the source is available.' } });
+  });
+  await page.goto(`/constellation?seed=${ARTIST_IDS[0]}&focus=1`);
+  const panel = page.getByRole('dialog', { name: `${people[0].displayName} details` });
+  await panel.getByRole('button', { name: `Play ${people[0].displayName}`, exact: true }).click();
+  await expect(page.getByTestId('player-loading')).toBeVisible();
+  await panel.getByRole('button', { name: 'Close panel' }).click();
+  const summary = page.getByText('People in this field', { exact: true });
+  await summary.click();
+  await expect(page.getByRole('button', { name: people[1].displayName, exact: true })).toBeVisible();
+  await summary.click();
+  release();
+  await expect(page.getByTestId(playback === 'ready' ? 'player-youtube-link' : 'player-error')).toBeVisible();
+  await expect.poll(async () => {
+    const player = await page.getByRole('region', { name: 'Constellation player' }).boundingBox();
+    const reserved = await page.getByTestId('player-space').boundingBox();
+    return player !== null && reserved !== null && Math.abs(player.height - reserved.height) < 1;
+  }).toBe(true);
+  await summary.click();
+  await page.getByRole('button', { name: people[1].displayName, exact: true }).click();
+  await expect(page).toHaveURL(/focus=7/);
+  await expect(page.getByRole('region', { name: 'Constellation player' })).toBeVisible();
+  expect(fixture.invalid).toEqual([]);
+});
+
 test('named endpoints send numeric path IDs and reload restores verified names', async ({ catalogPage: page }) => {
   const fixture = await constellationFixture(page); await page.goto(`/constellation?seed=${ARTIST_IDS[0]}&focus=1`);
   await page.getByRole('button', { name: 'Close panel' }).click();

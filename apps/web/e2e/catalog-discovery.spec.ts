@@ -91,7 +91,7 @@ test('same-name recommendation actions preserve unrelated selection and effectiv
   const additions: { mbid: string; artistName: string; rootFolderPath: string; searchOnAdd: boolean }[] = [];
   await page.route('**/api/discover/add', route => {
     additions.push(route.request().postDataJSON());
-    return route.fulfill({ json: { success: true } });
+    return route.fulfill({ json: { success: true, outcome: 'added' } });
   });
   await page.goto('/discover');
   await chooseSeed(page, 'Seed Alpha');
@@ -109,6 +109,36 @@ test('same-name recommendation actions preserve unrelated selection and effectiv
   await expect(page.getByRole('dialog', { name: 'Common Name', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(rows[1].getByRole('checkbox', { name: 'Select Common Name', exact: true })).toBeChecked();
+});
+
+test('mixed discovery outcomes count new artists honestly and retain only failed selections for retry', async ({ catalogPage: page }) => {
+  await library(page);
+  const failedId = '55555555-5555-4555-8555-555555555555';
+  const mixed = [...recommendations, { ...recommendations[0], mbid: failedId, name: 'Failed recommendation' }];
+  await page.route('**/api/discover/similar', route => route.fulfill({ json: { recommendations: mixed, seedArtists: ['Seed Alpha'], total: 3, failedSeedArtists: [] } }));
+  const additions: string[] = [];
+  let fail = true;
+  await page.route('**/api/discover/add', route => {
+    const { mbid } = route.request().postDataJSON(); additions.push(mbid);
+    return mbid === failedId && fail ? route.fulfill({ status: 503, json: { error: 'Provider offline' } }) : route.fulfill({ json: { success: true, outcome: mbid === ARTIST_IDS[1] ? 'already-in-library' : 'added' } });
+  });
+  await page.goto('/discover');
+  await chooseSeed(page, 'Seed Alpha');
+  await page.getByRole('button', { name: 'Select loaded recommendations', exact: true }).click();
+  await page.getByRole('button', { name: 'Add selected artists', exact: true }).click();
+  const options = page.getByRole('dialog', { name: 'Add artist options', exact: true });
+  await options.getByRole('button', { name: 'Confirm add', exact: true }).click();
+  await expect(options.getByText(/1 additions failed/)).toBeVisible();
+  await expect(page.getByText('Added 1 artists to Lidarr; 1 already in Lidarr', { exact: true })).toBeVisible();
+  await expect(page.getByText('In Lidarr', { exact: true })).toHaveCount(2);
+  await expect(page.getByRole('checkbox', { name: 'Select Failed recommendation', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Select Common Name', exact: true })).toHaveCount(0);
+  fail = false;
+  await options.getByRole('button', { name: 'Confirm add', exact: true }).click();
+  await expect(options).toHaveCount(0);
+  await expect(page.getByText('In Lidarr', { exact: true })).toHaveCount(3);
+  expect(additions).toEqual([...ARTIST_IDS, failedId, failedId]);
+  await expect(page.getByRole('region', { name: 'Bulk actions', exact: true })).toHaveCount(0);
 });
 
 test('mobile discovery keeps seeds before results and exposes usable persistent actions', async ({ catalogPage: page }) => {

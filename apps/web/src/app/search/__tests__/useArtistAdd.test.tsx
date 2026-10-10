@@ -19,6 +19,15 @@ const setRows = (update: (rows: any[]) => any[]) => { rows = update(rows); };
 beforeEach(() => { vi.clearAllMocks(); mocks.actor = 1; rows = [{ foreignArtistId: a, artistName: 'Same name' }, { foreignArtistId: b, artistName: 'Same name' }]; });
 afterEach(cleanup);
 describe('search acquisition executors', () => {
+  it.each([false, true].flatMap(discovery => ['added', 'already-in-library', undefined].map(outcome => ({ discovery, outcome }))))('announces only the actual confirmed outcome=$outcome discovery=$discovery', async ({ discovery, outcome }) => {
+    if (discovery) rows[0] = { resultKey: 'spotify:one', spotifyId: 'one', artistName: 'Same name' };
+    vi.mocked(api.post).mockResolvedValue(response({ success: true, outcome }));
+    const { result } = renderHook(() => useArtistAdd(setRows));
+    await act(async () => { await result.current.handleAddArtist(rows[0]); });
+    expect(rows[0].inLibrary).toBe(true);
+    expect(rows[1].inLibrary).not.toBe(true);
+    expect(mocks.toast).toHaveBeenCalledExactlyOnceWith({ type: 'success', title: outcome === 'added' ? 'Artist added' : outcome === 'already-in-library' ? 'Already in Lidarr' : 'Membership confirmed', message: outcome === 'added' ? 'Same name added to Lidarr' : outcome === 'already-in-library' ? 'Same name is already in Lidarr' : 'Same name is in Lidarr' });
+  });
   it('passes all selected effective options including false through the original canonical endpoint', async () => {
     vi.mocked(api.post).mockResolvedValue(response({ success: true }));
     const { result } = renderHook(() => useArtistAdd(setRows));

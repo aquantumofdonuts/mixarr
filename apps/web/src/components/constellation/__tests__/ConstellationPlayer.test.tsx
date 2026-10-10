@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Mock the api wrapper so no real fetch happens.
@@ -36,9 +37,16 @@ const YOUTUBE = {
 // jsdom does not implement media playback; stub play/pause/load + `paused`.
 let playMock: Mock;
 let pauseMock: Mock;
+let resizeObservers: { callback: () => void; observe: Mock; disconnect: Mock }[];
 
 beforeEach(() => {
   vi.resetAllMocks();
+  resizeObservers = [];
+  vi.stubGlobal('ResizeObserver', class {
+    observe = vi.fn();
+    disconnect = vi.fn();
+    constructor(public callback: () => void) { resizeObservers.push(this); }
+  });
   playMock = vi.fn().mockResolvedValue(undefined);
   pauseMock = vi.fn();
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(playMock);
@@ -54,6 +62,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function playReq(req: Partial<NowPlayingRequest> = {}): NowPlayingRequest {
@@ -61,6 +70,54 @@ function playReq(req: Partial<NowPlayingRequest> = {}): NowPlayingRequest {
 }
 
 describe('ConstellationPlayer', () => {
+  it('reserves the measured player extent through loading, ready, wrapping and error, then releases it on dismissal', async () => {
+    let height = 61;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ height }) as DOMRect);
+    let resolve!: (value: unknown) => void;
+    mockGet.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const { rerender, unmount } = render(<ConstellationPlayer request={playReq()} onClose={vi.fn()} />);
+    expect(screen.getByTestId('player-loading')).toBeInTheDocument();
+    expect(screen.getByTestId('player-space')).toHaveStyle({ height: '61px' });
+    expect(resizeObservers[0].observe).toHaveBeenCalledWith(screen.getByRole('region', { name: 'Constellation player' }));
+    height = 101;
+    await act(async () => { resolve({ data: YOUTUBE, error: null, status: 200 }); });
+    act(() => resizeObservers[0].callback());
+    expect(screen.getByTestId('player-youtube-link')).toBeInTheDocument();
+    expect(screen.getByTestId('player-space')).toHaveStyle({ height: '101px' });
+    height = 147;
+    act(() => resizeObservers[0].callback());
+    expect(screen.getByTestId('player-space')).toHaveStyle({ height: '147px' });
+    mockGet.mockResolvedValueOnce({ data: null, error: 'A long playback failure wraps on a narrow viewport', status: 503 });
+    rerender(<ConstellationPlayer request={playReq({ track: 'Another request' })} onClose={vi.fn()} />);
+    await screen.findByTestId('player-error');
+    height = 193;
+    act(() => resizeObservers[0].callback());
+    expect(screen.getByTestId('player-space')).toHaveStyle({ height: '193px' });
+    expect(resizeObservers).toHaveLength(1);
+    rerender(<ConstellationPlayer request={null} onClose={vi.fn()} />);
+    expect(screen.queryByTestId('player-space')).toBeNull();
+    expect(resizeObservers[0].disconnect).toHaveBeenCalledTimes(1);
+    height = 73;
+    mockGet.mockResolvedValueOnce({ data: DEEZER, error: null, status: 200 });
+    rerender(<ConstellationPlayer request={playReq()} onClose={vi.fn()} />);
+    await screen.findByTestId('player-audio');
+    expect(screen.getByTestId('player-space')).toHaveStyle({ height: '73px' });
+    unmount();
+    expect(resizeObservers[1].disconnect).toHaveBeenCalledTimes(1);
+    expect(pauseMock).toHaveBeenCalled();
+  });
+
+  it('releases every player measurement observer under StrictMode unmount', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ height: 101 } as DOMRect);
+    mockGet.mockResolvedValue({ data: YOUTUBE, error: null, status: 200 });
+    const { unmount } = render(<StrictMode><ConstellationPlayer request={playReq()} onClose={vi.fn()} /></StrictMode>);
+    await screen.findByTestId('player-youtube-link');
+    expect(screen.getByTestId('player-space')).toHaveStyle({ height: '101px' });
+    expect(resizeObservers).toHaveLength(2);
+    expect(resizeObservers[0].disconnect).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(resizeObservers.every(observer => observer.disconnect.mock.calls.length === 1)).toBe(true);
+  });
   it('renders nothing when there is no request', () => {
     const { container } = render(<ConstellationPlayer request={null} onClose={vi.fn()} />);
     expect(container.firstChild).toBeNull();
