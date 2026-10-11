@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mixarr — Self-Hosted Music Discovery & Automation for Lidarr</title>
-  <meta name="description" content="Mixarr is a free, open-source, self-hosted music discovery companion for Lidarr. Connect Spotify, TIDAL, Deezer, Last.fm, Plex & more. Automate artist discovery from playlists, charts, and AI recommendations. Deploy with Docker in minutes.">
+  <title>Mixarr — Music Discovery & Catalog for Lidarr</title>
+  <meta name="description" content="Self-hosted music discovery for Lidarr. Browse a compact artist catalog, trace discovery sources, review scheduled subscription results, and explore credited collaborators.">
   <meta name="keywords" content="mixarr, lidarr, self-hosted, music discovery, music automation, arr stack, docker, spotify to lidarr, lidarr companion, lidarr recommendations, open source, tidal, deezer, lastfm, plex, musicbrainz, listenbrainz, ai recommendations, docker music app">
   <meta name="author" content="Mixarr">
   <meta name="theme-color" content="#bf7a56">
@@ -15,17 +15,17 @@
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://aquantumofdonuts.github.io/mixarr/">
-  <meta property="og:title" content="Mixarr — Self-Hosted Music Discovery & Automation for Lidarr">
-  <meta property="og:description" content="Free, open-source Lidarr companion. Connect Spotify, TIDAL, Deezer, Last.fm & more. Automate artist discovery from playlists, charts, and AI recommendations. Deploy with Docker in minutes.">
+  <meta property="og:title" content="Mixarr — Music Discovery & Catalog for Lidarr">
+  <meta property="og:description" content="A self-hosted music catalog for Lidarr. Discover artists through subscriptions, inspect sources and releases, and review additions with clear outcomes.">
   <meta property="og:image" content="https://aquantumofdonuts.github.io/mixarr/img/mixarr-discover.png">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
+  <meta property="og:image:width" content="1440">
+  <meta property="og:image:height" content="1000">
   <meta property="og:site_name" content="Mixarr">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Mixarr — Self-Hosted Music Discovery for Lidarr">
-  <meta name="twitter:description" content="Free, open-source Lidarr companion. Automate artist discovery from Spotify, TIDAL, Last.fm, charts & AI recommendations. Self-hosted with Docker.">
+  <meta name="twitter:description" content="Discover artists, trace their sources, review subscription results, and explore credited collaborators. Free, open source, and self-hosted.">
   <meta name="twitter:image" content="https://aquantumofdonuts.github.io/mixarr/img/mixarr-discover.png">
 
   <!-- Favicons -->
@@ -42,7 +42,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Mixarr",
-    "description": "Self-hosted music discovery and automation companion for Lidarr. Connect Spotify, TIDAL, Deezer, Last.fm, Plex, MusicBrainz, and ListenBrainz to automatically discover new artists.",
+    "description": "Self-hosted music discovery and catalog companion for Lidarr, with scheduled subscriptions, a review queue, artist inspection, and credited collaboration exploration. Screenshots show the unreleased dev catalog preview.",
     "url": "https://aquantumofdonuts.github.io/mixarr/",
     "applicationCategory": "MultimediaApplication",
     "operatingSystem": "Linux, Docker",
@@ -53,7 +53,7 @@
     },
     "license": "https://www.gnu.org/licenses/gpl-3.0.html",
     "screenshot": "https://aquantumofdonuts.github.io/mixarr/img/mixarr-discover.png",
-    "softwareVersion": "2.3.1",
+    "softwareVersion": "2.3.5",
     "codeRepository": "https://github.com/aquantumofdonuts/mixarr",
     "isAccessibleForFree": true
   }
@@ -111,8 +111,9 @@
           <button class="dot" aria-label="Slide 4"></button>
         </div>
       </div>
-      <h1>The missing piece for Lidarr</h1>
-      <p class="hero-subtitle">Self-hosted music discovery for Lidarr. Connect your services, subscribe to playlists and charts, and let new artists flow into your library.</p>
+      <p class="hero-subtitle">Development preview · catalog redesign on <code>dev</code> · not yet released</p>
+      <h1>Find your next artist. Know where they came from.</h1>
+      <p class="hero-subtitle">Bring playlists, charts, listening history, and recommendations into one music catalog. Inspect artists and their sources, review discoveries, then send your choices to Lidarr.</p>
       <div class="hero-cta">
         <a href="#features" class="btn btn-primary">See How It Works</a>
         <a href="https://github.com/aquantumofdonuts/mixarr" class="btn btn-secondary" target="_blank" rel="noopener">View on GitHub</a>
@@ -123,7 +124,7 @@
   <!-- Service Logos -->
   <section class="services">
     <div class="container">
-      <p class="services-title">Works with your favorite services</p>
+      <p class="services-title">Bring your music sources together</p>
       <div class="services-logos">
         <div class="service-logo" title="Spotify">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
@@ -150,7 +151,8 @@
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
         </div>
       </div>
-      <p class="services-ai">Plus AI recommendations via OpenAI, Anthropic, or Ollama</p>
+      <p class="services-ai">Integrations depend on each provider’s current API and authorization. <a href="https://github.com/aquantumofdonuts/mixarr/blob/dev/docs/ISSUES.md">See known issues</a>, including TIDAL subscription compatibility.</p>
+      <p class="services-ai">Also includes Jellyfin, Discogs, Bandcamp, and optional AI recommendations via OpenAI, Anthropic, or compatible endpoints such as Ollama.</p>
     </div>
   </section>
 
@@ -158,8 +160,8 @@
   <section class="why">
     <div class="container">
       <h2>Why Mixarr?</h2>
-      <p>Lidarr is great at downloading music, but finding new artists is manual work. You're constantly switching between Spotify, Last.fm, and charts to find what's new. Mixarr is the missing Lidarr companion in your *arr stack.</p>
-      <p>Connect your music services and set up subscriptions that run on schedule. Subscriptions pull artists from your Spotify playlists, Last.fm recommendations, and global charts—then send them straight to Lidarr. Free, open-source, and self-hosted with Docker.</p>
+      <p>Music discovery is scattered across playlists, charts, listening history, and record credits. Mixarr brings those leads into a compact catalog with artwork, source links, and persistent review actions.</p>
+      <p>Schedule subscriptions, inspect an artist’s identity and release chronology, and follow a discovery back to its subscription and run when recorded. Review results before adding them to Lidarr, or choose automatic handling per subscription. Pending, confirmed, failed, and uncertain acquisition outcomes stay distinct.</p>
     </div>
   </section>
 
@@ -170,31 +172,45 @@
       <div class="features-grid">
         <div class="feature-card">
           <div class="feature-img">
-            <img src="img/mixarr-connections.png" alt="Multi-Service Integration" loading="lazy">
+            <img src="img/mixarr-discover.png" alt="Compact music catalog" loading="lazy" width="1440" height="1000">
           </div>
-          <h3>Multi-Service Integration</h3>
-          <p>Connect Spotify, TIDAL, Deezer, Last.fm, Plex, MusicBrainz, and ListenBrainz. Pull from playlists, charts, and recommendations.</p>
+          <h3>Compact music catalog</h3>
+          <p>Browse artwork rows with source context and always-visible actions. Switch to the artwork view when you want a different way to browse.</p>
         </div>
         <div class="feature-card">
           <div class="feature-img">
-            <img src="img/mixarr-discover.png" alt="Music Discovery" loading="lazy">
+            <img src="img/mixarr-artist-inspector.png" alt="Artist context, one click away" loading="lazy" width="1440" height="1000">
           </div>
-          <h3>AI-Powered Discovery</h3>
-          <p>Ask your AI provider for recommendations based on your Lidarr library. Works with OpenAI, Anthropic, or self-hosted Ollama.</p>
+          <h3>Artist context, one click away</h3>
+          <p>Inspect MusicBrainz identity, library membership, discovery sources, and release chronology without losing your place.</p>
         </div>
         <div class="feature-card">
           <div class="feature-img">
-            <img src="img/mixarr-subscriptions.png" alt="Subscription Automation" loading="lazy">
+            <img src="img/mixarr-subscriptions.png" alt="56 subscription types" loading="lazy" width="1440" height="1000">
           </div>
-          <h3>Automated Subscriptions</h3>
-          <p>39 subscription types run on schedule. Discover Weekly, Release Radar, global charts, and more—all feeding your review queue.</p>
+          <h3>56 subscription types</h3>
+          <p>Schedule playlists, charts, tags, listening history, and recommendations. Choose preview, review queue, or automatic handling for each subscription.</p>
         </div>
         <div class="feature-card">
           <div class="feature-img">
-            <img src="img/mixarr-subscription-results.png" alt="Library Health" loading="lazy">
+            <img src="img/mixarr-review-queue.png" alt="Review with clear outcomes" loading="lazy" width="1440" height="1000">
           </div>
-          <h3>Library Growth</h3>
-          <p>Subscription results feed directly into Lidarr. Review new artists before import, or auto-add them. Your library grows while you sleep.</p>
+          <h3>Review with clear outcomes</h3>
+          <p>Filter and page through review records. Approve or reject discoveries, undo eligible decisions, and distinguish confirmed additions from failures or uncertain outcomes.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-img">
+            <img src="img/mixarr-constellation.png" alt="Follow credited collaborators" loading="lazy" width="1440" height="1000">
+          </div>
+          <h3>Follow credited collaborators</h3>
+          <p>Explore people who share recording credits, inspect roles and releases, and find collaboration paths. The graph stays bounded to 300 visible people.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-img">
+            <img src="img/mixarr-connections.png" alt="Connections you can inspect" loading="lazy" width="1440" height="1000">
+          </div>
+          <h3>Connections you can inspect</h3>
+          <p>Manage service connections, check authorization separately from connection tests, and use library maintenance tools. AI recommendations and slskd search are optional.</p>
         </div>
       </div>
     </div>
@@ -203,28 +219,37 @@
   <!-- Gallery -->
   <section class="gallery">
     <div class="container">
-      <h2>See It In Action</h2>
+      <h2>Inside the current catalog</h2>
       <div class="gallery-grid">
-        <div class="gallery-item" data-caption="Music Discovery">
-          <img src="img/mixarr-discover.png" alt="Music Discovery" loading="lazy">
+        <div class="gallery-item" data-caption="Discovery catalog with subscription provenance">
+          <img src="img/mixarr-discover.png" alt="Discovery catalog with subscription provenance" loading="lazy" width="1440" height="1000">
         </div>
-        <div class="gallery-item" data-caption="Subscription Management">
-          <img src="img/mixarr-subscriptions.png" alt="Subscription Management" loading="lazy">
+        <div class="gallery-item" data-caption="Artist inspector with source history and releases">
+          <img src="img/mixarr-artist-inspector.png" alt="Artist inspector with source history and releases" loading="lazy" width="1440" height="1000">
         </div>
-        <div class="gallery-item" data-caption="Universal Search">
-          <img src="img/mixarr-search.png" alt="Universal Search" loading="lazy">
+        <div class="gallery-item" data-caption="Search with selectable providers">
+          <img src="img/mixarr-search.png" alt="Search with selectable providers" loading="lazy" width="1440" height="1000">
         </div>
-        <div class="gallery-item" data-caption="Service Connections">
-          <img src="img/mixarr-connections.png" alt="Service Connections" loading="lazy">
+        <div class="gallery-item" data-caption="Scheduled subscriptions and handling modes">
+          <img src="img/mixarr-subscriptions.png" alt="Scheduled subscriptions and handling modes" loading="lazy" width="1440" height="1000">
         </div>
-        <div class="gallery-item" data-caption="Subscription Results">
-          <img src="img/mixarr-subscription-results.png" alt="Subscription Results" loading="lazy">
+        <div class="gallery-item" data-caption="Subscription results linked to their runs">
+          <img src="img/mixarr-subscription-results.png" alt="Subscription results linked to their runs" loading="lazy" width="1440" height="1000">
         </div>
-        <div class="gallery-item" data-caption="User Management">
-          <img src="img/mixarr-user-management.png" alt="User Management" loading="lazy">
+        <div class="gallery-item" data-caption="Review queue with filters and persistent decisions">
+          <img src="img/mixarr-review-queue.png" alt="Review queue with filters and persistent decisions" loading="lazy" width="1440" height="1000">
+        </div>
+        <div class="gallery-item" data-caption="Credited collaboration graph">
+          <img src="img/mixarr-constellation.png" alt="Credited collaboration graph" loading="lazy" width="1440" height="1000">
+        </div>
+        <div class="gallery-item" data-caption="Connection authorization and test evidence">
+          <img src="img/mixarr-connections.png" alt="Connection authorization and test evidence" loading="lazy" width="1440" height="1000">
+        </div>
+        <div class="gallery-item" data-caption="User management and account roles">
+          <img src="img/mixarr-user-management.png" alt="User management and account roles" loading="lazy" width="1440" height="1000">
         </div>
       </div>
-      <p class="gallery-hint">Click any image to enlarge</p>
+      <p class="gallery-hint">Fresh Playwright captures of the dev interface with fictional demonstration data. Click any image to enlarge. These images demonstrate the UI, not live provider connectivity.</p>
     </div>
   </section>
 
@@ -238,10 +263,10 @@
         <button class="tab-btn" data-tab="unraid">Unraid</button>
       </div>
       <div class="tab-content active" id="tab-compose">
-        <pre><code>git clone https://github.com/aquantumofdonuts/mixarr.git
+        <pre><code>git clone --branch dev https://github.com/aquantumofdonuts/mixarr.git
 cd mixarr
-git checkout latest
 cp .env.example .env
+# Edit .env: set a strong SESSION_SECRET and your public URLs
 docker compose up -d --build
 
 # Access at https://your-ip:3443</code></pre>
@@ -266,10 +291,11 @@ docker compose up -d --build
       </div>
       <div class="tab-content" id="tab-unraid">
         <div class="unraid-content">
-          <p>Coming Soon</p>
+          <p>Use the Docker Run settings in Unraid’s Docker UI: image <code>ghcr.io/aquantumofdonuts/mixarr:latest</code>, HTTPS port <code>3443:443</code>, a persistent <code>/data</code> mapping, and the same environment variables. See the <a href="https://github.com/aquantumofdonuts/mixarr/blob/prod/README.md">deployment guide</a> for image variants.</p>
         </div>
       </div>
-      <p class="install-requirements">Requirements: Docker, Docker Compose, Lidarr instance</p>
+      <p class="install-requirements">Requirements: Docker; Docker Compose for the Compose option; a Lidarr instance for library additions. After installation, create an admin account and configure your connections.</p>
+      <p class="install-requirements">Docker Compose builds the catalog preview from <code>dev</code>. Docker Run installs the stable <code>:latest</code> image, which does not yet include this redesign.</p>
       <a href="https://github.com/aquantumofdonuts/mixarr#readme" class="btn btn-secondary" target="_blank" rel="noopener">View Full Documentation</a>
     </div>
   </section>
@@ -279,10 +305,10 @@ docker compose up -d --build
     <div class="container">
       <h2>Support</h2>
       <div class="support-grid">
-        <a href="https://github.com/aquantumofdonuts/mixarr/wiki" class="support-card" target="_blank" rel="noopener">
+        <a href="https://github.com/aquantumofdonuts/mixarr/blob/prod/README.md" class="support-card" target="_blank" rel="noopener">
           <span class="support-icon"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
-          <h3>Wiki</h3>
-          <p>Docs and guides on GitHub</p>
+          <h3>Documentation</h3>
+          <p>Installation, service setup, and deployment options</p>
         </a>
         <a href="https://github.com/aquantumofdonuts/mixarr/issues" class="support-card" target="_blank" rel="noopener">
           <span class="support-icon"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
