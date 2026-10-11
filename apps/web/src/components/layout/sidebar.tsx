@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useQuery } from '@tanstack/react-query';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import Settings from 'lucide-react/dist/esm/icons/settings';
@@ -63,20 +64,18 @@ export function Sidebar() {
         )}
       >
         {/* Header */}
-        <div className="flex h-[57px] shrink-0 items-center justify-between border-b border-sidebar-border px-4">
-          <Link href="/" className="flex items-center gap-2.5 min-w-0">
-            <span className="flex items-center justify-center w-8 h-8 rounded-button bg-primary text-primary-foreground font-bold text-sm flex-shrink-0">
-              M
-            </span>
-            {!collapsed && (
+        <div className={cn('flex h-[57px] shrink-0 items-center justify-between border-b border-sidebar-border', collapsed ? 'justify-center px-2' : 'px-4')}>
+          {!collapsed && (
+            <Link href="/" aria-label="Mixarr home" className="flex items-center gap-2.5 min-w-0">
+              <Image src="/icons/icon-192x192.png" alt="" width={32} height={32} className="h-8 w-8 shrink-0" />
               <span className="text-lg font-semibold truncate">Mixarr</span>
-            )}
-          </Link>
+            </Link>
+          )}
           <div className="flex items-center gap-1">
             {/* Collapse toggle */}
             <button
               type="button" onClick={toggleCollapsed}
-              className="h-11 w-11 rounded-button p-2 hover:bg-accent transition-colors"
+              className="flex h-11 w-11 items-center justify-center rounded-button hover:bg-accent transition-colors"
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
               <ChevronRight className={cn('h-5 w-5 transition-transform duration-[140ms]', !collapsed && 'rotate-180')} aria-hidden="true" />
