@@ -1,6 +1,6 @@
 # Mixarr Issues & Technical Debt
 
-> **Last Updated:** October 9, 2026
+> **Last Updated:** October 11, 2026
 > **Status:** PRODUCTION READY (v2.3.5) — Collaboration Constellation unreleased on `dev`
 > 
 > For completed issues, see [ISSUES-FIXED.md](ISSUES-FIXED.md)  
@@ -22,6 +22,12 @@ The 2026-10-07 snapshot identified six merge-blocking items from [plans/2026-07-
 6. **Partially resolved locally:** T25 scopes user-facing slskd search/download operations to owned connections (administrators retain access), rejects foreign tracking mutations before effects, and retries through the record's exact active connection. Independent spec/quality reviews passed actual router/auth tests with mocked external boundaries. The webhook still sits behind session auth and uses unscoped configuration/record matching; those findings remain open — `apps/api/src/routes/slskd.ts`.
 
 Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from that review have shipped.
+
+---
+
+## Release 3.0.0 CodeQL dispositions
+
+PR #85 exposed incomplete artist-text sanitization, which now removes remaining markup delimiters and has malformed/nested input regression coverage. The provider-fetch test mock now compares parsed hostnames exactly. CodeQL alerts 59–61 are classified `used in tests`: their login/session middleware exists only in `tests/api/catalog-completion-database.test.ts`, uses synthetic actors and an allowlisted disposable database, and is excluded by the API build’s `src/**/*` include. The fixture does not certify production credential validation, CSRF, rate limiting, or TLS behavior. Existing production findings above remain open.
 
 ---
 

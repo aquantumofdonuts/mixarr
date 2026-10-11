@@ -92,6 +92,13 @@ describe('ArtistDetailService scoped provenance', () => {
     expect(detail.unavailable).toEqual([]);
   });
 
+  it.each(['<script', '<scri<script>pt>alert(1)</script>', 'A <b>verified</b> identity <script'])('removes all markup delimiters from provider text: %s', async value => {
+    metadata.getArtist.mockResolvedValue({ id: mbid, name: value, disambiguation: value });
+    const detail = await service.getArtistDetail(mbid, 1);
+    expect(detail.name).not.toMatch(/[<>]/);
+    expect(detail.disambiguation).not.toMatch(/[<>]/);
+  });
+
   it('never joins same-name records, missing identities, or another user including an admin actor', async () => {
     results = [result(1), result(2, { mbid: otherMbid }), result(3, { mbid: null }), result(4, { subscription: { userId: 2, name: 'Admin own' } })];
     reviews = [review(1), review(2, { mbid: otherMbid }), review(3, { mbid: null }), review(4, { userId: 2 })];
@@ -229,7 +236,7 @@ describe('ArtistDetailService scoped provenance', () => {
     const timeouts = vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => ms === 20_000 ? deadline.signal : nativeTimeout(ms));
     let finishMetadata: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async url => {
-      if (String(url).includes('musicbrainz.org')) {
+      if (new URL(String(url)).hostname === 'musicbrainz.org') {
         return new Promise<Response>(resolve => { finishMetadata = resolve; });
       }
       setImmediate(() => deadline.abort(new DOMException('Read budget expired', 'TimeoutError')));

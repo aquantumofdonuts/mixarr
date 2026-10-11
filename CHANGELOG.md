@@ -36,6 +36,7 @@ This is a major release because custom API clients must adapt to the contracts b
 - Keep review items recoverable when acquisition cannot be confirmed, enforce ownership on affected result/download mutations, and preserve partial subscription-run counts.
 - Build shared types before API compilation in Docker images and smoke CI; include the native build toolchain required by the optional SQLite credit index. CI fetches comparison history and fails on invalid diffs rather than silently skipping source lint.
 - Reject creation of unsupported Telegram, Pushover, and email notification channels instead of accepting configurations that cannot deliver. Unsupported SSO test handlers report failure.
+- Remove incomplete and nested markup delimiters from artist metadata before returning display text.
 - Replace development-history comments with functional explanations.
 
 ### Breaking changes and upgrade notes
