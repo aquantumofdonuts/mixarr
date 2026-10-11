@@ -67,6 +67,7 @@ function httpUrl(value: string | null | undefined): string | null {
 }
 
 function text(value: string | null | undefined): string | null {
+  // eslint-disable-next-line no-control-regex -- Remove control characters from provider text before display.
   return value?.replace(/<[^>]*>/g, '').replace(/[\u0000-\u001f\u007f]/g, '').trim() || null;
 }
 

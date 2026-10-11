@@ -158,7 +158,7 @@ Collaboration data can come from live APIs or a local index. This is a global to
 *   **Deezer** — 30-second track previews (no auth required).
 *   **Lidarr** — send-to-library. An artist must exist in MusicBrainz to be auto-added; if it doesn't, that's an honest "not in MusicBrainz" dead-end — the node stays fully browsable and playable, but its subscribe action is disabled with a tooltip.
 *   **Plex / Jellyfin / Lidarr** — power the "in your library" ring that highlights nodes you already own.
-*   **YouTube** — a **link-out** only (no in-app embed or API), used as the final fallback in the player after owned playback and Deezer preview.
+*   **YouTube** — a **link-out** only (no in-app embed or API), used as the fallback when a Deezer preview is unavailable. Library ownership is a badge, not an in-app stream.
 
 ### Honest limitations
 

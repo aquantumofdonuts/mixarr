@@ -2,7 +2,7 @@
 
 `index.html` is the static project website. Pages deploys changes under `website/` only after a push to `prod` (or a manual workflow dispatch). Updating `dev` does not publish the site.
 
-The gallery shows the unreleased catalog redesign on `dev`. Docker Compose builds the preview from `dev`; Docker Run uses the stable `:latest` image. The package version is 2.3.5, not a new catalog release.
+The gallery shows the 3.0.0 catalog with fictional demonstration data. Docker Compose builds from `prod`; Docker Run uses the stable `:latest` image. Images are published separately by the version-tag workflow. Release preparation on `dev` does not publish a website or image.
 
 To refresh screenshots, build and start the web app locally, then run from the repository root:
 

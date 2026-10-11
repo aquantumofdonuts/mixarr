@@ -9,7 +9,7 @@ import { z } from 'zod';
  * Cron expression regex — standard 5-field cron (minute hour dom month dow)
  * Supports: numbers, ranges (1-5), lists (1,3,5), steps, wildcards
  */
-const cronRegex = /^(\*(?:\/[0-9]+)?|[0-9,\-\/]+)\s+(\*(?:\/[0-9]+)?|[0-9,\-\/]+)\s+(\*(?:\/[0-9]+)?|[0-9,\-\/]+)\s+(\*(?:\/[0-9]+)?|[0-9,\-\/]+)\s+(\*(?:\/[0-9]+)?|[0-9,\-\/]+)$/;
+const cronRegex = /^(\*(?:\/[0-9]+)?|[0-9,/-]+)\s+(\*(?:\/[0-9]+)?|[0-9,/-]+)\s+(\*(?:\/[0-9]+)?|[0-9,/-]+)\s+(\*(?:\/[0-9]+)?|[0-9,/-]+)\s+(\*(?:\/[0-9]+)?|[0-9,/-]+)$/;
 
 /**
  * Schedule field — valid 5-field cron expression, empty string, or null

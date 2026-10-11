@@ -104,9 +104,9 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     }
 
     // Look up a connection by type.
-    function findConnection(type: string) {
+    const findConnection = (type: string) => {
       return connectionMap.get(type) || null;
-    }
+    };
 
     // Get all connections from the pre-built map
     const lidarrConn = findConnection('lidarr');
@@ -205,7 +205,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     // Funnel metrics counters
     let alreadyInLibrary = 0;
     let noMbidFound = 0;
-    let dedupedCount = artistsForDedup.length - artists.length;
+    const dedupedCount = artistsForDedup.length - artists.length;
 
     for (let i = 0; i < artists.length; i++) {
       const artist = artists[i];

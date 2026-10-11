@@ -176,7 +176,7 @@ searchRouter.get('/ai/status', async (_req, res) => {
   try {
     const available = await aiService.isAvailable();
     res.json({ available });
-  } catch (error) {
+  } catch {
     res.json({ available: false });
   }
 });

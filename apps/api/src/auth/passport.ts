@@ -27,6 +27,7 @@ sessionRedis.on('connect', () => {
 });
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Passport uses Express.User declaration merging.
   namespace Express {
     interface User {
       id: number;

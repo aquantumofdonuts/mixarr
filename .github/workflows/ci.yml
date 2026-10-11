@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,7 +42,7 @@ jobs:
             BASE_SHA="${{ github.event.before }}"
           fi
 
-          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}" | grep -E '^apps/api/src/.*\.ts$' || true)
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "${{ github.sha }}" -- ':(glob)apps/api/src/**/*.ts')
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No API TypeScript source files changed"
             exit 0
@@ -156,5 +158,4 @@ jobs:
           tags: ghcr.io/${{ github.repository_owner }}/mixarr-${{ matrix.app }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
 

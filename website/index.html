@@ -42,7 +42,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Mixarr",
-    "description": "Self-hosted music discovery and catalog companion for Lidarr, with scheduled subscriptions, a review queue, artist inspection, and credited collaboration exploration. Screenshots show the unreleased dev catalog preview.",
+    "description": "Self-hosted music discovery and catalog companion for Lidarr, with scheduled subscriptions, a review queue, artist inspection, and credited collaboration exploration. Screenshots use fictional demonstration data.",
     "url": "https://aquantumofdonuts.github.io/mixarr/",
     "applicationCategory": "MultimediaApplication",
     "operatingSystem": "Linux, Docker",
@@ -53,7 +53,7 @@
     },
     "license": "https://www.gnu.org/licenses/gpl-3.0.html",
     "screenshot": "https://aquantumofdonuts.github.io/mixarr/img/mixarr-discover.png",
-    "softwareVersion": "2.3.5",
+    "softwareVersion": "3.0.0",
     "codeRepository": "https://github.com/aquantumofdonuts/mixarr",
     "isAccessibleForFree": true
   }
@@ -111,7 +111,7 @@
           <button class="dot" aria-label="Slide 4"></button>
         </div>
       </div>
-      <p class="hero-subtitle">Development preview · catalog redesign on <code>dev</code> · not yet released</p>
+      <p class="hero-subtitle">Mixarr 3.0.0 · music discovery and catalog companion</p>
       <h1>Find your next artist. Know where they came from.</h1>
       <p class="hero-subtitle">Bring playlists, charts, listening history, and recommendations into one music catalog. Inspect artists and their sources, review discoveries, then send your choices to Lidarr.</p>
       <div class="hero-cta">
@@ -263,7 +263,7 @@
         <button class="tab-btn" data-tab="unraid">Unraid</button>
       </div>
       <div class="tab-content active" id="tab-compose">
-        <pre><code>git clone --branch dev https://github.com/aquantumofdonuts/mixarr.git
+        <pre><code>git clone --branch prod https://github.com/aquantumofdonuts/mixarr.git
 cd mixarr
 cp .env.example .env
 # Edit .env: set a strong SESSION_SECRET and your public URLs
@@ -295,7 +295,7 @@ docker compose up -d --build
         </div>
       </div>
       <p class="install-requirements">Requirements: Docker; Docker Compose for the Compose option; a Lidarr instance for library additions. After installation, create an admin account and configure your connections.</p>
-      <p class="install-requirements">Docker Compose builds the catalog preview from <code>dev</code>. Docker Run installs the stable <code>:latest</code> image, which does not yet include this redesign.</p>
+      <p class="install-requirements">Docker Compose builds from <code>prod</code>. Docker images are published separately when the release tag is pushed; check the release page before upgrading an image.</p>
       <a href="https://github.com/aquantumofdonuts/mixarr#readme" class="btn btn-secondary" target="_blank" rel="noopener">View Full Documentation</a>
     </div>
   </section>
