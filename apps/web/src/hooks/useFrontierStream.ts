@@ -30,8 +30,6 @@ export interface FrontierStreamStatus {
  * generation it was published under; a payload whose generation differs from
  * the token's current generation is stale (it belongs to a superseded center)
  * and MUST be discarded.
- *
- * Exported for unit testing — this predicate is the crux of the race guard.
  */
 export function isCurrentGeneration(
   payload: { generation?: unknown },

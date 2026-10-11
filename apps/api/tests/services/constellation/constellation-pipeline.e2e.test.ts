@@ -1,37 +1,12 @@
 /**
- * END-TO-END INTEGRATION TEST — Collaboration Constellation backend pipeline.
+ * Compose real expansion, crawl, graph, and identity services over one in-memory
+ * Prisma store in dump-index and live-adapter modes. Each test receives fresh
+ * shared delegates; writes from one service are visible to the others.
  *
- * This proves the REAL constellation services compose across the whole pipeline,
- * in BOTH the index-ON and index-OFF data-source modes, over a single shared
- * in-memory Prisma store. Nothing here is re-mocked per service: ExpansionService
- * WRITES and OrbitCrawler / GraphService / IdentityService READ over the SAME
- * backing Maps, so a defect in how any two of them agree on the schema surfaces.
- *
- * The exact Prisma surface the constellation services touch (grepped from
- * apps/api/src/services/constellation/*.ts) — and therefore all the in-memory
- * store must implement — is:
- *   constellationEdge     upsert · findMany · updateMany
- *   constellationPerson   upsert · findUnique · findMany
- *   constellationGenre    upsert · findMany
- *   constellationOwned    upsert · findMany
- *   constellationIdentity findUnique · findFirst · upsert
- * (constellationOrbit is only touched by the job/worker layer, not by any of the
- * five services exercised here, so it is intentionally absent.)
- *
- * SHARED-STATE APPROACH: db.js is module-mocked to a bare object; beforeEach
- * builds a fresh `makeInMemoryConstellationPrisma()` and `Object.assign`s its
- * delegates onto that same object. Every service imports the default `prisma`
- * binding (the bare object), so after the assign they all resolve to the one
- * fresh store — module-level sharing without hoisting gymnastics, reset per test.
- *
- * ON vs OFF — what actually degrades: the OFF source mirrors the live Discogs
- * adapter (LiveDiscogsCreditSource), which returns `genres: []` on every release
- * because the artist-releases listing carries no per-release genre. Consequence:
- * ON produces ConstellationGenre rows (nodes get a dominant genre / colour); OFF
- * produces none (node.genre === null). EVERYTHING ELSE is identical — edges,
- * weights, master-dedup, bridge confidence, path, and owned all compute the same
- * in OFF, because none of them depend on genres (bridge needs neighbour SETS, not
- * genres). The difference between modes is genre presence, never a crash.
+ * Exercise edge weights, master deduplication, bridge confidence, paths, and
+ * ownership. The live credit source lacks per-release genres, so only the genre
+ * channel is absent in that mode. Worker-owned orbit records and real database
+ * behavior are outside this service-composition test.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

@@ -1,49 +1,18 @@
 /**
- * IdentityService — Discogs → MusicBrainz identity resolution.
+ * Resolve Discogs people to MusicBrainz MBIDs for acquisition and library
+ * ownership. Cache successful resolutions in ConstellationIdentity.
  *
- * The Collaboration Constellation graph lives in Discogs ID space, but Lidarr
- * adds artists by MBID and the "owned ring" checks library MBIDs. Resolving a
- * Discogs person to a MusicBrainz MBID is therefore the critical join for the
- * acquisition loop (Design §13). Resolution is bounded (only ever called for
- * visible nodes + the user's library set) and cached forever in
- * `ConstellationIdentity`.
+ * Check the cache, then curated MusicBrainz URL relationships, then artist-name
+ * candidates corroborated by release titles. Corroboration requires exactly one
+ * candidate with at least one shared non-generic normalized title. Zero or
+ * multiple matching candidates require manual resolution and are not cached.
  *
- * Resolution strategy, in order:
- *   1. Cache          — a stored ConstellationIdentity row wins, no network.
- *   2. Linked         — MB `/url` relationship (Discogs artist page → MB artist).
- *                       The clean, curated join key. confidence='linked'.
- *   3. Corroborated   — MB artist name search, then confirm by comparing the
- *                       candidate's MB discography titles against the Discogs
- *                       artist's release titles. Guards against fusing two
- *                       different people who happen to share a name.
- *                       confidence='corroborated'.
- *   4. Manual         — a name candidate exists but discography overlap is empty
- *                       (ambiguous), or nothing matched at all. Not cached; the
- *                       UI later offers a manual "link to MusicBrainz" picker.
+ * Ignore generic titles such as Live and Greatest Hits to avoid conflating
+ * same-named artists. Normalize titles by lowercasing, replacing punctuation
+ * and symbols with spaces, collapsing whitespace, and trimming.
  *
- * ## Design decisions
- * - **Corroboration threshold:** ≥ 1 NON-GENERIC normalized-title match between
- *   the MB candidate's release-group titles and the Discogs artist's release
- *   titles. A single shared *distinctive* record is strong evidence two credits
- *   are the same person given the name already matched; higher thresholds
- *   discard legitimate matches for artists with short or partially-catalogued
- *   discographies.
- * - **Generic-title stoplist:** titles like "Greatest Hits", "Live", "Untitled"
- *   recur across unrelated artists and must NOT count toward overlap, or two
- *   different same-named people get fused (and the wrong MBID cached forever,
- *   driving a wrong Lidarr add). See {@link GENERIC_TITLES}.
- * - **Uniqueness rule:** compute non-generic overlap for EVERY candidate. Accept
- *   (corroborated) only if EXACTLY ONE candidate has ≥1 non-generic overlap.
- *   Zero overlapping candidates → manual. Two or more overlapping candidates →
- *   ambiguous → manual (never arbitrarily pick the top-scored one).
- * - **Title normalization:** lowercase, strip punctuation/symbols to spaces,
- *   collapse whitespace, trim. (`normalizeTitle`.) This makes "Blue Album!" and
- *   "blue album" compare equal across the two catalogues.
- * - **Discogs discography seam:** injected as `getDiscogsReleaseTitles` so the
- *   corroboration step is testable without a live Discogs call and not coupled
- *   to a token-bearing DiscogsService. Defaults to a real implementation that
- *   fetches the public Discogs artist-releases endpoint behind
- *   `rateLimit('discogs')`.
+ * getDiscogsReleaseTitles is injectable; its default fetches public artist
+ * releases behind the Discogs rate limiter.
  */
 
 import { rateLimit } from '../rate-limiter.js';
@@ -89,7 +58,7 @@ export interface DiscogsToMbidResult {
 /**
  * A user-library source that yields the artist MBIDs it holds. Injected seam so
  * {@link IdentityService.buildOwnedSet} stays testable with fakes; production
- * wiring (Task 15) supplies real adapters over the lidarr/plex/jellyfin
+ * wiring supplies real adapters over the lidarr/plex/jellyfin
  * services — this service must NOT couple to them directly.
  */
 export interface OwnedSourceProvider {
@@ -264,7 +233,7 @@ export class IdentityService {
    * Build the user's owned set: for each library source, resolve every artist
    * MBID to its Discogs person id (via {@link mbidToDiscogs}) and record a
    * per-user {@link ConstellationOwned} row. MBIDs that don't resolve to a
-   * Discogs node are SKIPPED (counted, never thrown). Task 13/15 then flags a
+   * Discogs node are SKIPPED (counted, never thrown). Graph reads flag a
    * visible node's `owned` by a simple membership check against these rows.
    *
    * Per-source resilient: a source whose fetch throws (e.g. Lidarr down) is

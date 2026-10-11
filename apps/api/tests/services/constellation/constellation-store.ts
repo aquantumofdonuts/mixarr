@@ -1,23 +1,8 @@
 /**
- * A stateful, in-memory stand-in for the Prisma client subset that the
- * constellation services actually call. There is no live database in the test
- * environment (migrations cannot run), so this fake gives ExpansionService a
- * place to WRITE and GraphService/IdentityService a place to READ over the SAME
- * backing Maps — letting the real services compose end-to-end.
- *
- * It implements ONLY the methods enumerated from a grep of the constellation
- * services (see the e2e test header), with correct-enough semantics for the
- * exact queries those callers make:
- *
- *   constellationEdge     upsert, findMany (where.sourcePersonId as number|{in}),
- *                         updateMany (where as {source,target} or {OR:[...]})
- *   constellationPerson   upsert, findUnique (where.personId), findMany (where.personId {in}|number)
- *   constellationGenre    upsert (where.personId_genre), findMany (where.personId {in}, orderBy)
- *   constellationOwned    upsert (where.userId_personId_source), findMany (where.userId + personId {in})
- *   constellationIdentity findUnique (where.personId_source), findFirst (where {source,externalId}), upsert
- *
- * Each call returns a shallow COPY of the stored row(s) so callers cannot mutate
- * store state by reference (matching Prisma's value semantics).
+ * Stateful in-memory Prisma subset for constellation service-composition tests.
+ * Shared Maps back the edge, person, genre, ownership, and identity delegates.
+ * Only the query shapes used by these services are supported. Return shallow
+ * copies so callers cannot mutate stored rows by reference.
  */
 
 export interface EdgeRow {

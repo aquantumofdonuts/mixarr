@@ -1,5 +1,5 @@
 /**
- * CreditSource selection factory (Design §4.2 — Setting-ON vs Setting-OFF).
+ * CreditSource selection factory.
  *
  * {@link resolveCreditSource} is the PURE selector: given the toggle + path it
  * returns either a {@link DumpIndexService} (local SQLite dump index, "Setting-ON")

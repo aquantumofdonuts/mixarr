@@ -96,7 +96,7 @@ describe('DumpIndexService', () => {
     // Credit exists, but setReleaseMeta was never called for release 500.
     idx.addCredit({ releaseId: 500, artistId: 1, role: 'Bass', masterId: null });
     const releases = await idx.getArtistReleases(1);
-    // An INNER JOIN regression would drop this row entirely.
+    // A LEFT JOIN must retain artists without credits.
     expect(releases).toEqual([{ releaseId: 500, masterId: null, year: null, genres: [] }]);
     idx.close();
   });

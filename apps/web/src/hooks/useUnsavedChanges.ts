@@ -28,7 +28,7 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   }, []);
   const updateDirty = useCallback(() => {
     const dirty = [...entries.current.values()].some(Boolean);
-    // ponytail: synchronize the native guard in the same commit as draft registration.
+    // synchronize the native guard in the same commit as draft registration.
     if (dirty !== unloadAttached.current) {
       if (dirty) window.addEventListener('beforeunload', beforeUnload);
       else window.removeEventListener('beforeunload', beforeUnload);
@@ -47,7 +47,7 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   const confirmDiscard = useCallback(() => ![...entries.current.values()].some(Boolean) || window.confirm('Discard unsaved settings changes?'), []);
   const guardedNavigation = useCallback((action: () => void) => {
     if (!confirmDiscard()) return false;
-    // ponytail: the explicit discard dialog replaces the native unload prompt for this one action.
+    // the explicit discard dialog replaces the native unload prompt for this one action.
     bypassUnload.current = true;
     try { action(); } finally {
       clearTimeout(resetTimer.current);

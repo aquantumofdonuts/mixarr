@@ -1,9 +1,6 @@
 /**
- * Strategy pattern interfaces for subscription processing.
- *
- * Each subscription type (lastfm_chart, spotify_playlist, etc.) will
- * implement the SubscriptionStrategy interface so the worker can
- * dispatch to it without a giant switch statement.
+ * SubscriptionStrategy defines the processing contract for each subscription
+ * type. The worker dispatches through the registry by type string.
  */
 
 /** Artist discovered by a subscription strategy. */

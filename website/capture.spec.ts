@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { test, expect, CATALOG_USER, catalogFeed, catalogQueue } from '../apps/web/e2e/catalog-fixtures';
 
-// ponytail: reuse the strict catalog fixtures; these are fictional records, not provider evidence.
+// Use fictional catalog fixtures to capture UI without provider activity.
 const names = ['Harbor Signals', 'Cedar Lines', 'Paper Satellites', 'Quiet Atlas', 'Night Transit', 'Small Hours', 'Glass Fields', 'Northbound Orchestra'];
 const timestamp = '2026-10-10T09:00:00.000Z';
 const artwork = catalogFeed[0].imageUrl;
@@ -71,7 +71,7 @@ test('capture the current catalog for the GitHub Pages website', async ({ catalo
   await expect(page.getByRole('heading', { name: 'Discovery', exact: true, level: 1 })).toBeVisible();
   await expect(page.locator('article[data-feed-id]')).toHaveCount(names.length);
   await capture('discover');
-  // README still embeds this filename; keep it current too.
+  // Capture the dashboard image embedded by the repository README.
   await capture('dashboard');
   await page.locator('article[data-feed-id="feed-1"]').getByRole('link', { name: names[0], exact: true }).click();
   await expect(page.getByRole('dialog', { name: names[0], exact: true })).toContainText('Release chronology');

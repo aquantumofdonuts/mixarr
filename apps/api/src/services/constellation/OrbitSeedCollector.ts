@@ -1,20 +1,10 @@
 /**
- * OrbitSeedCollector — collects, tiers, resolves, and de-duplicates the seed
- * artists that warm a single user's taste orbit into the constellation cache.
+ * Collect, resolve, tier, and deduplicate artists for a user's constellation
+ * orbit. Order seeds by recency: hist1d, hist7d, hist30d, libtop, then lib,
+ * so the bounded crawl prioritizes recent listening. frontier is not a seed tier.
  *
- * WHY TIERS: the crawl (Task 9's {@link OrbitCrawler}) is breadth-first under a
- * hard edge budget, so the ORDER seeds are handed to it decides which slice of a
- * user's taste gets materialized when the budget runs out. We seed by RECENCY:
- * what you played today (`hist1d`) is nearer than this week (`hist7d`), this
- * month (`hist30d`), your library favourites (`libtop`), then the rest of your
- * library (`lib`). The crawler fills nearest tiers first. (`frontier` exists in
- * the schema for later expansion rings but is not a seed tier.)
- *
- * PURE OVER AN INJECTED SEAM: this class references no Prisma and no concrete
- * listening-history/library service — only the {@link SeedSource} seam (which
- * yields artist identifiers) and a `resolveMbid` function (= IdentityService's
- * `mbidToDiscogs`). That keeps collection unit-testable with fakes; production
- * wiring of which service feeds which tier lives in the worker (Task 10 part C).
+ * SeedSource yields artist identifiers; resolveMbid maps them to Discogs people.
+ * Concrete history/library adapters are composed in the worker.
  */
 
 /** The recency/library tiers a seed can belong to, NEAREST first. */

@@ -254,7 +254,9 @@ export function useDismissFeedItem() {
   });
 }
 
-/** Restoration is a server mutation now, with no delayed or client-only decision rollback. */
+/**
+ * Restore decisions through a server mutation.
+ */
 export function useRestoreDecision(kind: 'feed' | 'review') {
   const queryClient = useQueryClient();
   return useMutation({

@@ -1,8 +1,5 @@
 /**
- * Notification Event Formatting
- * 
- * UI text for notification events - moved from API to frontend (SOC-006)
- * The API returns raw event strings, frontend handles display formatting.
+ * Format raw API notification event strings as UI text.
  */
 
 /**

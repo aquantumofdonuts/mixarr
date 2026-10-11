@@ -261,8 +261,7 @@ ssoRouter.post('/providers/:type/test', validateParams(ssoProviderTypeParamsSche
         }
       }
       default: {
-        // Every SsoProviderType has a case above; this only runs if a new enum
-        // value is added without a test. Never report an untested provider as OK.
+        // Reject provider types without a connection-test handler.
         const unhandled: never = type;
         res.json({ success: false, message: `No connection test is available for ${String(unhandled)}` });
       }

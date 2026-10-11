@@ -158,7 +158,7 @@ export async function getDeezerRelatedArtists(artistId: number, limit: number = 
 // ---------------------------------------------------------------------------
 // Track search (playback previews) — the public general `search` endpoint returns
 // TRACKS carrying a 30s `preview` MP3 URL plus artist/title/album-cover art. Used
-// by the constellation /play resolution (Design §8 playback chain).
+// by the constellation /play resolution.
 // ---------------------------------------------------------------------------
 
 interface DeezerTrackAlbum {

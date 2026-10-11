@@ -1,10 +1,7 @@
 /**
- * Pure visual-encoding functions for the Collaboration Constellation graph.
- *
- * These translate the honest data channels from the design (§8) into concrete
- * canvas paint values: genre -> color, prominence -> radius, tie strength ->
- * line width, confident bridge -> warm glow, ownership -> ring. They are kept
- * free of canvas / React so they can be unit-tested without a DOM.
+ * Map constellation data to canvas paint: genre to color, prominence to radius,
+ * tie strength to line width, confident bridges to glow, and ownership to rings.
+ * Pure functions with no canvas or React dependency.
  */
 
 // ---------------------------------------------------------------------------
@@ -171,7 +168,7 @@ const BRIDGE_GLOW_RGB = '245, 166, 35';
  *
  * Focus links are reddish. A *confident* bridge (`bridgeConfident` true and a
  * non-null `bridge` score) glows warm, with opacity scaled by the score — this
- * is the design's confidence gate: a non-confident bridge (or a null score) is
+ * is the confidence gate: a non-confident bridge (or a null score) is
  * treated as an ordinary edge and rendered neutral, never glowing.
  */
 export function edgeColor(
@@ -195,9 +192,7 @@ export function edgeColor(
 export const OWNED_RING_COLOR = '#f5c542';
 
 /**
- * Red highlight stroke for the current focus node — the design's "red center at
- * the focus". Drawn as an outer ring so it reads on top of any genre fill or
- * owned gold ring.
+ * Draw a red outer ring for the current focus, above genre fill and ownership rings.
  */
 export const FOCUS_NODE_COLOR = '#e0533a';
 

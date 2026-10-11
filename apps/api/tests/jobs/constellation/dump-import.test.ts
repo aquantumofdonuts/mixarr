@@ -218,8 +218,7 @@ describe('importDumpStream', () => {
       },
     } as unknown as DumpIndexService;
 
-    // batchSize 1 flushes mid-stream (inside the sax closetag handler), which is
-    // where the throw used to escape as an uncaught exception.
+    // batchSize 1 triggers a writer failure mid-stream inside the SAX closetag handler.
     await expect(
       importDumpStream(Readable.from(DUMP_XML), stub, { batchSize: 1 }),
     ).rejects.toThrow('SQLITE_FULL');

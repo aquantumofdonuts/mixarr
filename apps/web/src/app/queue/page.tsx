@@ -37,7 +37,7 @@ export default function QueuePage() {
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const current = (captured: typeof owner.current) => mounted.current && owner.current === captured;
-  // ponytail: keep only cursors this mounted page actually visited; direct links have no invented Previous page.
+  // keep only cursors this mounted page actually visited; direct links have no invented Previous page.
   const history = useRef<{ scope: string; cursors: Array<string | null> }>({ scope, cursors: [cursor] });
   if (history.current.scope !== scope) history.current = { scope, cursors: [cursor] };
   if (!history.current.cursors.includes(cursor)) history.current.cursors = [cursor];

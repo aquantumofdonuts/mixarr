@@ -10,7 +10,7 @@ import {
 import { GENRE_LEGEND } from './encoding';
 
 /**
- * The constellation controls bar (Design §5 / §8).
+ * The constellation controls bar.
  *
  * Three honest controls over the field:
  *  - **Role filter** — which credit roles create edges. Server-side: the selected

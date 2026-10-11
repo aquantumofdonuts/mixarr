@@ -545,7 +545,7 @@ export class FeedService {
       item.score = this.calculateScore({
         subscriptionCount: item.subscriptionCount,
         sourceCount: item.sourceCount,
-        librarySimilarity: 0, // MVP: not implemented
+        librarySimilarity: 0, // Library membership lookup is unavailable here.
         earliestFound: item.earliestFound,
       });
     }

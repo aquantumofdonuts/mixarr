@@ -1,14 +1,7 @@
 /**
- * Frontend mirror of the backend role→bit mapping.
- *
- * The authoritative source is `ROLE_BITS` in
- * `apps/api/src/services/constellation/RoleTaxonomy.ts`. Those bit VALUES are the
- * contract the `roleMask` query param encodes: the controls bar ORs the selected
- * role bits into a mask, and the backend's `GraphService.subgraph` filters edges
- * by it. We keep a thin copy here (rather than importing across the app boundary
- * into server-only code) and a unit test (`roleBits.test.ts`) asserts the values
- * still match the documented backend values. If the backend bits ever change,
- * that test fails and this copy must be updated in lockstep.
+ * Frontend role-to-bit mapping for the roleMask API parameter. Values must
+ * match ROLE_BITS in apps/api/src/services/constellation/RoleTaxonomy.ts.
+ * The controls OR selected bits; GraphService uses the mask to filter edges.
  */
 
 export type BaseRole = 'performer' | 'producer' | 'composer' | 'engineer' | 'artwork' | 'other';
@@ -24,7 +17,7 @@ export const ROLE_BITS: Record<BaseRole, number> = Object.freeze({
 });
 
 /**
- * The roles surfaced as checkboxes in the controls bar (Design §5). `other` is
+ * The roles surfaced as checkboxes in the controls bar. `other` is
  * intentionally omitted from the UI — it is the catch-all bucket, not a role a
  * user would deliberately filter to — but its bit still exists in {@link ROLE_BITS}.
  */

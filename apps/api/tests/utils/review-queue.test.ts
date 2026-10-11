@@ -221,8 +221,7 @@ describe('findOrCreateReviewItem', () => {
     });
 
     it('includes all album fields including artistMbid and albumMbid', async () => {
-      // Regression test: ensure album items preserve MBID fields
-      // Bug: subscription worker was not passing artistMbid to review queue
+      // Album review records retain the artist MBID.
       mockPrisma.reviewItem.findFirst.mockResolvedValue(null);
       mockPrisma.reviewItem.findMany.mockResolvedValue([]);
       mockPrisma.reviewItem.create.mockResolvedValue({ id: 7 });

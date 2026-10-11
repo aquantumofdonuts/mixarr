@@ -263,7 +263,7 @@ export class LidarrService {
       throw new Error(`Artist not found in Lidarr for MBID: ${foreignArtistId}`);
     }
 
-    // Build request body with explicit fields only (matching upstream Python implementation)
+    // Build the request body with explicit Lidarr fields
     // Don't spread ...artist as search results may contain conflicting/stale fields
     const requestBody = {
       artistName: artist.artistName,
@@ -359,10 +359,8 @@ export class LidarrService {
   }
 
   /**
-   * Fetch Lidarr's current download queue. Used by the 60-day sweep to find
-   * and remove entries for albums that are being abandoned (see
-   * removeQueueItem below) — not part of the original service, added for
-   * that purpose.
+   * Fetch the current Lidarr download queue so the diversion sweep can remove
+   * entries for albums being abandoned.
    */
   async getQueue(pageSize = 1000): Promise<Array<{ id: number; albumId?: number; artistId?: number; title: string }>> {
     const result = await this.request<{ records: Array<{ id: number; albumId?: number; artistId?: number; title: string }> }>(
@@ -444,11 +442,8 @@ export class LidarrService {
   }
 
   /**
-   * Add an artist to Lidarr.
-   * 
-   * Note: We previously triggered a metadata refresh after adding, but this
-   * caused full library scans due to Lidarr API issues. The addArtist call
-   * already fetches metadata from MusicBrainz, so extra refresh is unnecessary.
+   * Add an artist to Lidarr. The add request fetches MusicBrainz metadata;
+   * omit an extra metadata refresh to avoid triggering full-library scans.
    */
   async addArtistWithRefresh(
     foreignArtistId: string,

@@ -148,7 +148,7 @@ test('640px reflow approximation is labeled separately from native browser zoom'
     testInfo.annotations.push({ type: 'coverage-limit', description: 'Native Control+= browser zoom did not produce 200% layout zoom in this automated engine; manual native zoom acceptance is pending. The following 640px viewport is reflow approximation only.' });
   }
   await page.keyboard.press('Control+0');
-  // ponytail: A CSS viewport checks reflow; device scale or CSS zoom cannot prove native zoom.
+  // A CSS viewport checks reflow; device scale or CSS zoom cannot prove native zoom.
   await page.setViewportSize({ width: 640, height: 450 });
   for (const [path, heading, content] of routes) {
     await page.goto(path);

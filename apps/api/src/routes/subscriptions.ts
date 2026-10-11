@@ -36,7 +36,7 @@ subscriptionsRouter.get('/', subscriptionController.list);
 /**
  * GET /api/subscriptions/types
  * Returns subscription type metadata for frontend consumption
- * SOC-003: Single source of truth for subscription type configuration
+ * Single source of truth for subscription type configuration
  */
 subscriptionsRouter.get('/types', (_req, res) => {
   res.json(SUBSCRIPTION_TYPES);

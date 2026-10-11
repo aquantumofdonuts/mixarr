@@ -397,7 +397,7 @@ describe('ListenBrainz Service', () => {
   });
 
   // ============================================================================
-  // NEW LISTENBRAINZ DEEP INTEGRATION METHODS
+  // LISTENBRAINZ INTEGRATION METHODS
   // ============================================================================
 
   describe('getFreshReleases', () => {

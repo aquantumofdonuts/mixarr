@@ -1,14 +1,7 @@
 /**
- * Collaboration Constellation Job Queues
- *
- * BullMQ queues for the "Setting-ON" constellation pipeline:
- *  - `constellation-import`: stream-parse the Discogs releases dump into the
- *    local {@link DumpIndexService} index (Task 8).
- *  - `constellation-crawl`: OrbitCrawler expansion from a seed artist (Task 9).
- *  - `constellation-expand`: on-demand node expansion for the graph view.
- *
- * Mirrors the conventions in `jobs/queue.ts` (queue names, Redis connection via
- * {@link createRedisConnection}, and shared {@link defaultJobOptions}).
+ * BullMQ queues for constellation dump import, orbit crawling, and interactive
+ * node expansion. Share Redis connection creation and default job options with
+ * the other background queues.
  */
 
 import { Queue } from 'bullmq';
@@ -33,8 +26,8 @@ export interface ConstellationImportJobData {
 
 /**
  * Payload for a crawl job. The crawl queue serves two shapes:
- *  - a single-seed expansion outward from `seedArtistId` (Task 9); and
- *  - a per-user orbit warm keyed by `userId` (Task 10's orbit-crawl-worker),
+ *  - a single-seed expansion outward from `seedArtistId`; and
+ *  - a per-user orbit warm keyed by `userId` (orbit-crawl-worker),
  *    which collects the user's tiered seeds itself.
  * At least one of the two keys is present for a given job.
  */
@@ -49,7 +42,7 @@ export interface ConstellationCrawlJobData {
 
 /**
  * Payload for an on-demand node-expansion job. `tokenId`/`generation` correlate
- * the expansion to the client's SSE stream (Task 15): the expand worker (Task 16)
+ * the expansion to the client's SSE stream: the expand worker
  * publishes each newly-expanded node with `publishToStream(tokenId, generation, node)`
  * so only the re-center that requested it receives the push.
  */

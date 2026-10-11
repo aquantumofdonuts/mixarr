@@ -8,9 +8,8 @@ import { masterKey } from './MasterDedup.js';
 const logger = createLogger('ExpansionService');
 
 /**
- * The injectable seam that decouples ExpansionService from any concrete data
- * backend. Task 7 provides a SQLite-index-backed implementation; a live adapter
- * wraps DiscogsService. ExpansionService must never reference either directly.
+ * Credit backend contract shared by the SQLite index and live Discogs adapter.
+ * ExpansionService depends on this interface rather than a concrete backend.
  */
 export interface CreditSource {
   /** A person's releases as {releaseId, masterId, year, genres} refs. */
@@ -24,8 +23,8 @@ export interface CreditSource {
 }
 
 /**
- * Optional collaborators for ExpansionService. `isPersonFull` is the fullness
- * seam (see fullness note below); it defaults to "nobody is known-full yet".
+ * Optional expansion collaborators. isPersonFull defaults to the persisted
+ * fullyExpanded flag when no reader is injected.
  */
 export interface ExpansionOptions {
   /** Returns true if `personId` has already been fully expanded elsewhere. */
@@ -79,7 +78,7 @@ interface Collab {
  *   they are themselves expanded. An edge's `bothEndpointsFull` is true iff BOTH
  *   endpoints are full — here P is full, so it reduces to `isPersonFull(Q)`.
  *   `isPersonFull` remains an injectable seam (tests can supply a fake); its
- *   default reads the persisted `fullyExpanded` flag. Task 13's bridgeFill
+ *   default reads the persisted `fullyExpanded` flag. bridgeFill
  *   recomputes edges once Q is later expanded.
  */
 export class ExpansionService {
@@ -100,7 +99,7 @@ export class ExpansionService {
 
     const nowYear = this.nowYear;
 
-    // Per-expand resilience (Design §9): if the credit source is down for THIS
+    // Per-expand resilience: if the credit source is down for THIS
     // person (e.g. Discogs API throwing on the artist-releases listing), skip the
     // whole expansion cleanly — no seed row, no edges — rather than letting the
     // failure abort the surrounding orbit crawl. The already-materialized graph

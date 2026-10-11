@@ -38,9 +38,9 @@ export interface SubgraphOpts {
 }
 
 /**
- * Optional enrichment seam. Design says size = max(lastfm popularity, credit
- * prominence); lastfm is an OPTIONAL enrichment, so it is injected. When absent,
- * size = credit prominence (sum of the person's outgoing edge weights).
+ * Optional popularity enrichment for node size. Size is the maximum of
+ * popularity and credit prominence; without enrichment, use the sum of
+ * outgoing edge weights.
  */
 export type GetPopularity = (personId: number) => Promise<number>;
 
@@ -221,7 +221,7 @@ export class GraphService {
     for (const o of owned as Array<{ personId: number }>) ownedSet.add(o.personId);
 
     // Gather popularity for all nodes in parallel (the seam may hit Last.fm).
-    // Graceful degradation (Design §9): the popularity seam is an OPTIONAL
+    // Graceful degradation: the popularity seam is an OPTIONAL
     // enrichment. Absent -> size = credit prominence. A THROWING seam (Last.fm
     // outage) must ALSO degrade rather than crash the whole subgraph, so each
     // call is guarded: a rejected popularity lookup falls back to 0 for that
@@ -351,7 +351,7 @@ export class GraphService {
   }
 
   /**
-   * Two "six degrees" modes over the SAME edge data (design §7).
+   * Two "six degrees" modes over the SAME edge data.
    *
    * - `shortest` (default): bounded, cycle-safe layered BFS. Returns the fewest-hop
    *   path from `fromId` to `toId` within `max` degrees (default 6), or `null` if

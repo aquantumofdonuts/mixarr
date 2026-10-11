@@ -15,7 +15,7 @@ export const catalogFeed: FeedItem[] = [
   { id: 'feed-4', artistName: 'Unidentified Ensemble with a Very Long Name and Collaborator Credits', artistMbid: null, imageUrl: null, score: 1, subscriptionCount: 1, sourceCount: 1, sources: ['spotify'], createdAt: recordedAt, tags: null, listeners: null, subscriptionName: null, status: 'pending' },
 ];
 
-// ponytail: generate the full dataset; the mock applies the API's actual page limit.
+// generate the full dataset; the mock applies the API's actual page limit.
 export const catalogQueue = Array.from({ length: 520 }, (_, index) => ({
   id: index + 1, userId: CATALOG_USER.id, artistName: `Queue Artist ${String(index + 1).padStart(3, '0')}`,
   albumName: null as string | null, releaseYear: null, spotifyId: null, mbid: index % 3 ? ARTIST_IDS[index % 2] : null,

@@ -10,7 +10,7 @@ vi.mock('../../src/lib/db.js', () => ({
   },
 }));
 
-// Import the real extracted function — this tests the actual production logic
+// Exercise the production user deserializer.
 import { lookupSessionUser } from '../../src/auth/passport.js';
 
 describe('passport deserializeUser (lookupSessionUser)', () => {

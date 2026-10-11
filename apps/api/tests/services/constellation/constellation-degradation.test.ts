@@ -1,37 +1,9 @@
 /**
- * DEGRADATION MATRIX — Collaboration Constellation graceful-degradation (Design §9).
- *
- * §9 promises the constellation DEGRADES (reduced data / a browsable-but-thinner
- * graph) rather than CRASHES when any single upstream dependency is unavailable.
- * This suite asserts one focused scenario per §9 row over the SAME in-memory
- * Prisma store the e2e test uses (real ExpansionService/GraphService/Identity-
- * Service compose; only the failing dependency is faked):
- *
- *   Row 1  Discogs dump not imported (index ON, empty)  -> getArtistReleases []
- *          => crawl no-ops, subgraph = just the focus node. (UI "warming".)
- *   Row 2  Discogs API down (credit source throws)      -> per-release AND
- *          per-expand resilience: the failing release/person is skipped, the
- *          reachable rest still materializes. Partial graph, no crash.
- *   Row 3  MusicBrainz down                             -> discogsToMbid needsManual,
- *          mbidToDiscogs null, buildOwnedSet skips unresolved. No throw.
- *   Row 4  Plex/Jellyfin/Lidarr absent                  -> owned set empty
- *          (nodes owned:false); /subscribe 400/409 (browsable, not a 500);
- *          /play still resolves to a YouTube link-out.
- *   Row 5  Last.fm down (popularity seam throws/absent) -> node size falls back
- *          to credit prominence. No crash.
- *   Row 6  Rate-limit contention                        -> the orbit crawl is
- *          enqueued at LOW priority (design-level; the one unit-testable bit).
- *
- * TWO SOURCE HARDENINGS were required for the promise to actually hold and are
- * covered here (see the row bodies):
- *   - Row 5: GraphService.subgraph now guards each `getPopularity` call, so a
- *     THROWING Last.fm seam degrades that node to credit prominence instead of
- *     rejecting the whole subgraph. (Previously `Promise.all(map(getPopularity))`
- *     would have propagated the rejection and crashed the subgraph.)
- *   - Row 2: ExpansionService.expandPerson now guards `getArtistReleases`, so a
- *     Discogs outage for ONE person skips that expansion cleanly (mirroring the
- *     pre-existing per-release `getReleaseCredits` guard) rather than aborting the
- *     surrounding orbit crawl.
+ * Exercise constellation degradation with real graph/expansion/identity services,
+ * an in-memory Prisma store, and failing dependency fakes. Cover empty dump
+ * indexes, Discogs and MusicBrainz outages, missing libraries, Last.fm fallback,
+ * and low-priority crawl scheduling. Failed enrichments must preserve the
+ * remaining browsable graph.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -288,7 +260,7 @@ describe('§9 Row 2 — Discogs API down (expand source throws)', () => {
 describe('§9 Row 3 — MusicBrainz down', () => {
   // Faithful "MB down" seam: the real MusicBrainzService catches network errors
   // in lookupArtistMbidByUrl / lookupArtistDiscogsId and returns null; searchArtist
-  // propagates (and discogsToMbid catches it). We reproduce exactly that shape.
+  // throws network errors for the discogsToMbid error handler to catch.
   const mbDown = () =>
     ({
       lookupArtistMbidByUrl: vi.fn(async () => null),
@@ -415,7 +387,7 @@ describe('§9 Row 5 — Last.fm down (popularity seam)', () => {
     const nodeA = sg.nodes.find((n) => n.personId === A)!;
     expect(nodeA.size).toBeGreaterThan(0); // fell back to credit prominence (sum of outgoing weights)
 
-    // Identical to the no-seam baseline — the Last.fm outage changes nothing else.
+    // Last.fm outages preserve graph membership and edges.
     const baseline = await new GraphService().subgraph(A, {});
     expect(nodeA.size).toBe(baseline.nodes.find((n) => n.personId === A)!.size);
   });

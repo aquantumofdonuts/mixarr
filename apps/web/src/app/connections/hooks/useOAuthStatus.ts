@@ -34,7 +34,7 @@ export function useOAuthStatus(type: OAuthType, connectionId: number | null) {
           !(typeof data.expired === 'boolean' || (type === 'deezer' && data.expired === undefined))) {
         throw new Error('Invalid authorization status response');
       }
-      // ponytail: Deezer's actual status response has no expiry field.
+      // Deezer's actual status response has no expiry field.
       return { ...data, expired: data.expired ?? false };
     },
     enabled: connectionId !== null,

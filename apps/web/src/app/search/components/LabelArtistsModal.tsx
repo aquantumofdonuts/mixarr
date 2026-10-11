@@ -112,7 +112,7 @@ export function LabelArtistsModal({ label, onClose }: LabelArtistsModalProps) {
     setIsAddingBatch(true);
     const counts = { added: 0, skipped: 0, failed: 0 };
     try {
-      // ponytail: the API accepts at most 100 identities per request. Keep one
+      // the API accepts at most 100 identities per request. Keep one
       // options choice and submit bounded chunks of the loaded selection.
       const ids = [...remaining];
       for (let start = 0; start < ids.length; start += 100) {

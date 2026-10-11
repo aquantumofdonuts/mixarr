@@ -314,7 +314,7 @@ connectionsRouter.post('/test', validateBody(testConnectionSchema), async (req, 
           res.status(400).json({ success: false, error: 'Client ID and Client Secret required' });
           return;
         }
-        // For Spotify, we just validate the credentials format for now
+        // Validate Spotify credential format without a provider request
         // Full OAuth flow happens after saving the connection
         if (clientId.length < 10 || clientSecret.length < 10) {
           res.json({ success: false, error: 'Invalid credentials format' });

@@ -14,17 +14,9 @@ import type {
 } from '@/types/constellation';
 
 /**
- * The side panel a constellation node opens (Design §8 acquisition grain).
- *
- * Nodes are PEOPLE, but Lidarr monitors ARTISTS — so blind-subscribing a
- * session-player node would monitor an empty artist. Instead, selecting a node
- * lands the user HERE, where they explicitly choose the grain: monitor the whole
- * artist, or add a single release (album). This is the "graph IS the download
- * interface" loop.
- *
- * The honest dead-end: a person MusicBrainz can't link/corroborate can't be
- * auto-added. The subscribe endpoint answers 409; we render an inline message +
- * a MusicBrainz search link instead of a generic error. The node stays browsable.
+ * Show a selected person's releases and acquisition options for the whole
+ * artist or one album. When identity resolution returns 409, display an inline
+ * message and MusicBrainz search link while keeping the node browsable.
  */
 export interface PersonPanelProps {
   /** The Discogs person id to show, or `null` for a closed panel. */
@@ -166,7 +158,7 @@ export function PersonPanel({ personId, displayName, owned, onClose, actorId, cr
     [subscribe],
   );
 
-  // Play affordance (Design §8): the header ▶ plays the person's representative
+  // Play affordance: the header ▶ plays the person's representative
   // track (their name as the artist), and each release row has a ▶ that plays
   // `{artist: name, track: release.title}`. Both only render when a page-level
   // player is mounted (the context provides `play`); otherwise they are hidden.
@@ -332,8 +324,8 @@ export function PersonPanel({ personId, displayName, owned, onClose, actorId, cr
 }
 
 /**
- * The honest acquisition dead-end: not in MusicBrainz, so no auto-add. We offer a
- * MusicBrainz search link rather than a generic error; the node stays browsable.
+ * Offer MusicBrainz search when the person cannot be resolved for acquisition.
+ * The node remains browsable.
  */
 function NeedsManualNotice({ name }: { name: string }) {
   return (

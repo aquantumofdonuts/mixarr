@@ -20,33 +20,13 @@ import { api } from '@/lib/api';
 import type { PlayResponse } from '@/types/constellation';
 
 /**
- * The persistent audio player bar (Design §8 playback chain).
+ * Persistent constellation player driven by ConstellationPlayerProvider context.
+ * Resolve artist/track requests through /api/constellation/play. Render an
+ * in-app Deezer preview or a YouTube search link; owned adds a library badge
+ * and does not enable library streaming.
  *
- * A "now playing" request names an artist (+ optional track) and whether the node
- * is owned. The bar resolves a source via `GET /api/constellation/play` and
- * renders the honest tier it got back:
- *
- *  - **deezer**  → an in-app `<audio>` 30s preview (play/pause + a scrubber),
- *    cover art, title/artist, and a "▶ Deezer preview" source badge.
- *  - **youtube** → an "↗ Open in YouTube" link-out (new tab) + a "no preview
- *    available" note and a "YouTube" source badge. It NEVER autoplays and is a
- *    plain results link, not an embed.
- *  - **owned**   → an extra "● In your library" badge. Full library streaming is
- *    out of scope, so owned is a badge hint layered on whichever source resolved.
- *
- * ## How it is driven (decoupled trigger)
- * The player is mounted once, high in the tree (Task 22 places it at the
- * constellation page). Triggers live deep in the tree (the {@link PersonPanel}
- * header ▶ and per-release ▶). Rather than prop-drill a callback through the
- * graph, this module exposes a tiny React context: wrap the page in
- * {@link ConstellationPlayerProvider} and call {@link useConstellationPlayer} from
- * anywhere to `play(request)`. The provider owns the "now playing" state and
- * renders the bar. `useConstellationPlayer` returns `null` outside a provider, so
- * a trigger can cheaply hide its play affordance when no player is mounted.
- *
- * ## Audio hygiene
- * The `<audio>` element is paused + its `src` cleared whenever the resolved
- * preview changes or the bar unmounts — no leaked/overlapping playback.
+ * useConstellationPlayer returns null outside a provider. Pause audio and clear
+ * its source when the preview changes or the player unmounts to avoid overlap.
  */
 export interface NowPlayingRequest {
   artist: string;
@@ -399,9 +379,8 @@ export function useConstellationPlayer(): PlayerContextValue | null {
 }
 
 /**
- * Mounts a single {@link ConstellationPlayer} and exposes `play(request)` to the
- * subtree via context. Wrap the constellation page in this (Task 22) so nodes and
- * release rows can start playback without prop-drilling.
+ * Mount one player and expose play(request) to descendant nodes and release
+ * rows through context.
  */
 export function ConstellationPlayerProvider({ children }: { children: ReactNode }) {
   const [request, setRequest] = useState<NowPlayingRequest | null>(null);

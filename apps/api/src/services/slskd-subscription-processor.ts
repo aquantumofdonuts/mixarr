@@ -70,7 +70,7 @@ export class SlskdSubscriptionProcessor {
     const { connectionId, preferences } = context;
     const searchText = artist.album ? `${artist.name} ${artist.album}` : artist.name;
 
-    // IMPORTANT FIX #4: Validate connectionId
+    // Validate the connection ID.
     if (!connectionId || connectionId <= 0) {
       throw new Error(`Invalid connectionId: ${connectionId}`);
     }
@@ -97,7 +97,7 @@ export class SlskdSubscriptionProcessor {
               connectionId,
             });
 
-            // CRITICAL FIX #2: Catch timeout errors from waitUntilFinished
+            // Handle waitUntilFinished timeouts.
             let searchResult: { searchId: string };
             try {
               // Wait for job to complete (60s timeout includes queue wait + execution)
@@ -115,7 +115,7 @@ export class SlskdSubscriptionProcessor {
 
             searchId = searchResult.searchId;
           } else {
-            // Direct call (legacy path)
+            // Call slskd directly when no operation queue is configured
             log.info("Using direct slskd call (rate limiting disabled)", {
               artist: artist.name,
               album: artist.album,
@@ -217,7 +217,7 @@ export class SlskdSubscriptionProcessor {
                 // Wait for download to be queued (10s timeout - downloads are quick)
                 await downloadJob.waitUntilFinished(this.queueEvents, 10000);
               } else {
-                // Direct call (legacy path)
+                // Call slskd directly when no operation queue is configured
                 await this.slskdService.queueDownload(bestResult.username, [{
                   filename: file.filename,
                   size: file.size,
@@ -267,7 +267,7 @@ export class SlskdSubscriptionProcessor {
             };
           }
         } catch (error) {
-          // IMPORTANT FIX #7: Don't retry on queue full errors
+          // Do not retry when the operation queue is full.
           const errorMessage = error instanceof Error ? error.message : "Unknown error";
           const isQueueFull = errorMessage.includes("queue is full") || errorMessage.includes("too many jobs");
 

@@ -47,7 +47,7 @@ it.each([
   expect(mocks.organizer).toHaveBeenCalledWith({ downloadDir: '/downloads', musicLibraryDir: '/music' }); expect(mocks.organize).toHaveBeenCalledWith(42);
 });
 it('keeps authenticated webhook requests subject to the existing router rate limit', async () => {
-  // ponytail: router's existing 60/minute limit precedes the webhook's 100/minute limit.
+  // router's existing 60/minute limit precedes the webhook's 100/minute limit.
   const responses = await Promise.all(Array.from({length:101}, () => webhook({ ...body, event: 'OtherEvent' })));
   expect(responses.some(response => response.status === 429 && /too many.*requests/i.test(response.body.error))).toBe(true);
 });

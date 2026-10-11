@@ -304,7 +304,7 @@ export default function LibraryPage() {
   const page = readPage(params.get('page'));
   const visibleCount = page * RENDER_CHUNK;
   const context = useListContext({ ready: !isLoading });
-  // ponytail: Show more appends rows to this snapshot; other URL changes restore their own saved selection.
+  // Show more appends rows to this snapshot; other URL changes restore their own saved selection.
   const expansionSelection = useRef<{ page: number; ids: Set<string> } | null>(null);
 
   // Filter and sort artists

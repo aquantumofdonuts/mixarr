@@ -424,5 +424,5 @@ export class DeezerOAuthService {
   }
 }
 
-// Re-export the image helper from original deezer.ts for backward compatibility
+// Re-export the image helper for callers using this module
 export { fetchDeezerArtistImage, fetchDeezerArtistImages } from './deezer.js';

@@ -55,7 +55,7 @@ export interface LabelResult {
 const PAGE_SIZE = 25;
 const SOURCES: SearchSource[] = ['spotify', 'deezer', 'tidal', 'bandcamp'];
 const TYPES: SearchType[] = ['artist', 'album', 'label', 'year', 'ai'];
-// ponytail: name-only identities last only as long as their request's result objects.
+// name-only identities last only as long as their request's result objects.
 const unidentifiedKeys = new WeakMap<ArtistResult, string>();
 let unidentifiedSequence = 0;
 export function artistResultKey(artist: ArtistResult): string {

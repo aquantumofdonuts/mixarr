@@ -1,22 +1,10 @@
 /**
- * Constellation On-Demand Expand Worker
+ * Expand a constellation person through the configured CreditSource, then read
+ * and publish the materialized subgraph to the matching SSE token/generation.
  *
- * Consumes `constellation-expand` jobs `{ artistId, tokenId?, generation? }`
- * (enqueued by GET /constellation/expand/:personId, Task 15). For each job it
- * expands the person through the configured {@link CreditSource} (SQLite dump
- * index or live Discogs adapter), materializing ConstellationEdge/Person rows,
- * then reads that person's freshly-materialized subgraph and — when the job
- * carries a stream token — pushes it to the matching SSE stream via
- * {@link publishToStream} so the client that requested the re-center receives the
- * new nodes/edges.
- *
- * TESTABLE CORE WITHOUT REDIS: the orchestration is {@link runExpandJob}, a pure
- * function over injected seams (an expand service, a `getNeighbors` reader, and a
- * `publish` fn). It references no BullMQ, Redis, or Prisma. The BullMQ + socket.io
- * shell ({@link registerConstellationExpandWorker}) dynamically imports
- * bullmq/redis/queue INSIDE the register function and is only ever called at app
- * startup, so merely importing this module opens no Redis connection (mirrors the
- * dump-import / orbit-crawl workers).
+ * runExpandJob uses injected expansion, reader, and publisher functions.
+ * Worker registration imports BullMQ and Redis lazily; importing this module
+ * does not open a Redis connection.
  */
 
 import type { Server as SocketIOServer } from 'socket.io';

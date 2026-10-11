@@ -200,7 +200,7 @@ describe('Subscription Worker - slskd Result Handling', () => {
       expect(resultHandlingSchema.safeParse('slskd_queue').success).toBe(true);
       expect(resultHandlingSchema.safeParse('slskd_auto').success).toBe(true);
       
-      // Original modes still work
+      // Non-Soulseek modes remain supported
       expect(resultHandlingSchema.safeParse('preview').success).toBe(true);
       expect(resultHandlingSchema.safeParse('queue').success).toBe(true);
       expect(resultHandlingSchema.safeParse('auto').success).toBe(true);

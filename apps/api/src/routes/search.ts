@@ -1285,7 +1285,7 @@ searchRouter.get('/label/:mbid/artists', async (req, res) => {
       }
     }
     const artists = [...artistMap.values()];
-    // ponytail: artwork is optional. An image outage must not discard a valid release page.
+    // artwork is optional. An image outage must not discard a valid release page.
     try {
       const imageMap = await readBeforeDeadline(getArtistImages(artists.map(artist => artist.name)), signal);
       artists.forEach(artist => { artist.imageUrl = imageMap.get(artist.name) || null; });

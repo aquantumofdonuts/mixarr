@@ -344,7 +344,7 @@ describe('ConstellationView', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Controls-bar wiring (Task 21 FRONTEND-B)
+// Controls-bar wiring
 // ---------------------------------------------------------------------------
 
 /** Paint-recording ctx that captures arc radii and the alpha at each fill. */

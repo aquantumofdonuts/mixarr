@@ -1,38 +1,13 @@
 /**
- * Collaboration Constellation HTTP surface (Design §4.2, §7, §13).
+ * Authenticated collaboration-graph routes for seeds, expansion, paths,
+ * releases, ownership, acquisition, playback, and SSE updates.
  *
- * The read/traversal API the frontend (Tasks 17-22) consumes:
- *  - GET /seed                     seed the graph from an artist (discogs id or mbid)
- *  - GET /expand/:personId         optimistic cached neighbours + background expand
- *  - GET /path                     six-degrees path finding (shortest | interesting)
- *  - GET /person/:personId/releases  discography for the side panel
- *  - GET /stream/:token            SSE push channel for background-expanded nodes
- *  - GET /owned                    the user's owned person-id set (owned ring)
+ * Seeds accept artist identities; album seeds return 400. Release lists use
+ * the public Discogs artist-releases endpoint without a per-user token.
  *
- * ## Decisions
- * - **Auth**: every route sits behind `requireAuth`; the authenticated user id is
- *   read as `req.user!.id`, matching the other routers (see routes/dashboard.ts).
- * - **Album seeds**: NOT yet supported. `type=album` returns 400 with a clear
- *   message rather than guessing a primary artist — album→artist resolution needs
- *   a token-bearing Discogs lookup we deliberately keep out of this read surface.
- *   Documented simplification; artist seeds are the shipped path.
- * - **SSE push source**: an in-process {@link StreamRegistry} over Node's
- *   `EventEmitter`, keyed by opaque stream-token id. No Redis, no socket.io — the
- *   SSE endpoint is leak-free (listener removed + heartbeat cleared on close) and
- *   unit-testable. The `constellation-expand` worker
- *   (`jobs/constellation/constellation-expand-worker.ts`) consumes
- *   `constellation-expand` jobs and publishes each newly-expanded node by calling
- *   `publishToStream(job.data.tokenId, job.data.generation, node)` — using the
- *   `tokenId`/`generation` this router threads through the job payload. Everything
- *   on this side (token minting + user-scoping, generation framing, the payload
- *   correlation fields, and the publish/subscribe primitive) is implemented here.
- * - **Generation (re-center race guard, §4.2)**: a stream token is `{id, generation}`.
- *   `/seed` mints a fresh token; re-centering with `?token=<id>` bumps that id's
- *   generation. Every SSE event carries the generation it was published with, so a
- *   client can discard events from a superseded (older) generation.
- * - **releases data source**: the public Discogs artist-releases endpoint
- *   (`fetchDiscogsArtistReleases`, injectable seam), mirroring IdentityService's
- *   public discography fetch — no per-user token needed for a read-only panel.
+ * StreamRegistry scopes opaque tokens to users. Re-centering increments the
+ * token generation; workers publish with the job's token/generation so clients
+ * can discard stale events. SSE close removes listeners and heartbeat timers.
  */
 
 import { Router } from 'express';
@@ -323,18 +298,11 @@ export interface SubscribeOutcome {
 export type SubscribeToLidarr = (input: SubscribeToLidarrInput) => Promise<SubscribeOutcome>;
 
 /**
- * Default subscribe implementation — the SAME Lidarr-add mechanism the search /
- * subscription-approve routes use: resolve the user's Lidarr connection via
- * {@link getLidarrServiceWithConfig}, fall back to the first available
- * profile/folder, then add by MBID with SkyHook cache warming.
+ * Resolve the user's Lidarr connection, fall back to available profiles/folders,
+ * and add by MBID with SkyHook cache warming.
  *
- * ## Acquisition grain (Design §8)
- * Lidarr monitors ARTISTS, but a session-player node has an empty artist
- * discography, so blind "monitor artist" is useless. When the panel passes a
- * `releaseTitle`, we instead resolve that album's MBID via Lidarr's own album
- * lookup and monitor ONLY that album (`addAlbumWithCacheWarm`, which adds the
- * artist with monitor:none and monitors the single release). Without a
- * releaseTitle we monitor the whole artist (`addArtistWithCacheWarm`).
+ * With releaseTitle, resolve the album under the artist and monitor only that
+ * album. Without releaseTitle, monitor the whole artist.
  */
 export async function subscribeToLidarrDefault(
   input: SubscribeToLidarrInput,
@@ -392,7 +360,7 @@ export async function subscribeToLidarrDefault(
 }
 
 // ---------------------------------------------------------------------------
-// Playback resolution (Design §8) — the honest player chain.
+// Playback source resolution.
 // ---------------------------------------------------------------------------
 
 /**
@@ -422,10 +390,8 @@ export type PlayResolution =
     };
 
 /**
- * Build the YouTube search link-out for an artist (+ optional track). This is a
- * plain results-page link — NOT the Data API and NOT an iframe embed (Design §8:
- * quota/ToS reality). It is the always-available bottom tier of the chain, so a
- * play affordance is never a dead button.
+ * Build a YouTube results-page link for the artist and optional track.
+ * Used when an in-app preview is unavailable; requires no API call or embed.
  */
 function youtubeSearchUrl(artist: string, track?: string): string {
   const q = [artist, track].filter((s) => s && s.trim()).join(' ');
@@ -599,7 +565,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
         }
 
         // Opening a fresh graph is the "user is here" signal that warms their
-        // taste orbit in the background (design §4.2). Staleness-gated inside
+        // taste orbit in the background. Staleness-gated inside
         // warmOrbit, so a settled orbit is a no-op; a re-seed via ?token= (role
         // filter change) is not a new visit. Never blocks or fails the response.
         if (!existingToken) {
@@ -623,7 +589,7 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
      * Optimistic: enqueue a background expand job (guarded so a missing Redis in
      * tests never throws) and return the currently-cached subgraph immediately.
      * When a stream token is supplied it is threaded into the job payload so the
-     * expand worker (Task 16) can push results to the correct SSE stream.
+     * expand worker can push results to the correct SSE stream.
      */
     async expand(req: Request, res: Response): Promise<void> {
       try {
@@ -734,13 +700,9 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
 
     /**
      * POST /person/:personId/subscribe   body: { releaseTitle?, name? }
-     * Close the graph→Lidarr loop: resolve the Discogs person to a MusicBrainz
-     * MBID and add it to Lidarr (whole artist, or a single album when
-     * `releaseTitle` is supplied — the acquisition grain from Design §8).
-     *
-     * The honest dead-end: a person MusicBrainz doesn't link/corroborate cannot
-     * be auto-added, so we answer 409 `{ needsManual }` rather than guessing. The
-     * node stays fully browsable; only the Lidarr add is unavailable.
+     * Resolve the Discogs person to a MusicBrainz MBID and add the artist or
+     * requested album to Lidarr. Unresolved identities return 409 { needsManual }
+     * without guessing; the graph node remains browsable.
      */
     async subscribe(req: Request, res: Response): Promise<void> {
       try {
@@ -866,23 +828,9 @@ export function buildConstellationHandlers(deps: ConstellationDeps = {}): Conste
 
     /**
      * GET /play?artist=<name>&track=<optional>&owned=<bool>
-     * Resolve a playback source down the honest chain (Design §8):
-     *   owned (badge only — full streaming is OUT OF SCOPE) → Deezer 30s preview
-     *   (in-app <audio>) → YouTube link-out (a results-page link, NEVER the Data
-     *   API / an embed — quota + ToS reality).
-     *
-     * ## OWNED is a hint, not a stream
-     * `owned=true` (the caller already knows the node is in the user's Plex/
-     * Jellyfin library) is passed straight through as an `owned: true` flag so the
-     * player can show an "in your library" badge. We deliberately do NOT attempt
-     * in-browser streaming from Plex/Jellyfin: their stream URLs need per-server
-     * auth + transcoding negotiation that is out of scope for this read surface.
-     * The reliable in-app tiers are the Deezer preview and the YouTube link-out.
-     *
-     * ## Graceful degradation
-     * A Deezer error OR a result with no preview falls through to the YouTube
-     * link-out — this endpoint never 500s on a missing preview, so the frontend
-     * play button is never dead: at worst it becomes a YouTube search link.
+     * Return a Deezer preview or fall back to a YouTube search link when the
+     * preview is absent or lookup fails. The owned flag supplies a library badge
+     * only; this endpoint does not stream from Plex or Jellyfin.
      */
     async play(req: Request, res: Response): Promise<void> {
       const artist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';

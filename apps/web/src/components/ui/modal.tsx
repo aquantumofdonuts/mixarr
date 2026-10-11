@@ -55,7 +55,7 @@ export function Modal({ isOpen, onClose, title, description, children, size = 'm
   const [footerContainer, setFooterContainer] = React.useState<HTMLDivElement | null>(null);
   const titleId = React.useId(), descriptionId = React.useId();
 
-  // ponytail: close is synchronous and controlled by the caller. No exit timer
+  // close is synchronous and controlled by the caller. No exit timer
   // can call onClose twice or outlive the dialog; callers can refuse a dirty close.
   const handleClose = React.useCallback(() => onCloseRef.current(), []);
 

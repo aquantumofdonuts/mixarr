@@ -1,44 +1,10 @@
 /**
- * OrbitCrawler — breadth-first, edge-budget-bounded crawl of a collaboration graph.
+ * Breadth-first collaboration-graph crawl bounded by a materialized-edge
+ * budget. Visit nearer tiers first and stop when maxEdges is spent.
  *
- * WHY A BUDGET, NOT A DEPTH: collaboration graphs are small-world. A fixed BFS
- * depth from realistic seeds reaches essentially all of Discogs, so depth alone
- * is not a usable bound — a few tiers "explode" to the whole universe. The hard
- * bound here is a materialized-EDGE budget (`maxEdges`): we fill nearer tiers
- * first (breadth-first) and stop once the budget is spent. That budget bounds
- * the crawl whenever expansions report `edgesCreated > 0`. The one corner it
- * does not cover is an ever-fresh infinite graph whose expansions all report
- * `edgesCreated: 0` (so the running total never advances) — for that, `maxDepth`
- * is the backstop, and it is clamped to `MAX_DEPTH_CAP` so termination is
- * guaranteed even if a caller passes `maxDepth: Infinity`.
- *
- * PURE ALGORITHM OVER INJECTED SEAMS: this class references no Prisma, no
- * network, and no concrete service — mirroring the `CreditSource` seam
- * philosophy of ExpansionService. It operates entirely through two async
- * function seams (`expand`, `isFull`), so it is trivially unit-testable with
- * fakes. Do NOT import a data backend here.
- *
- * INTENDED PRODUCTION WIRING (Task 10's worker builds the adapter):
- *   const crawler = new OrbitCrawler({
- *     async expand(personId) {
- *       await expansionService.expandPerson(personId); // materializes edges + persons
- *       const edges = await prisma.constellationEdge.findMany({
- *         where: { sourcePersonId: personId },
- *         select: { targetPersonId: true },
- *       });
- *       return {
- *         neighborIds: edges.map((e) => e.targetPersonId),
- *         edgesCreated: edges.length,        // NEW edges from this expansion
- *       };
- *     },
- *     async isFull(personId) {
- *       return (await prisma.constellationPerson.findUnique({
- *         where: { personId },
- *       }))?.fullyExpanded ?? false;
- *     },
- *   });
- * (The adapter is responsible for reporting only NEW edges in `edgesCreated`
- * where that matters for the budget; the crawler treats the number as given.)
+ * maxDepth, clamped to MAX_DEPTH_CAP, also bounds expansions that report zero
+ * new edges. Expansion and fullness checks are injected; the crawler opens no
+ * database or network handles and uses reported edgesCreated counts as given.
  */
 
 export interface OrbitDeps {

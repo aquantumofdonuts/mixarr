@@ -6,7 +6,7 @@ import type { CreditSource } from './ExpansionService.js';
 import { normalizeRole, type BaseRole } from './RoleTaxonomy.js';
 
 /**
- * A compact local index built from the Discogs data dump (Task 8 fills it),
+ * A compact local index built from the Discogs data dump,
  * read by the OrbitCrawler/ExpansionService with zero network access. It is the
  * "Setting-ON" data source and is interchangeable with the live Discogs adapter
  * because it satisfies the same {@link CreditSource} contract.
@@ -26,8 +26,7 @@ import { normalizeRole, type BaseRole } from './RoleTaxonomy.js';
  *
  * Lifecycle: the CONSUMER owns the database handle. Whoever constructs a
  * DumpIndexService must call {@link close} when done — in a `finally` block so
- * the handle is released even on error (the Task 8 import worker and the Task 9
- * crawler both do this).
+ * the handle is released even on error.
  */
 export class DumpIndexService implements CreditSource {
   private readonly db: BetterSqliteDatabase;
@@ -128,7 +127,7 @@ export class DumpIndexService implements CreditSource {
   }
 
   // ---------------------------------------------------------------------------
-  // Writer methods (used by Task 8's dump-import worker).
+  // Writer methods for the dump-import worker.
   // ---------------------------------------------------------------------------
 
   /** Insert or update a person's display name. */

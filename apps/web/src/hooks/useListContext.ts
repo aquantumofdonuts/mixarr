@@ -7,7 +7,7 @@ import { updateQuery } from '@/lib/list-state';
 
 export const ListScrollContext = createContext<HTMLElement | null>(null);
 interface Snapshot { top: number; selected: string[] }
-// ponytail: bounded tab memory is sufficient; no credentials or persistent ledger.
+// bounded tab memory is sufficient; no credentials or persistent ledger.
 const snapshots = new Map<string, Snapshot>();
 const MAX_CONTEXTS = 20, MAX_SELECTION = 500;
 

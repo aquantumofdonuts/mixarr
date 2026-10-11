@@ -90,7 +90,7 @@ export interface ConstellationViewProps {
  * remounts the view with a new `seed`.
  */
 export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pathTo, pathMode, onFocusChange, onPathChange }: ConstellationViewProps) {
-  // Controls-bar state (Design §5). `roleMask` is the SERVER-SIDE role filter —
+  // Controls-bar state. `roleMask` is the SERVER-SIDE role filter —
   // it is passed into the data hook so a change re-seeds through the backend's
   // filtered `subgraph`. `hideHotness` and `genreHighlight` are CLIENT-SIDE paint
   // adjustments only (no re-fetch).
@@ -205,8 +205,7 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
     (node: NodeObject<CanvasNode>) => {
       const personId = Number(node.id);
       if (!Number.isFinite(personId)) return;
-      // Selecting a node ALWAYS opens its acquisition panel (the grain fix): the
-      // user chooses artist-vs-album there rather than blind-subscribing.
+      // Open the acquisition panel so users can choose an artist or a single album.
       restored.current = `${streamKey}:${personId}`;
       // The canvas callback can run outside React; commit anchors before even an
       // immediately resolved cached expansion can merge and prune the field.
@@ -271,8 +270,7 @@ export function ConstellationView({ seed, actorId, requestedFocus, pathFrom, pat
         ctx.stroke();
       }
 
-      // Focus emphasis: the design's "red center at the focus" — a bright red
-      // outer ring so the currently-centred node stands out of the dense field.
+      // Draw a bright red outer ring to distinguish the current focus in dense graphs.
       if (node.isFocus) {
         ctx.beginPath();
         ctx.arc(x, y, radius + 2, 0, 2 * Math.PI);

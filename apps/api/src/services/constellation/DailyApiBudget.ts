@@ -1,6 +1,5 @@
 /**
- * Daily live-API request budget for the constellation (design §4.2 / §12:
- * "daily frontier-API budget = 5000 requests").
+ * Daily live-API request budget for the constellation.
  *
  * One Redis counter per UTC day. Every live Discogs HTTP request the
  * constellation makes (orbit warm AND interactive expansion) takes one unit;

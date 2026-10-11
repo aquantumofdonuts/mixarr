@@ -362,7 +362,6 @@ describe('SSO Test Connection', () => {
           updatedAt: new Date(),
         };
 
-        // Mock will be set up in implementation
         globalThis.__ldapMockBind = { success: true };
 
         const response = await request(app)

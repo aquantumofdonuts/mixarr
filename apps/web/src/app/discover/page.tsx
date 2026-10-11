@@ -55,7 +55,7 @@ export default function DiscoverPage() {
           const identity = canonicalArtistMbid(id);
           if (identity && typeof name === 'string' && name.length > 0 && name.length <= 500) names[identity] = name;
         }
-      } catch { /* ponytail: unavailable session storage leaves URL identities recoverable from the library. */ }
+      } catch { /* unavailable session storage leaves URL identities recoverable from the library. */ }
     }
     setStoredSeeds({ actor, names });
   }, [actor]);
@@ -69,13 +69,13 @@ export default function DiscoverPage() {
   }, [actor, storedSeeds, library]);
   useEffect(() => {
     if (actor === null || storedSeeds.actor !== actor) return;
-    // Keep bounded previously chosen identities so Back can restore an off-page seed.
+    // Bound seed history so Back can restore an off-page identity.
     const saved = Object.fromEntries([...Object.entries(storedSeeds.names).filter(([id]) => !seedIds.includes(id)), ...seedIds.filter(id => seedNames[id]).map(id => [id, seedNames[id]])].slice(-MAX_SAVED_SEEDS));
     const encoded = JSON.stringify(saved);
     // Direct-link resolutions must remain available after library filters replace the page.
     setStoredSeeds(previous => previous !== storedSeeds || JSON.stringify(previous.names) === encoded ? previous : { actor, names: saved });
     try { sessionStorage.setItem(`mixarr:discovery-seeds:${actor}`, encoded); }
-    catch { /* ponytail: session storage is optional; canonical seeds stay in the URL. */ }
+    catch { /* session storage is optional; canonical seeds stay in the URL. */ }
   }, [actor, storedSeeds, seedIds, seedNames]);
 
   const allResolved = seedValues.length > 0 && seedIds.length === seedValues.length && seedIds.every(id => seedNames[id]);
@@ -95,7 +95,7 @@ export default function DiscoverPage() {
   const failedSeeds = recsData?.failedSeedArtists ?? [];
   const everySeedFailed = !!recsData && failedSeeds.length > 0 && failedSeeds.length === recsData.seedArtists.length;
   const providerFailed = allResolved && (!!recommendationError || everySeedFailed);
-  // ponytail: retain one successful response for this mounted actor, never another actor's cached rows.
+  // retain one successful response for this mounted actor, never another actor's cached rows.
   const lastSuccess = useRef<{ actor: number | null; key: string; data: RecommendationsResponse } | null>(null);
   if (lastSuccess.current?.actor !== actor) lastSuccess.current = null;
   if (actor !== null && allResolved && recsData && !providerFailed) lastSuccess.current = { actor, key: keySignature, data: recsData };
@@ -104,7 +104,7 @@ export default function DiscoverPage() {
   const actionsUnavailable = showingPrevious || loadingRecommendations || providerFailed || !allResolved;
   const recommendations = displayData?.recommendations ?? [];
   const context = useListContext({ ready: !loadingLibrary && !loadingRecommendations, retainSelectionOnScopeChange: true });
-  // ponytail: canonical/provider identities survive reordering; unresolved names are scoped to this response object.
+  // canonical/provider identities survive reordering; unresolved names are scoped to this response object.
   const unresolvedKeys = useRef(new WeakMap<Recommendation, string>()), nextKey = useRef(0);
   const rowKey = useCallback((rec: Recommendation) => {
     const mbid = canonicalArtistMbid(rec.mbid);
@@ -151,7 +151,7 @@ export default function DiscoverPage() {
         for (const rec of remaining) {
           if (!isCurrent()) return;
           const mbid = canonicalArtistMbid(rec.mbid);
-          if (!mbid) continue; // ponytail: unknown recommendations require an individual explicit identity choice.
+          if (!mbid) continue; // unknown recommendations require an individual explicit identity choice.
           const { data, error } = await api.post<{ success?: boolean; outcome?: 'added' | 'already-in-library' }>('/api/discover/add', { artistName: rec.name, ...options, mbid });
           if (!isCurrent()) return;
           if (error || data?.success !== true || (data.outcome !== 'added' && data.outcome !== 'already-in-library')) continue;

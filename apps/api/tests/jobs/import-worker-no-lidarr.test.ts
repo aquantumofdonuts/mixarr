@@ -19,15 +19,9 @@ import {
 } from '../utils/fixtures.js';
 
 /**
- * These tests validate the expected behavior when Lidarr is not configured.
- * 
- * Due to the import-worker's architecture (internal processImport function
- * with many module-level dependencies), we test the logic through behavioral expectations:
- * 
- * 1. Auto mode without Lidarr should NOT throw 'No active Lidarr connection for auto mode'
- * 2. Auto mode without Lidarr should degrade to queue mode
- * 3. A warning log should be created indicating degradation
- * 4. Job progress should show 'Degraded to queue mode (no Lidarr)'
+ * Behavioral simulations of auto-mode fallback without Lidarr.
+ * These tests do not invoke processImport. Queue records, warnings, and
+ * progress messages are checked through local simulations.
  */
 describe('Import Worker - No Lidarr Connection Logic', () => {
   let mockPrisma: ReturnType<typeof createMockPrisma>;
@@ -40,23 +34,18 @@ describe('Import Worker - No Lidarr Connection Logic', () => {
 
   describe('Auto Mode Degradation Logic', () => {
     it('should NOT throw when auto mode and no Lidarr connection', () => {
-      // The OLD behavior throws an error
-      // The NEW behavior should NOT throw
+      // Missing Lidarr falls back to queue handling.
       const mode = 'auto';
       const lidarrConn = null; // No Lidarr connection
 
-      // Old code would do:
-      // if (!lidarrConn) {
-      //   throw new Error('No active Lidarr connection for auto mode');
-      // }
 
-      // New code should gracefully degrade
+      // Fall back to queue mode without throwing.
       let thrownError: Error | null = null;
       let degradedToQueue = false;
 
       if (mode === 'auto') {
         if (!lidarrConn) {
-          // New behavior: don't throw, degrade to queue
+          // Queue items when no Lidarr connection is available.
           degradedToQueue = true;
         }
       }
@@ -81,7 +70,7 @@ describe('Import Worker - No Lidarr Connection Logic', () => {
       let queuedCount = 0;
       const createdItems: Array<{ artistName: string; source: string }> = [];
 
-      // Simulate the new degradation logic
+      // Simulate fallback to queue mode
       if (mode === 'auto' && !lidarrConn) {
         for (const item of items) {
           const result = await mockFindOrCreate({
@@ -119,7 +108,7 @@ describe('Import Worker - No Lidarr Connection Logic', () => {
 
       let loggedWarning = false;
 
-      // Simulate the new degradation logic
+      // Simulate fallback to queue mode
       if (mode === 'auto' && !lidarrConn) {
         await mockAddLogEntry('warn', 'import', 'Auto mode degraded to queue - no Lidarr connection', { importSourceId });
         loggedWarning = true;

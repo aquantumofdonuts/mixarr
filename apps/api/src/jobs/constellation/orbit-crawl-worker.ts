@@ -1,32 +1,11 @@
 /**
- * Constellation Orbit-Crawl Worker
+ * Warm a user's constellation orbit from seeds ordered by listening recency.
+ * Persist orbit membership and crawl breadth-first under the configured edge
+ * and daily live-API budgets. Exhausted API budgets stop the crawl until re-wake.
  *
- * Warms one user's taste orbit into the constellation cache: it collects seed
- * artists (tiered by recency), records them into {@link ConstellationOrbit}, and
- * runs the breadth-first, edge-budget-bounded {@link OrbitCrawler} outward from
- * them — nearest tiers first, so the edge budget (Task 9) is spent on the music
- * closest to the user's recent listening. This is the perpetual low-priority
- * background crawler from design §4.2.
- *
- * TESTABLE CORE WITHOUT REDIS: the orchestration is {@link runOrbitCrawl}, a pure
- * function over injected seams — an {@link OrbitSeedCollector}, its
- * {@link SeedSource}s, an {@link OrbitCrawler} (built by the caller with the real
- * expand/isFull adapters), and a `markOrbit` upsert. It references no BullMQ, no
- * Redis, and no Prisma, so it is unit-tested with fakes. The BullMQ + socket.io
- * shell ({@link registerOrbitCrawlWorker}) dynamically imports bullmq/redis/queue
- * INSIDE the register function and is only ever called at app startup, so merely
- * importing this module opens no Redis connection (mirrors Task 8's worker).
- *
- * SCHEDULING (design §4.2 "idles once settled, re-wakes on new history"):
- *   - {@link warmOrbitIfStale} is the single entry point. The constellation seed
- *     route calls it when a user opens a fresh graph, and the daily scheduler
- *     calls {@link rewakeStaleOrbits} for every user who has an orbit. Both go
- *     through the same staleness gate, so a settled orbit is left alone and a
- *     warm already in flight is never duplicated.
- *   - Budgets: the materialized-edge cap is the `orbitEdgeBudget` setting; live
- *     Discogs requests are charged against the `dailyApiBudget` setting via
- *     {@link DailyApiBudget}. When the day's API budget runs out the crawl stops
- *     early (no retries) and resumes on the next re-wake.
+ * The seed route and daily scheduler share warmOrbitIfStale to avoid duplicate
+ * or unnecessary warms. Worker registration imports BullMQ and Redis lazily;
+ * importing this module does not open a Redis connection.
  */
 
 import type { Server as SocketIOServer } from 'socket.io';
@@ -117,21 +96,12 @@ export async function runOrbitCrawl(p: RunOrbitCrawlParams): Promise<RunOrbitCra
 // ---------------------------------------------------------------------------
 
 /**
- * Build the OrbitCrawler `expand` adapter around the real {@link ExpansionService}.
+ * Adapt ExpansionService to OrbitCrawler by expanding a person and reading
+ * their outgoing edges for neighbor IDs.
  *
- * It expands the person (materializing ConstellationEdge/ConstellationPerson
- * rows), then reads that person's outgoing edges to report the discovered
- * neighbours.
- *
- * edgesCreated APPROXIMATION: we report the person's TOTAL outgoing-edge count
- * after expansion as `edgesCreated`, not strictly the number of NEW rows this
- * call inserted. For a fresh expand (the common case in a cold orbit warm) every
- * edge is new, so total == new. On a re-expand of an already-materialized person
- * this over-counts against the budget — that is the safe direction (it makes the
- * crawl stop SOONER, never later), and {@link OrbitCrawler} already skips
- * fully-expanded persons via `isFull`, so re-expands are rare. Computing exact
- * new-row deltas would require a pre-count/post-count around expandPerson; the
- * approximation is documented and intentional.
+ * edgesCreated reports the total outgoing-edge count after expansion, not the
+ * inserted-row delta. Re-expansion can overcount the budget and stop the crawl
+ * early. Fully expanded people are skipped by the crawler's isFull check.
  */
 export function makeExpandAdapter(
   expansionService: { expandPerson(id: number): Promise<void> },
@@ -209,34 +179,16 @@ export interface SeedSourceDeps {
 }
 
 /**
- * Build the tiered {@link SeedSource}s for a user (design §4.2 tiers:
- * 1d → 7d → 30d → library-top → whole-library). One source per (tier, backend);
- * the collector dedupes within and across tiers and survives a dead backend.
+ * Build lazy seed sources for each supported tier/backend; missing connections
+ * return no artists and failures are isolated by the collector.
  *
- * WIRED:
- *   - `hist7d`  <- Last.fm top artists, 7day  + ListenBrainz top artists, week
- *   - `hist30d` <- Last.fm top artists, 1month + ListenBrainz top artists, month
- *   - `libtop`  <- Last.fm top artists, overall + ListenBrainz top artists, all_time
- *                  (all-time most-played is the closest available proxy for the
- *                  "top slice of the library": Lidarr exposes no per-artist play
- *                  rank, and Jellyfin favourites are name-only, see below)
- *   - `lib`     <- the user's Lidarr library artists, keyed by MBID
- *                  (`foreignArtistId`); the collector resolves each MBID to a
- *                  Discogs person id via IdentityService.mbidToDiscogs.
+ * Last.fm and ListenBrainz provide hist7d and hist30d. Their all-time top artists
+ * serve as libtop; Lidarr library MBIDs supply lib. The collector deduplicates
+ * across tiers and resolves MBIDs to Discogs people.
  *
- * NOT WIRED, and why:
- *   - `hist1d`: no configured backend exposes a one-day window that carries
- *     MBIDs (Last.fm's shortest top-artists period is 7day, ListenBrainz's is
- *     week). It would need per-listen aggregation (`user.getrecenttracks` /
- *     `/1/user/{name}/listens`) that neither service wrapper implements.
- *   - Tautulli / Plex and Jellyfin play history: both return artist NAMES only,
- *     and the collector resolves MBIDs or Discogs ids, never names (name
- *     matching against Discogs is the identity-reconciliation problem of
- *     design §13 and is deliberately not done here).
- *
- * Every source is a lazy `getArtists` closure that resolves its connection at
- * call time and returns [] when the connection is absent, so a crawl for a user
- * with no configured sources is a well-defined no-op.
+ * hist1d is unavailable because the wrappers expose no one-day MBID window.
+ * Tautulli/Plex and Jellyfin history supply names only, which this collector
+ * does not resolve.
  */
 export function buildSeedSources(userId: number, deps: SeedSourceDeps = {}): SeedSource[] {
   const getLidarrArtists = deps.getLidarrArtists ?? defaultGetLidarrArtists;
@@ -342,7 +294,7 @@ export async function enqueueOrbitCrawl(userId: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Scheduling: staleness gate + daily re-wake (design §4.2).
+// Scheduling: staleness gate + daily re-wake.
 // ---------------------------------------------------------------------------
 
 /** How long a settled orbit is left alone before it is re-walked. */
@@ -455,8 +407,7 @@ export async function registerOrbitCrawlWorker(io?: SocketIOServer): Promise<voi
     async (job) => {
       const { userId } = job.data as { userId?: number };
       if (userId == null) {
-        // This worker owns only per-user orbit warms; a seed-only crawl job
-        // (Task 9 shape) is not ours to process.
+        // Require a user ID; this worker processes per-user orbit warms.
         throw new Error('Orbit crawl job is missing userId');
       }
 

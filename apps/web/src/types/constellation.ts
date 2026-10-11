@@ -134,7 +134,7 @@ export type PlayResponse =
 /**
  * A single background-expand SSE payload. Carries the `generation` it was
  * published with plus the newly-expanded node/edge data. The exact node/edge
- * fields depend on the expand worker (Task 16); the generation field is the
+ * fields depend on the expand worker; the generation field is the
  * contract the client relies on for the re-center race guard.
  */
 export interface StreamPayload {

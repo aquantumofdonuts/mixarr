@@ -19,7 +19,7 @@ export default function Home() {
   const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, error, refetch } = useFeed();
   const { remember } = useListContext({ ready: !!data && !isLoading });
   const approveMutation = useApproveFeedItem(), dismissMutation = useDismissFeedItem(), restoreMutation = useRestoreDecision('feed');
-  // ponytail: session-only recent outcomes keep feedback visible without changing server offsets.
+  // session-only recent outcomes keep feedback visible without changing server offsets.
   const [recent, setRecent] = useState<FeedItem[]>([]);
   const [loadingIds, setLoadingIds] = useState(new Set<string>());
   const pending = useRef(new Set<string>());

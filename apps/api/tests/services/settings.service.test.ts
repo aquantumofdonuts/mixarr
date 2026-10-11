@@ -1,7 +1,7 @@
 /**
  * Settings Service Tests
  * 
- * Tests for SettingsService (SOC-005)
+ * Tests for SettingsService
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';

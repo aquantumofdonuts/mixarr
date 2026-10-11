@@ -79,7 +79,6 @@ export { sessionRedis };
 
 /**
  * Look up a user by ID and verify they are active.
- * Extracted so both passport.deserializeUser and tests use the same logic.
  */
 export async function lookupSessionUser(
   id: number

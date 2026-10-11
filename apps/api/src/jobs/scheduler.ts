@@ -202,7 +202,7 @@ export function stopAllJobs(): void {
 }
 
 /**
- * Constellation orbit re-wake job (design §4.2)
+ * Constellation orbit re-wake job
  * Runs daily at 4 AM UTC. For every user who has an orbit, re-enqueues the
  * low-priority orbit warm if their orbit is stale (see `rewakeStaleOrbits`).
  * The worker module is imported lazily on tick so the scheduler stays free of
@@ -304,40 +304,18 @@ export function startDataRetentionJob(): void {
 }
 
 /**
- * Soulseek 30-day / 60-day sweep job.
+ * Sweep Soulseek diversions after two 30-day download windows.
+ * Diverted albums remain unmonitored during the initial Soulseek window.
  *
- * When a Lidarr album's qBittorrent download is diverted to Soulseek (see
- * move_queue_to_soulseek.js / divert-album.ts and the soulseek_diversions
- * table they write to), the album is deliberately unmonitored in Lidarr so
- * its own periodic missing-album search doesn't immediately re-grab the
- * same album via qBittorrent and undo the diversion. That trial window is
- * two phases, not one:
+ * After 30 days, complete albums resolve as soulseek_success and monitoring
+ * is enabled. Missing albums are monitored and searched through Lidarr;
+ * escalated_at starts the second window without marking the attempt resolved.
  *
- *   Phase 1 (0-30 days, "Soulseek-only"): diversion sits with
- *     escalated_at/resolved_at both NULL. This job leaves it alone.
- *   At the 30-day mark: if Lidarr's file count shows the album fully
- *     present, Soulseek won — mark resolved_at (resolution
- *     'soulseek_success') and re-enable monitoring, done. Otherwise,
- *     escalate: re-enable monitoring, trigger a fresh Lidarr album search
- *     (handing it to qBittorrent/indexers), and set escalated_at = NOW()
- *     with resolution 'escalated_to_qbittorrent' — NOT resolved_at, since
- *     this isn't a terminal outcome yet, it's the start of a second timer.
- *   Phase 2 (30-60 days, "Lidarr/qBittorrent"): diversion has
- *     escalated_at set, resolved_at still NULL. This job leaves it alone
- *     until escalated_at is itself 30+ days old.
- *   At the 60-day-total mark: if the album is now fully present (delivered
- *     during the qBittorrent phase), mark resolved_at (resolution
- *     'delivered_after_escalation'), done. Otherwise nothing found it in
- *     60 days total — per Ryan's explicit call (2026-07-22), abandon it:
- *     remove any matching entries from Lidarr's download queue
- *     (blocklisted, so the same release doesn't get re-grabbed
- *     immediately), unmonitor the album again so Lidarr stops retrying,
- *     and mark resolved_at (resolution 'abandoned_not_found_60d'). These
- *     are things nothing could find anywhere in two months — treated as
- *     "don't want it clogging the queue," not as a bug to keep retrying.
+ * After 30 days of escalation, complete albums resolve as
+ * delivered_after_escalation. Missing albums have matching queue entries
+ * blocklisted, are unmonitored, and resolve as abandoned_not_found_60d.
  *
- * soulseek_diversions is a hand-created table (see the script above), not
- * part of the Prisma schema, so this reads/writes it via raw SQL.
+ * The soulseek_diversions table is outside the Prisma schema and uses raw SQL.
  */
 let soulseekSweepJob: CronJob | null = null;
 
@@ -453,10 +431,7 @@ async function sweepPhase2SixtyDayAbandon(lidarr: LidarrService): Promise<{ deli
         continue;
       }
 
-      // 60 days total, still nothing anywhere — abandon it: pull it out of
-      // Lidarr's queue (blocklisted so it isn't immediately re-grabbed) and
-      // unmonitor so Lidarr stops retrying. Per Ryan's explicit 2026-07-22
-      // call: nothing found in 60 days shouldn't keep clogging the queue.
+      // Abandon missing albums: blocklist queued releases and unmonitor to stop retries.
       const queue = await lidarr.getQueue();
       const queueItems = queue.filter((item) => item.albumId === diversion.lidarr_album_id);
       for (const item of queueItems) {

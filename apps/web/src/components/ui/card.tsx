@@ -10,7 +10,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
     <div
       ref={ref}
       className={cn(
-        // ponytail: interaction belongs to the card's links/buttons; keep the
+        // interaction belongs to the card's links/buttons; keep the
         // legacy prop compatible without suggesting the whole container clicks.
         'rounded-card border bg-card text-card-foreground',
         className

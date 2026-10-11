@@ -35,11 +35,8 @@ import { createRedisConnection } from '../lib/redis.js';
 const log = createLogger('SlskdRoutes');
 
 /**
- * slskd reports remote filenames/directories as the peer's full path using
- * whatever separator the peer's OS uses — almost always Windows `\`, since
- * most Soulseek peers are Windows clients (confirmed live 2026-07-21).
- * Extracts just the final path segment regardless of separator, so the
- * result can be validated as a plain path component below.
+ * Extract the final path segment from peer paths using Windows or POSIX
+ * separators. Linux path.basename alone does not strip backslashes.
  */
 export function slskdBasename(remotePath: string): string {
   const segments = remotePath.split(/[\\/]+/).filter(Boolean);
@@ -238,7 +235,7 @@ router.post('/download', validateBody(slskdDownloadSchema), async (req: Request,
           await job.waitUntilFinished(queueEvents, 10000);
         }
       } else {
-        // Legacy path: direct slskd call
+        // Call slskd directly when no operation queue is configured
         await slskd.service.queueDownload(username, files);
       }
     } catch (error) {
@@ -362,7 +359,7 @@ router.post('/downloads/:id/retry', validateParams(slskdDownloadIdParamsSchema),
         });
         await job.waitUntilFinished(queueEvents, 10000);
       } else {
-        // Legacy path: direct slskd call
+        // Call slskd directly when no operation queue is configured
         await slskd.service.queueDownload(download.username, [{
           filename: download.filename,
           size: Number(download.fileSize),
@@ -534,10 +531,7 @@ router.post('/webhook', webhookLimiter, validateBody(slskdWebhookSchema), async 
     const downloadDir = config.downloadDir || '/data/slskd/downloads';
     const musicLibraryDir = config.musicLibraryDir || '/data/plex/music';
 
-    // Build download path with validated components. slskd never
-    // namespaces completed downloads by username and flattens the
-    // remote directory to just its leaf name — confirmed live 2026-07-21
-    // against real files on disk (see slskd-poll.ts for the same fix).
+    // Normalize the peer's remote directory to its leaf before matching local files.
     const downloadPath = `${downloadDir}/${safeDirectory}/${safeFilename}`;
 
     // Atomic status update - only update if still in expected state
@@ -555,7 +549,7 @@ router.post('/webhook', webhookLimiter, validateBody(slskdWebhookSchema), async 
       },
     });
 
-    // Check if we won the race
+    // Check whether this caller claimed the pending download
     if (updated.count === 0) {
       // Another process already started organizing this download
       log.debug('Download already being organized by another process', { downloadId: download.id });
@@ -563,7 +557,7 @@ router.post('/webhook', webhookLimiter, validateBody(slskdWebhookSchema), async 
       return;
     }
 
-    // We won the race - proceed with organization
+    // Organize files only after a successful claim
     const organizer = new SlskdOrganizerService({ downloadDir, musicLibraryDir });
 
     try {

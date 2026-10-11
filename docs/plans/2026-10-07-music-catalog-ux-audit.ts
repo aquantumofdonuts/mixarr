@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-// Extracted from the approved specification before implementation verification.
+// Check approved catalog requirements against implementation evidence.
 const rows = [
 'platform|R01|D5;T02.1|Sole active neutral/slate light and dark catalog tokens replace warm/decorative accents',
 'platform|R06|D5;T02.1|System display/text/mono stacks replace font download and preserve hydration/system mode',

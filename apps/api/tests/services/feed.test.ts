@@ -311,17 +311,8 @@ describe('FeedService', () => {
   });
 
   /**
-   * Task 3: getFeedForUser - Database Integration Tests
-   *
-   * Edge Cases:
-   * - User with no subscriptions -> empty feed
-   * - User with no pending results -> empty feed
-   * - User with pending results -> returns them
-   *
-   * Security:
-   * - User can only see own subscriptions' results (userId filter)
-   *
-   * Note: FeedItemAction table doesn't exist yet - exclusion tests skipped
+   * Feed reads use the authenticated user's subscriptions and pending results.
+   * Cover empty subscriptions, empty pending results, and user-scoped feed rows.
    */
   describe('getFeedForUser', () => {
     beforeEach(() => {

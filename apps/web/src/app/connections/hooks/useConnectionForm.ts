@@ -115,7 +115,7 @@ export function useConnectionForm(onTestResult?: (id: number, result: Connection
       }
       return false;
     } finally {
-      // ponytail: lastTest records attempts even when the provider returns failure.
+      // lastTest records attempts even when the provider returns failure.
       if (valid()) void queryClient.invalidateQueries({ queryKey: queryKeys.connections });
     }
   };

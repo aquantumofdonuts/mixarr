@@ -1,8 +1,5 @@
 /**
- * Settings Service
- * 
- * Business logic for user and global settings management.
- * Extracted from routes/settings.ts per SOC-005.
+ * Manage user and global settings.
  */
 
 import prisma from '../lib/db.js';
