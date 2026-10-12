@@ -132,20 +132,6 @@ app.use('/api', apiLimiter);
 // Make io available to routes
 app.set('io', io);
 
-// Boot the Collaboration Constellation background workers (guarded: each
-// registerXWorker dynamically imports bullmq/redis internally, so no Redis is
-// touched until called here). Skipped under test to avoid opening connections.
-if (process.env.NODE_ENV !== 'test') {
-  const { registerDumpImportWorker } = await import('./jobs/constellation/dump-import-worker.js');
-  const { registerOrbitCrawlWorker } = await import('./jobs/constellation/orbit-crawl-worker.js');
-  const { registerConstellationExpandWorker } = await import(
-    './jobs/constellation/constellation-expand-worker.js'
-  );
-  await registerDumpImportWorker(io);
-  await registerOrbitCrawlWorker(io);
-  await registerConstellationExpandWorker(io);
-}
-
 // Routes
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
@@ -218,6 +204,12 @@ if (process.env.NODE_ENV !== 'test') {
     await import('./jobs/subscription-worker.js');
     await import('./jobs/import-worker.js');
     await import('./jobs/slskd-operations-worker.js');
+    const { registerDumpImportWorker } = await import('./jobs/constellation/dump-import-worker.js');
+    const { registerOrbitCrawlWorker } = await import('./jobs/constellation/orbit-crawl-worker.js');
+    const { registerConstellationExpandWorker } = await import('./jobs/constellation/constellation-expand-worker.js');
+    await registerDumpImportWorker(io);
+    await registerOrbitCrawlWorker(io);
+    await registerConstellationExpandWorker(io);
   } catch (error) {
     log.error('Startup failed before accepting requests', { error: error instanceof Error ? error.message : String(error) });
     process.exit(1);
