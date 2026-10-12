@@ -78,7 +78,7 @@ services:
       - ./apps/api/src:/app/apps/api/src
       - ./apps/api/prisma:/app/apps/api/prisma
       - ./packages:/app/packages
-    command: sh -c "cd /app/apps/api && npx prisma generate && npx prisma db push --accept-data-loss && cd /app && npm run dev --workspace=@mixarr/api"
+    command: sh -c "cd /app/apps/api && npx prisma generate && npx tsx src/scripts/deploy-schema.ts && cd /app && npm run dev --workspace=@mixarr/api"
 
   # ---------------------------------------------------------------------------
   # Web Frontend (development with hot-reload)

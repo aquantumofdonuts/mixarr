@@ -35,8 +35,10 @@ import { initializeScheduler } from './jobs/scheduler.js';
 import { setupJobEventBroadcasting } from './jobs/queue.js';
 import { warmLidarrCaches } from './services/lidarr-warmup.js';
 import { redis } from './lib/redis.js';
+import prisma from './lib/db.js';
 import slskdRouter, { cleanupQueueEvents } from './routes/slskd.js';
 import { applyNetworkPreflight } from './lib/network-preflight.js';
+import { prepareStartup } from './lib/startup.js';
 
 // Probe outbound IPv6 connectivity before any worker establishes pools.
 // On hosts where v6 is advertised but egress is broken, this falls back to v4.
@@ -217,11 +219,15 @@ io.on('connection', (socket) => {
 if (process.env.NODE_ENV !== 'test') {
   const PORT = process.env.PORT || 3010;
 
+  try {
+    await prepareStartup(() => Promise.all([prisma.$queryRaw`SELECT 1`, redis.ping()]), initializeScheduler);
+  } catch (error) {
+    log.error('Startup failed before accepting requests', { error: error instanceof Error ? error.message : String(error) });
+    process.exit(1);
+  }
+
   httpServer.listen(PORT, () => {
     log.info(`API server running on port ${PORT}`);
-
-    // Initialize job scheduler
-    initializeScheduler();
 
     // Broadcast BullMQ job lifecycle events to connected Socket.IO clients
     setupJobEventBroadcasting(io);

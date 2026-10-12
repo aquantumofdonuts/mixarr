@@ -34,6 +34,8 @@ This is a major release because custom API clients must adapt to the contracts b
 - Prevent stale requests, cached data, and feedback from crossing authenticated-user or artist boundaries.
 - Improve keyboard focus, dialog cleanup, narrow layouts, contrast, zoom support, and persistent-player spacing.
 - Keep review items recoverable when acquisition cannot be confirmed, enforce ownership on affected result/download mutations, and preserve partial subscription-run counts.
+- Preserve unmanaged tables during upgrades with checked Prisma migration baselines; stop startup on migration failure and wait for dependencies and restored schedules before accepting requests.
+- Build and rehearse both published Docker variants in PR CI, including v2.3.5 upgrades, restart, schema-drift rejection, and fresh installation.
 - Build shared types before API compilation in Docker images and smoke CI; include the native build toolchain required by the optional SQLite credit index. CI fetches comparison history and fails on invalid diffs rather than silently skipping source lint.
 - Reject creation of unsupported Telegram, Pushover, and email notification channels instead of accepting configurations that cannot deliver. Unsupported SSO test handlers report failure.
 - Remove incomplete and nested markup delimiters from artist metadata before returning display text.
@@ -43,7 +45,7 @@ This is a major release because custom API clients must adapt to the contracts b
 - **Custom API clients must adapt to the acquisition contracts.** Review approvals return per-record `outcomes` and separate `added`, `alreadyInLibrary`, and `failed` counts. Bulk responses no longer provide the old `failedItems` shape. Read each outcome rather than treating HTTP 200 as confirmation that every item was added.
 - Review decision requests accept `approved` or `rejected`; setting `pending` directly is no longer supported. Restore an eligible rejection through `POST /api/imports/review/restore` with its Undo token. Bulk review requests are limited to **100 IDs**.
 - Label-artist pages expose `releasesProcessed`, `totalReleases`, and `nextReleaseOffset`; advance using the release offset rather than the number of artists returned.
-- Back up the persistent data/database before upgrading. The Prisma schema adds constellation tables; apply the schema through the normal deployment/startup path. Keep existing data and connections; no data reset is required. The local Discogs index is optional and requires downloading and parsing the full releases dump; automatic index refresh is unavailable.
+- Back up the persistent data/database before upgrading. The Prisma schema adds constellation tables; the normal deployment/startup path verifies a v2.3.5 or already-current schema, records its migration baseline, and applies checked additive migrations. Unmanaged tables are preserved. Unsupported schema drift or failed migrations stop startup and require inspection; never reset or accept data loss to bypass this guard. Keep existing data, connections, and `SESSION_SECRET`; no data reset is required. See [upgrade instructions](README.md#upgrading). The local Discogs index is optional and requires downloading and parsing the full releases dump; automatic index refresh is unavailable.
 
 ### Verification limits
 - Live provider compatibility remains separate work: **C137 deferred: provider verification will be performed separately**. Automated UI captures use fictional data and do not establish provider compatibility.
