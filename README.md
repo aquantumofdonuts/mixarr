@@ -264,6 +264,16 @@ The stack includes Next.js (Frontend), Express (API), Redis (Queue), and MySQL (
 
 ---
 
+## Upgrading
+
+For the v2.3.5-to-3.0.0 upgrade, back up the database and persistent `/data` volume, keep the same volume mounts and `SESSION_SECRET`, and upgrade the bundled web/API together. Wait for the versioned images to be published before pulling `latest` or `slim`. A fresh install uses the checked migration chain; an existing v2.3.5 or already-current installation is verified and baselined automatically. Existing connection/OAuth configuration, accounts, result history and unmanaged tables (including `soulseek_diversions`) are preserved.
+
+Unified and slim images apply migrations before starting the application; source Compose uses the same deployment script. For a source deployment, run `npm ci`, `npm run db:generate`, then `npm run db:deploy --workspace=@mixarr/api` before starting the API. Use `prisma migrate deploy` through this script for production; `db:push` is a development command and does not accept data loss automatically. The archived `apps/api/prisma/legacy-migrations/` files are historical partial changes and are not an executable baseline.
+
+Startup stops on an unresolved migration failure, unsupported schema drift, or schedule-initialization failure. Inspect the error and your backup before repairing a modified database; do not run `migrate reset`, destructive `db push`, or manually mark an unverified baseline as applied. Incompatible or partially-created constellation schemas require operator inspection. After a failed applied migration, inspect `prisma migrate status` and repair/resolve that specific failure before retrying. Concurrent first-time baseline adoption can cause one instance to fail safely; deploy migrations once, then start replicas.
+
+Queue workers start and the API accepts requests only after database/Redis readiness and restoration of persisted schedules. Custom API clients must adapt to the breaking decision/acquisition/pagination contracts in [CHANGELOG.md](CHANGELOG.md). Rollback to v2.3.5 is not an in-place downgrade: its old startup schema sync can drop new tables. Restore the pre-upgrade database/data backup for a rollback. Live provider verification remains separate under the accepted C137 deferral.
+
 ## License
 
 GPLv3. See [LICENSE](LICENSE) for details.

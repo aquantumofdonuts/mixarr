@@ -35,20 +35,15 @@ import { initializeScheduler } from './jobs/scheduler.js';
 import { setupJobEventBroadcasting } from './jobs/queue.js';
 import { warmLidarrCaches } from './services/lidarr-warmup.js';
 import { redis } from './lib/redis.js';
+import prisma from './lib/db.js';
 import slskdRouter, { cleanupQueueEvents } from './routes/slskd.js';
 import { applyNetworkPreflight } from './lib/network-preflight.js';
+import { prepareStartup } from './lib/startup.js';
 
 // Probe outbound IPv6 connectivity before any worker establishes pools.
 // On hosts where v6 is advertised but egress is broken, this falls back to v4.
 if (process.env.NODE_ENV !== 'test') {
   await applyNetworkPreflight();
-}
-
-// Import workers only in non-test environments to prevent test pollution
-if (process.env.NODE_ENV !== 'test') {
-  await import('./jobs/subscription-worker.js');
-  await import('./jobs/import-worker.js');
-  await import('./jobs/slskd-operations-worker.js');
 }
 
 // Print startup banner
@@ -137,20 +132,6 @@ app.use('/api', apiLimiter);
 // Make io available to routes
 app.set('io', io);
 
-// Boot the Collaboration Constellation background workers (guarded: each
-// registerXWorker dynamically imports bullmq/redis internally, so no Redis is
-// touched until called here). Skipped under test to avoid opening connections.
-if (process.env.NODE_ENV !== 'test') {
-  const { registerDumpImportWorker } = await import('./jobs/constellation/dump-import-worker.js');
-  const { registerOrbitCrawlWorker } = await import('./jobs/constellation/orbit-crawl-worker.js');
-  const { registerConstellationExpandWorker } = await import(
-    './jobs/constellation/constellation-expand-worker.js'
-  );
-  await registerDumpImportWorker(io);
-  await registerOrbitCrawlWorker(io);
-  await registerConstellationExpandWorker(io);
-}
-
 // Routes
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
@@ -217,11 +198,25 @@ io.on('connection', (socket) => {
 if (process.env.NODE_ENV !== 'test') {
   const PORT = process.env.PORT || 3010;
 
+  try {
+    await prepareStartup(() => Promise.all([prisma.$queryRaw`SELECT 1`, redis.ping()]), initializeScheduler);
+    log.info('Starting background workers');
+    await import('./jobs/subscription-worker.js');
+    await import('./jobs/import-worker.js');
+    await import('./jobs/slskd-operations-worker.js');
+    const { registerDumpImportWorker } = await import('./jobs/constellation/dump-import-worker.js');
+    const { registerOrbitCrawlWorker } = await import('./jobs/constellation/orbit-crawl-worker.js');
+    const { registerConstellationExpandWorker } = await import('./jobs/constellation/constellation-expand-worker.js');
+    await registerDumpImportWorker(io);
+    await registerOrbitCrawlWorker(io);
+    await registerConstellationExpandWorker(io);
+  } catch (error) {
+    log.error('Startup failed before accepting requests', { error: error instanceof Error ? error.message : String(error) });
+    process.exit(1);
+  }
+
   httpServer.listen(PORT, () => {
     log.info(`API server running on port ${PORT}`);
-
-    // Initialize job scheduler
-    initializeScheduler();
 
     // Broadcast BullMQ job lifecycle events to connected Socket.IO clients
     setupJobEventBroadcasting(io);

@@ -14,6 +14,8 @@ RUN apk add --no-cache openssl openssl-dev
 # DEPENDENCIES STAGE
 # =============================================================================
 FROM base AS deps
+# Compile the native SQLite dependency on Alpine; keep build tools out of runtime.
+RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 COPY turbo.json ./
 COPY tsconfig.base.json ./
@@ -22,7 +24,7 @@ COPY apps/web/package*.json ./apps/web/
 COPY packages/shared-types/package*.json ./packages/shared-types/
 COPY packages/config/package*.json ./packages/config/
 RUN --mount=type=cache,target=/root/.npm \
-    npm install
+    npm ci
 
 # =============================================================================
 # BUILD STAGE - API
@@ -420,7 +422,11 @@ for i in $(seq 1 30); do
 done
 cd /app/api
 export REDIS_URL="redis://127.0.0.1:6379"
-npx prisma db push --accept-data-loss || echo "Warning: Database migration had issues, continuing..."
+if ! node dist/scripts/deploy-schema.js; then
+    echo "ERROR: Schema deployment failed; refusing to start services" >&2
+    mysqladmin -u root shutdown 2>/dev/null || true
+    exit 1
+fi
 mysqladmin -u root shutdown 2>/dev/null || true
 sleep 2
 

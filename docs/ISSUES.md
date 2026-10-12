@@ -25,6 +25,12 @@ Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from
 
 ---
 
+## Release upgrade blockers
+
+The October 12 upgrade rehearsal reproduced missing native build tools in published unified/slim images, destructive schema synchronization against unmanaged tables, and scheduler initialization racing MariaDB readiness. The release-blocker fix branch replaces production schema pushes with verified baselining and checked migrations, fails startup on migration errors, waits for restored schedules before listening, and adds real migration and both-image upgrade checks to PR CI. See [the implementation and verification record](plans/2026-10-12-release-upgrade-blockers.md). Integration/release remain pending the PR and its CI evidence; C137 provider verification stays deferred.
+
+---
+
 ## Release 3.0.0 CodeQL dispositions
 
 PR #85 exposed incomplete artist-text sanitization, which now removes remaining markup delimiters and has malformed/nested input regression coverage. The provider-fetch test mock now compares parsed hostnames exactly. CodeQL alerts 59–61 are classified `used in tests`: their login/session middleware exists only in `tests/api/catalog-completion-database.test.ts`, uses synthetic actors and an allowlisted disposable database, and is excluded by the API build’s `src/**/*` include. The fixture does not certify production credential validation, CSRF, rate limiting, or TLS behavior. Existing production findings above remain open.
