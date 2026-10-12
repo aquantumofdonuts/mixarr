@@ -34,7 +34,7 @@ This is a major release because custom API clients must adapt to the contracts b
 - Prevent stale requests, cached data, and feedback from crossing authenticated-user or artist boundaries.
 - Improve keyboard focus, dialog cleanup, narrow layouts, contrast, zoom support, and persistent-player spacing.
 - Keep review items recoverable when acquisition cannot be confirmed, enforce ownership on affected result/download mutations, and preserve partial subscription-run counts.
-- Preserve unmanaged tables during upgrades with checked Prisma migration baselines; stop startup on migration failure and wait for dependencies and restored schedules before accepting requests.
+- Preserve unmanaged tables during upgrades with checked Prisma migration baselines; stop startup on migration failure and wait for dependencies and restored schedules before starting queue workers or accepting requests.
 - Build and rehearse both published Docker variants in PR CI, including v2.3.5 upgrades, restart, schema-drift rejection, and fresh installation.
 - Build shared types before API compilation in Docker images and smoke CI; include the native build toolchain required by the optional SQLite credit index. CI fetches comparison history and fails on invalid diffs rather than silently skipping source lint.
 - Reject creation of unsupported Telegram, Pushover, and email notification channels instead of accepting configurations that cannot deliver. Unsupported SSO test handlers report failure.

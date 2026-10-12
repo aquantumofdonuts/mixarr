@@ -19,7 +19,7 @@ Files: apps/api/prisma/baseline.prisma; apps/api/prisma/migrations; apps/api/pri
 1. Write/run failing unit regressions: only table-drop diff statements can be ignored during comparison, partial/mutated layouts are rejected; dependency failure prevents scheduler/listen, and scheduler failure prevents listen.
 2. Archive the incomplete historical migration chain. Generate a complete v2.3.5 baseline SQL from its checked-in schema and six-table additive migration from the baseline/current schema diff.
 3. Implement the checked baselining CLI with existing Prisma/Node tools: no table creation on an unsupported existing schema, no reset/drop generated SQL execution, finally disconnect. Accept verified v2.3.5 and already-current db-push installations; refuse unresolved migration failures.
-4. Wait up to 60 seconds for actual DB and Redis readiness; await scheduler initialization before HTTP listen; fail the process on initialization error. Test ordering, retry limit and failures.
+4. Wait up to 60 seconds for actual DB and Redis readiness; await scheduler initialization before importing queue workers and opening HTTP listen; fail the process on initialization error. Test ordering, retry limit and failures.
 5. Keep Prisma CLI as a production dependency for slim deployments. Run focused tests, types, lint, and actual migration checks before committing.
 
 ## Task 2: Wire and guard production paths
@@ -55,7 +55,7 @@ Scope: implementation requirements in Tasks 1–3, extracted from the plan above
 | 4 | Task 1.3: Unmanaged tables and existing records survive upgrades | yes | yes | yes | yes | COMPLETE | Both pinned v2.3.5 image rehearsals preserve 23 rows across 13 models plus soulseek_diversions; generated comparison SQL is never executed. |
 | 5 | Task 1.3: Unsupported and partial schemas fail safely | yes | yes | yes | yes | COMPLETE | MySQL drift/partial-layout tests leave migration history absent; both images exit 1 on later schema drift before API startup. |
 | 6 | Task 1.3: Unresolved migrations remain unresolved | yes | yes | yes | yes | COMPLETE | Real MySQL regression rejects a synthetic failed migration without clearing its failure record. |
-| 7 | Task 1.4: Dependency readiness and scheduler restoration precede listening | yes | yes | yes | yes | COMPLETE | src/index.ts awaits prepareStartup; unit tests cover retry, cancellation and scheduler failure; both image logs restore one persisted schedule before HTTP listen. |
+| 7 | Task 1.4: Dependency readiness and scheduler restoration precede listening | yes | yes | yes | yes | COMPLETE | src/index.ts awaits prepareStartup before importing queue workers; unit tests cover deferred restoration, retry, cancellation and failure; both image logs must restore the persisted schedule before workers start and HTTP listens. |
 | 8 | Task 1.5, Task 2.1: Runtime CLI and native build dependencies are present | yes | yes | yes | yes | COMPLETE | Prisma remains after slim production pruning; exact unified/slim Dockerfiles build and both compiled schema CLIs run successfully. |
 | 9 | Task 2.1, Task 2.2: Deployment and CI use checked migrations | yes | yes | yes | yes | COMPLETE | Unified/slim entrypoints, both Compose paths and database/test/smoke workflows invoke the shared CLI; YAML/shell checks pass; no production db push remains. |
 | 10 | Task 2.2, Task 2.3: Both published variants have reproducible upgrade checks | yes | yes | yes | yes | COMPLETE | CI builds the actual release Dockerfiles and invokes scripts/release-upgrade-smoke.sh; both local rehearsals pass upgrade, restart, old-session/password login, drift rejection and fresh install. |
@@ -66,7 +66,7 @@ Completion-theater scan found no TODOs, placeholders, unimplemented branches or 
 
 ### Full review verdict: PASS
 
-The four-lens review (rubber-duck trace, failure/attack analysis, best practices, generated-code review) covered every changed runtime/configuration file and the generated migration chain. No unresolved release-blocking finding remains in this change.
+The four-lens review (rubber-duck trace, failure/attack analysis, best practices, generated-code review) covered every changed runtime/configuration file and the generated migration chain. A subsequent startup trace found that eager queue-worker imports still preceded the dependency gate. Those imports now follow readiness and scheduler restoration, which also lets stale-job cleanup run before persisted queues resume. The image rehearsal asserts the actual schedule → workers → HTTP log order. No unresolved release-blocking finding remains in this change.
 
 - Lifecycle: Prisma disconnects in finally; subprocess failures propagate; startup read deadlines remove abort listeners; smoke resources are namespaced and cleaned on exit.
 - Failure and concurrency: unresolved migration failures are not erased. Verified baselines are recorded before additive deployment; Prisma migration locking remains enabled. Concurrent first adoption may safely reject one instance; the documented deployment order runs migrations once before replicas. Partial DDL is rejected for operator inspection instead of being reset.
@@ -83,3 +83,5 @@ The four-lens review (rubber-duck trace, failure/attack analysis, best practices
 - YAML parsing, `bash -n`, fixture `node --check`, generated-SQL checks, archived-file comparisons and `git diff --check` passed.
 
 Local logs are under `/tmp/mixarr-release-blockers-*.log` and `/tmp/mixarr-upgrade-fix-*.log`; hosted CI repeats the migration and image rehearsals. Live provider compatibility is not certified: **C137 deferred: provider verification will be performed separately**.
+
+Hosted CI checkpoint: the first test attempt hit an unchanged discovery UI test's five-second timeout. The test and all 825 web tests passed locally; the same-commit hosted retry passed without changing assertions or timeouts. All non-image checks passed. The image run was superseded by the final queue-worker startup ordering repair; final hosted results are recorded in the PR checks.

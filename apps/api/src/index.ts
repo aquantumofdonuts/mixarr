@@ -46,13 +46,6 @@ if (process.env.NODE_ENV !== 'test') {
   await applyNetworkPreflight();
 }
 
-// Import workers only in non-test environments to prevent test pollution
-if (process.env.NODE_ENV !== 'test') {
-  await import('./jobs/subscription-worker.js');
-  await import('./jobs/import-worker.js');
-  await import('./jobs/slskd-operations-worker.js');
-}
-
 // Print startup banner
 printBanner();
 
@@ -221,6 +214,10 @@ if (process.env.NODE_ENV !== 'test') {
 
   try {
     await prepareStartup(() => Promise.all([prisma.$queryRaw`SELECT 1`, redis.ping()]), initializeScheduler);
+    log.info('Starting background workers');
+    await import('./jobs/subscription-worker.js');
+    await import('./jobs/import-worker.js');
+    await import('./jobs/slskd-operations-worker.js');
   } catch (error) {
     log.error('Startup failed before accepting requests', { error: error instanceof Error ? error.message : String(error) });
     process.exit(1);

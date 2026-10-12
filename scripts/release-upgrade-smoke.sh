@@ -59,8 +59,8 @@ sudo docker logs "$prefix-new" > "$artifacts/startup.log" 2>&1
 node - "$artifacts/startup.log" <<'JS'
 const fs=require('node:fs'),assert=require('node:assert/strict');
 const log=fs.readFileSync(process.argv[2],'utf8');
-const schedule=log.indexOf('Scheduled 1 jobs'),ready=log.indexOf('API server running');
-assert.ok(schedule>=0 && ready>schedule,'Persisted schedule must load before the API listens');
+const schedule=log.indexOf('Scheduled 1 jobs'),workers=log.indexOf('Starting background workers'),ready=log.indexOf('API server running');
+assert.ok(schedule>=0 && workers>schedule && ready>workers,'Restore schedules before starting queue workers and accepting requests');
 assert.ok(!log.includes('Unhandled promise rejection'));
 JS
 sudo docker stop -t 3 "$prefix-new" >/dev/null

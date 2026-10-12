@@ -5,9 +5,15 @@ afterEach(() => vi.useRealTimers());
 describe('startup readiness', () => {
   it('awaits dependency checks and scheduler initialization', async () => {
     const order: string[] = [];
-    await prepareStartup(async () => { order.push('dependencies'); }, async () => { order.push('scheduler'); });
-    order.push('listen');
-    expect(order).toEqual(['dependencies', 'scheduler', 'listen']);
+    let restored!: () => void;
+    const starting = prepareStartup(async () => { order.push('dependencies'); }, () => {
+      order.push('scheduler');
+      return new Promise<void>(resolve => { restored = resolve; });
+    }).then(() => { order.push('workers', 'listen'); });
+    await vi.waitFor(() => expect(order).toEqual(['dependencies', 'scheduler']));
+    restored();
+    await starting;
+    expect(order).toEqual(['dependencies', 'scheduler', 'workers', 'listen']);
   });
   it('retries dependency errors before initializing the scheduler', async () => {
     vi.useFakeTimers();
