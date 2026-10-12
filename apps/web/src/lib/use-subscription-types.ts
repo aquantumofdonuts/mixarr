@@ -1,7 +1,7 @@
 /**
  * Subscription Types Hook
  * 
- * Fetches subscription type metadata from the API (SOC-003).
+ * Fetches subscription type metadata from the API.
  * Maps icon names from API to Lucide React components.
  */
 

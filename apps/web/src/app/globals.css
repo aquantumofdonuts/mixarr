@@ -5,14 +5,7 @@
 /* Theme-specific styles are in ../styles/themes/ */
 /* Imported after base to ensure proper specificity */
 
-@layer base {
-  /* Base variables - will be overridden by [data-theme] selectors */
-  :root {
-    --radius: 0.5rem;
-  }
-}
-
-/* Import themes AFTER tailwind to ensure they override defaults */
+/* Theme tokens are shared by CSS and Tailwind. */
 @import '../styles/themes/index.css';
 
 @layer base {
@@ -21,43 +14,39 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    font-family: var(--font-text);
+    font-size: 14px;
   }
 
-  /* Heading styles — DM Sans with tight tracking */
-  h1 {
-    @apply text-3xl font-semibold tracking-tight;
-    letter-spacing: -0.02em;
-  }
-
-  h2 {
-    @apply text-2xl font-semibold tracking-tight;
-    letter-spacing: -0.01em;
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 600;
   }
 
   /* Smooth scrolling */
   html {
     scroll-behavior: smooth;
   }
-  
+
   /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
-  
+
   ::-webkit-scrollbar-track {
     @apply bg-transparent;
   }
-  
+
   ::-webkit-scrollbar-thumb {
     @apply bg-muted rounded-full;
   }
-  
+
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground/50;
   }
-  
+
   /* Focus visible for accessibility */
   :focus-visible {
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
@@ -65,120 +54,64 @@
 }
 
 @layer components {
-  /* Button variants */
-  .btn {
-    @apply inline-flex items-center justify-center rounded-button text-sm font-medium 
-           transition-colors focus-visible:outline-none focus-visible:ring-2 
-           focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none 
-           disabled:opacity-50 h-10 px-4 py-2;
-  }
-  
-  .btn-primary {
-    @apply btn bg-primary text-primary-foreground shadow-sm hover:shadow-glow-sm hover:brightness-110 active:brightness-95 active:scale-[0.98];
-  }
-  
-  .btn-secondary {
-    @apply btn bg-secondary text-secondary-foreground hover:bg-secondary/80;
-  }
-  
-  .btn-outline {
-    @apply btn border border-input bg-background hover:bg-accent hover:text-accent-foreground;
-  }
-  
-  .btn-ghost {
-    @apply btn hover:bg-accent hover:text-accent-foreground;
-  }
-  
-  .btn-destructive {
-    @apply btn bg-destructive text-destructive-foreground hover:bg-destructive/90;
-  }
-  
-  .btn-sm {
-    @apply h-9 rounded-button px-3;
-  }
-  
-  .btn-lg {
-    @apply h-11 rounded-md px-8;
-  }
-  
-  .btn-icon {
-    @apply h-10 w-10 p-0;
-  }
-  
-  /* Card component */
-  .card {
-    @apply rounded-card border bg-card text-card-foreground shadow-sm;
-  }
-  
-  .card-header {
-    @apply flex flex-col space-y-1.5 p-6;
-  }
-  
-  .card-title {
-    @apply text-2xl font-semibold leading-none tracking-tight;
-  }
-  
-  .card-description {
-    @apply text-sm text-muted-foreground;
-  }
-  
-  .card-content {
-    @apply p-6 pt-0;
-  }
-  
-  .card-footer {
-    @apply flex items-center p-6 pt-0;
-  }
-  
   /* Input component */
   .input {
-    @apply flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 
-           text-sm ring-offset-background file:border-0 file:bg-transparent 
-           file:text-sm file:font-medium placeholder:text-muted-foreground 
-           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring 
+    @apply flex h-11 w-full rounded-button border border-input bg-background px-3 py-2
+           text-sm ring-offset-background file:border-0 file:bg-transparent
+           file:text-sm file:font-medium placeholder:text-muted-foreground
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
            focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
   }
-  
+
   /* Badge component */
   .badge {
-    @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs 
-           font-semibold transition-colors focus:outline-none focus:ring-2 
+    @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs
+           font-semibold transition-colors focus:outline-none focus:ring-2
            focus:ring-ring focus:ring-offset-2;
   }
-  
+
   .badge-default {
     @apply badge border-transparent bg-primary text-primary-foreground hover:bg-primary/80;
   }
-  
+
   .badge-secondary {
     @apply badge border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80;
   }
-  
+
   .badge-outline {
     @apply badge text-foreground;
   }
-  
+
   .badge-destructive {
     @apply badge border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80;
   }
-  
+
+  /* One chevron pivots for every native disclosure. */
+  summary .disclosure-chevron {
+    transform: rotate(0deg);
+    transition: transform 0.14s ease;
+  }
+  details[open] > summary .disclosure-chevron {
+    transform: rotate(90deg);
+  }
+
   /* Status indicators */
   .status-dot {
     @apply inline-block w-2 h-2 rounded-full;
   }
-  
+
   .status-online {
     @apply status-dot bg-green-500;
   }
-  
+
   .status-offline {
     @apply status-dot bg-gray-400;
   }
-  
+
   .status-error {
     @apply status-dot bg-red-500;
   }
-  
+
   .status-pending {
     @apply status-dot bg-yellow-500 animate-pulse;
   }
@@ -190,7 +123,8 @@
   }
 
   .font-display {
-    @apply font-semibold tracking-tight;
+    font-family: var(--font-display);
+    font-weight: 600;
   }
 
   /* Status color text utilities */

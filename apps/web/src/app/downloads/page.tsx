@@ -1,338 +1,114 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { EmptyState, Skeleton } from '@/components/ui';
-import { useToast } from '@/components/ui/toast';
+import { Modal, ModalFooter } from '@/components/ui/modal';
 import { PageHeader } from '@/components/layout/page-header';
+import { useAuth } from '@/lib/auth';
 import { useSlskdDownloads, useRetrySlskdDownload, useCancelSlskdDownload, SlskdDownload } from '@/lib/hooks';
-import CheckCircle from 'lucide-react/dist/esm/icons/check-circle';
-import Clock from 'lucide-react/dist/esm/icons/clock';
-import Download from 'lucide-react/dist/esm/icons/download';
-import File from 'lucide-react/dist/esm/icons/file';
-import FolderOpen from 'lucide-react/dist/esm/icons/folder-open';
-import HardDrive from 'lucide-react/dist/esm/icons/hard-drive';
-import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
-import Music from 'lucide-react/dist/esm/icons/music';
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
-import User from 'lucide-react/dist/esm/icons/user';
-import XCircle from 'lucide-react/dist/esm/icons/x-circle';
 
-type StatusFilter = 'all' | 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled';
+const statusOptions = ['all', 'queued_locally', 'pending', 'downloading', 'organizing', 'completed', 'failed', 'cancelled'] as const;
+type StatusFilter = typeof statusOptions[number];
+const label = (status: string) => status[0].toUpperCase() + status.slice(1).replaceAll('_', ' ');
 
-const statusOptions: { value: StatusFilter; label: string; icon: React.ElementType }[] = [
-  { value: 'all', label: 'All', icon: Download },
-  { value: 'pending', label: 'Pending', icon: Clock },
-  { value: 'downloading', label: 'Downloading', icon: Loader2 },
-  { value: 'completed', label: 'Completed', icon: CheckCircle },
-  { value: 'failed', label: 'Failed', icon: XCircle },
-];
-
-function formatBytes(bytes: number): string {
+function formatBytes(value: number | string): string {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return 'Size unavailable';
   if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+  const index = Math.min(3, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${Number((bytes / 1024 ** index).toFixed(1))} ${['B', 'KB', 'MB', 'GB'][index]}`;
 }
 
-function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleString();
-}
-
-function getStatusBadge(status: SlskdDownload['status']) {
-  switch (status) {
-    case 'pending':
-      return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
-    case 'downloading':
-      return <Badge variant="default" className="bg-status-info"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Downloading</Badge>;
-    case 'completed':
-      return <Badge variant="success"><CheckCircle className="h-3 w-3 mr-1" />Completed</Badge>;
-    case 'failed':
-      return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Failed</Badge>;
-    case 'cancelled':
-      return <Badge variant="outline">Cancelled</Badge>;
-  }
-}
-
-function DownloadCard({ 
-  download, 
-  onRetry, 
-  onCancel,
-  isRetrying,
-  isCancelling 
-}: { 
-  download: SlskdDownload; 
-  onRetry: () => void;
-  onCancel: (remove: boolean) => void;
-  isRetrying: boolean;
-  isCancelling: boolean;
-}) {
-  const filename = download.filename.split('/').pop() || download.filename;
-  const folder = download.filename.split('/').slice(0, -1).join('/');
-  
-  return (
-    <Card className="overflow-hidden hover:bg-muted/50 transition-colors">
-      <CardContent className="px-4 py-3">
-        <div className="flex items-center gap-3">
-          {/* Icon */}
-          <div className="flex-shrink-0 w-10 h-10 rounded-md bg-muted flex items-center justify-center">
-            <Music className="h-5 w-5 text-muted-foreground" />
-          </div>
-          
-          {/* Content */}
-          <div className="flex-1 min-w-0 flex flex-col gap-1">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <h3 className="font-semibold truncate">{download.artistName}</h3>
-                {download.albumName && (
-                  <p className="text-sm text-muted-foreground truncate">
-                    {download.albumName} {download.albumYear && `(${download.albumYear})`}
-                  </p>
-                )}
-              </div>
-              {getStatusBadge(download.status)}
-            </div>
-            
-            {/* File info */}
-            <div className="space-y-1 text-sm text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <File className="h-3 w-3" />
-                <span className="truncate">{filename}</span>
-              </div>
-              {folder && (
-                <div className="flex items-center gap-2">
-                  <FolderOpen className="h-3 w-3" />
-                  <span className="truncate">{folder}</span>
-                </div>
-              )}
-              <div className="flex items-center gap-4 flex-wrap">
-                <span className="flex items-center gap-1">
-                  <User className="h-3 w-3" />
-                  {download.username}
-                </span>
-                <span className="flex items-center gap-1">
-                  <HardDrive className="h-3 w-3" />
-                  {formatBytes(download.fileSize)}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {formatDate(download.createdAt)}
-                </span>
-              </div>
-            </div>
-            
-            {/* Error message */}
-            {download.error && (
-              <div className="mt-2 p-2 rounded bg-destructive/10 text-destructive text-sm">
-                {download.error}
-              </div>
-            )}
-            
-            {/* Organized path */}
-            {download.organizedPath && (
-              <div className="mt-2 p-2 rounded bg-success/10 text-success text-sm flex items-center gap-2">
-                <CheckCircle className="h-4 w-4" />
-                Organized to: {download.organizedPath}
-              </div>
-            )}
-          </div>
-          
-          {/* Actions */}
-          <div className="flex items-center gap-1">
-            {download.status === 'failed' && (
-              <Button 
-                size="sm" 
-                variant="outline" 
-                onClick={onRetry}
-                disabled={isRetrying}
-              >
-                {isRetrying ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RotateCcw className="h-4 w-4" />
-                )}
-              </Button>
-            )}
-            {(download.status === 'pending' || download.status === 'downloading') && (
-              <Button 
-                size="sm" 
-                variant="outline" 
-                onClick={() => onCancel(false)}
-                disabled={isCancelling}
-              >
-                {isCancelling ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <XCircle className="h-4 w-4" />
-                )}
-              </Button>
-            )}
-            {(download.status === 'completed' || download.status === 'cancelled' || download.status === 'failed') && (
-              <Button 
-                size="sm" 
-                variant="ghost" 
-                onClick={() => onCancel(true)}
-                disabled={isCancelling}
-                title="Remove from list"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
+function DownloadRow({ download }: { download: SlskdDownload }) {
+  const retry = useRetrySlskdDownload();
+  const cancel = useCancelSlskdDownload();
+  const [confirmation, setConfirmation] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const filename = download.filename.split(/[\\/]/).filter(Boolean).pop() || download.filename;
+  const active = ['queued_locally', 'pending', 'downloading', 'organizing'].includes(download.status);
+  const pending = retry.isPending || cancel.isPending;
+  const changeTracking = async () => {
+    if (confirmation === null || pending) return;
+    setError(null);
+    try {
+      await cancel.mutateAsync({ id: download.id, remove: confirmation });
+      if (mounted.current) { setFeedback(confirmation ? 'Mixarr record removed.' : 'Tracking marked cancelled. The remote transfer may continue.'); setConfirmation(null); }
+    } catch (failure) {
+      if (mounted.current) setError(failure instanceof Error ? failure.message : 'Could not update tracking');
+    }
+  };
+  const retryDownload = async () => {
+    if (pending) return;
+    setError(null);
+    try { await retry.mutateAsync(download.id); if (mounted.current) setFeedback('Download queued for retry.'); }
+    catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'Could not retry download'); }
+  };
+  return <article aria-label={`Download ${download.id}`} className="border-b py-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0 flex-1 basis-48">
+        <h2 className="break-words font-semibold">{download.artistName}</h2>
+        <p className="break-words text-sm text-muted-foreground">{download.albumName || 'Release unknown'}{download.albumYear ? ` (${download.albumYear})` : ''}</p>
+        <p className="mt-1 break-all font-mono text-xs" title={download.filename}>{filename}</p>
+        <p className="mt-1 break-words text-xs text-muted-foreground">Peer: {download.username} · <span className="font-mono">{formatBytes(download.fileSize)}</span></p>
+        <p className="text-xs text-muted-foreground">{new Date(download.createdAt).toLocaleString()}</p>
+      </div>
+      <div className="min-w-0 text-sm" role="status">
+        <p className={download.status === 'completed' ? 'text-status-success' : download.status === 'failed' ? 'text-status-error' : 'font-medium'}>{label(download.status)}</p>
+        {active && <p className="text-xs text-muted-foreground">Transfer percentage unavailable</p>}
+      </div>
+    </div>
+    {download.error && <p className="mt-2 break-words text-sm text-status-error">{download.error}</p>}
+    {download.finalPath && <p className="mt-2 break-all text-sm">Organized to: <span className="font-mono">{download.finalPath}</span></p>}
+    <div className="mt-3 flex flex-wrap gap-2">
+      {download.status === 'failed' && <Button variant="outline" onClick={retryDownload} disabled={pending}>{retry.isPending ? 'Queuing retry…' : 'Retry download'}</Button>}
+      <Button variant="outline" disabled={pending} onClick={() => { setError(null); setConfirmation(!active); }}>{active ? 'Cancel tracking' : 'Remove record'}</Button>
+    </div>
+    {error && confirmation === null && <div role="alert" className="mt-2 break-words text-sm"><p>{error}</p></div>}
+    {feedback && <p role="status" className="mt-2 break-words text-sm">{feedback}</p>}
+    <Modal isOpen={confirmation !== null} onClose={() => { if (!pending) { setConfirmation(null); setError(null); } }} title={confirmation ? 'Remove download record' : 'Cancel download tracking'} size="sm">
+      <p className="break-words font-semibold">{download.artistName} — {download.albumName || 'Release unknown'}</p>
+      <p className="mt-1 break-all font-mono text-xs">{filename}</p>
+      <p className="mt-3 text-sm">{confirmation ? 'Remove this record from Mixarr. Downloaded files are kept.' : 'Mark this download cancelled in Mixarr tracking only. The remote slskd transfer may continue.'}</p>
+      {error && <p role="alert" className="mt-3 break-words text-sm text-status-error">{error}</p>}
+      <ModalFooter>
+        <Button variant="outline" disabled={pending} onClick={() => { setConfirmation(null); setError(null); }}>Keep record</Button>
+        <Button disabled={pending} onClick={changeTracking}>{pending ? 'Saving…' : error ? 'Retry' : confirmation ? 'Remove record' : 'Mark cancelled'}</Button>
+      </ModalFooter>
+    </Modal>
+  </article>;
 }
 
 export default function DownloadsPage() {
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [retryingId, setRetryingId] = useState<number | null>(null);
-  const [cancellingId, setCancellingId] = useState<number | null>(null);
-  const { addToast } = useToast();
-  
-  const queryStatus = statusFilter === 'all' ? undefined : statusFilter;
-  const { data: downloads = [], isLoading, refetch, isFetching } = useSlskdDownloads(queryStatus);
-  const retryMutation = useRetrySlskdDownload();
-  const cancelMutation = useCancelSlskdDownload();
-  
-  const handleRetry = async (id: number) => {
-    setRetryingId(id);
-    try {
-      await retryMutation.mutateAsync(id);
-      addToast({ type: 'success', title: 'Download queued for retry' });
-    } catch {
-      addToast({ type: 'error', title: 'Failed to retry download' });
-    }
-    setRetryingId(null);
+  const router = useRouter(), pathname = usePathname(), params = useSearchParams();
+  const rawStatus = params.get('status');
+  const status: StatusFilter = statusOptions.includes(rawStatus as StatusFilter) ? rawStatus as StatusFilter : 'all';
+  const { user } = useAuth();
+  const query = useSlskdDownloads(status === 'all' ? undefined : status);
+  const downloads = query.data || [];
+  const setStatus = (value: string) => {
+    const next = new URLSearchParams(params.toString());
+    if (value === 'all') next.delete('status'); else next.set('status', value);
+    router.replace(`${pathname}${next.size ? `?${next}` : ''}`, { scroll: false });
   };
-  
-  const handleCancel = async (id: number, remove: boolean) => {
-    setCancellingId(id);
-    try {
-      await cancelMutation.mutateAsync({ id, remove });
-      addToast({ 
-        type: 'success', 
-        title: remove ? 'Download removed' : 'Download cancelled' 
-      });
-    } catch {
-      addToast({ type: 'error', title: 'Failed to cancel download' });
-    }
-    setCancellingId(null);
-  };
-  
-  // Stats for the header
-  const stats = {
-    total: downloads.length,
-    pending: downloads.filter(d => d.status === 'pending').length,
-    downloading: downloads.filter(d => d.status === 'downloading').length,
-    completed: downloads.filter(d => d.status === 'completed').length,
-    failed: downloads.filter(d => d.status === 'failed').length,
-  };
-
-  return (
-    <>
-      <PageHeader
-        title="slskd Downloads"
-        description="Track and manage your Soulseek downloads"
-      />
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold">{stats.total}</div>
-            <div className="text-sm text-muted-foreground">Total</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold text-status-warning">{stats.pending}</div>
-            <div className="text-sm text-muted-foreground">Pending</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold text-status-info">{stats.downloading}</div>
-            <div className="text-sm text-muted-foreground">Downloading</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold text-status-success">{stats.completed}</div>
-            <div className="text-sm text-muted-foreground">Completed</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold text-status-error">{stats.failed}</div>
-            <div className="text-sm text-muted-foreground">Failed</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-2">
-          {statusOptions.map((option) => (
-            <Button
-              key={option.value}
-              variant={statusFilter === option.value ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setStatusFilter(option.value)}
-            >
-              <option.icon className={`h-4 w-4 mr-1 ${option.value === 'downloading' && statusFilter === option.value ? 'animate-spin' : ''}`} />
-              {option.label}
-            </Button>
-          ))}
-        </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-          <RefreshCw className={`h-4 w-4 mr-1 ${isFetching ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
-      </div>
-
-      {/* Downloads List */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-4 p-4 rounded-container border bg-card">
-              <Skeleton className="w-12 h-12 rounded-md" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-1/4" />
-                <Skeleton className="h-3 w-1/2" />
-              </div>
-              <Skeleton className="h-6 w-16 rounded-full" />
-            </div>
-          ))}
-        </div>
-      ) : downloads.length === 0 ? (
-        <EmptyState
-          icon={Download}
-          title="No downloads"
-          description={statusFilter === 'all'
-            ? 'Downloads from slskd will appear here.'
-            : `No ${statusFilter} downloads.`}
-        />
-      ) : (
-        <div className="space-y-4">
-          {downloads.map((download) => (
-            <DownloadCard
-              key={download.id}
-              download={download}
-              onRetry={() => handleRetry(download.id)}
-              onCancel={(remove) => handleCancel(download.id, remove)}
-              isRetrying={retryingId === download.id}
-              isCancelling={cancellingId === download.id}
-            />
-          ))}
-        </div>
-      )}
-    </>
-  );
+  return <>
+    <PageHeader title="slskd Downloads" description="Track Soulseek downloads and recover failed transfers" />
+    <div className="mb-4 flex flex-wrap items-end gap-3">
+      <label className="flex min-w-0 flex-col gap-1 text-sm">Download status
+        <select value={status} onChange={event => setStatus(event.target.value)} className="min-h-11 rounded-button border bg-background px-3">
+          {statusOptions.map(option => <option key={option} value={option}>{label(option)}</option>)}
+        </select>
+      </label>
+      <Button variant="outline" disabled={query.isFetching} onClick={() => query.refetch({ cancelRefetch: false })}>{query.isFetching ? 'Refreshing…' : 'Refresh downloads'}</Button>
+    </div>
+    {query.isLoading ? <p role="status">Loading downloads…</p> : <>
+      {query.isError && <div role="alert" className="mb-4 border p-3"><p>{downloads.length ? 'Could not refresh downloads. Showing the last loaded records.' : 'Could not load downloads.'}</p><p className="break-words text-sm text-muted-foreground">{query.error.message}</p><Button variant="outline" disabled={query.isFetching} onClick={() => query.refetch({ cancelRefetch: false })}>Retry loading downloads</Button></div>}
+      {query.data && <p className="mb-3 text-sm text-muted-foreground"><span className="font-mono">{downloads.length}</span> loaded records · {status === 'all' ? 'All statuses' : label(status)} · Up to 100 returned records, newest first. Counts describe this loaded set only.</p>}
+      {!query.isError && downloads.length === 0 && <p>{status === 'all' ? 'No downloads yet. Soulseek downloads will appear here.' : `No ${label(status).toLowerCase()} downloads in the returned set.`}</p>}
+      <div>{downloads.map(download => <DownloadRow key={`${user?.id}:${user?.role}:${download.id}`} download={download} />)}</div>
+    </>}
+  </>;
 }

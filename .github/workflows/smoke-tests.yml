@@ -70,11 +70,12 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Push schema to test DB
-        run: npx prisma db push --schema apps/api/prisma/schema.prisma --skip-generate --accept-data-loss
+      - name: Deploy migrations to test DB
+        run: npm run db:deploy --workspace=@mixarr/api
 
       - name: Build API and web
         run: |
+          npm run build --workspace=@mixarr/shared-types
           npm run build --workspace=@mixarr/api
           npm run build --workspace=@mixarr/web
 

@@ -6,13 +6,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui';
 import { PageHeader } from '@/components/layout/page-header';
+import { ResultState } from '@/components/ui/result-state';
 import { api } from '@/lib/api';
 import CheckCircle from 'lucide-react/dist/esm/icons/check-circle';
 import Clock from 'lucide-react/dist/esm/icons/clock';
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
-import PlayCircle from 'lucide-react/dist/esm/icons/play-circle';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-import User from 'lucide-react/dist/esm/icons/user';
 import XCircle from 'lucide-react/dist/esm/icons/x-circle';
 import { useAuth } from '@/lib/auth';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -55,11 +54,11 @@ function getJobStatus(job: Job): 'completed' | 'failed' | 'active' | 'waiting' {
 function JobStatusBadge({ status }: { status: ReturnType<typeof getJobStatus> }) {
   switch (status) {
     case 'completed':
-      return <Badge variant="default" className="bg-status-success"><CheckCircle className="h-3 w-3 mr-1" />Completed</Badge>;
+      return <Badge variant="success"><CheckCircle className="h-3 w-3 mr-1" />Completed</Badge>;
     case 'failed':
-      return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Failed</Badge>;
+      return <Badge variant="error"><XCircle className="h-3 w-3 mr-1" />Failed</Badge>;
     case 'active':
-      return <Badge variant="default" className="bg-status-info"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Running</Badge>;
+      return <Badge variant="secondary"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Running</Badge>;
     case 'waiting':
       return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Waiting</Badge>;
   }
@@ -84,10 +83,10 @@ export default function JobsPage() {
   const queryClient = useQueryClient();
 
   // React Query for jobs with auto-refresh
-  const { data: jobs = [], isLoading, isFetching: isRefreshing } = useQuery({
+  const { data: jobs = [], isLoading, isFetching: isRefreshing, isError, error } = useQuery({
     queryKey: ['jobs', activeQueue],
-    queryFn: async () => {
-      const { data, error } = await api.get<{ jobs: Job[] }>(`/api/jobs/recent/${activeQueue}?limit=50`);
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ jobs: Job[] }>(`/api/jobs/recent/${activeQueue}?limit=50`, { signal });
       if (error) throw new Error(error);
       return data!.jobs;
     },
@@ -125,11 +124,12 @@ export default function JobsPage() {
       </PageHeader>
 
       {/* Queue Tabs */}
-      <div className="flex gap-2 mb-6">
+      <div className="mb-4 flex flex-wrap gap-2">
         {queueNames.map((queue) => (
           <Button
             key={queue.value}
             variant={activeQueue === queue.value ? 'default' : 'outline'}
+            aria-pressed={activeQueue === queue.value}
             onClick={() => setActiveQueue(queue.value)}
           >
             {queue.label}
@@ -137,49 +137,18 @@ export default function JobsPage() {
         ))}
       </div>
 
-      {/* Stats Summary */}
-      <div className="grid gap-4 md:grid-cols-3 mb-6">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Active</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <PlayCircle className="h-5 w-5 text-status-info" />
-              <span className="text-2xl font-bold">{activeJobs.length}</span>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Completed</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <CheckCircle className="h-5 w-5 text-status-success" />
-              <span className="text-2xl font-bold">{completedJobs.length}</span>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Failed</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <XCircle className="h-5 w-5 text-status-error" />
-              <span className="text-2xl font-bold">{failedJobs.length}</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {!isLoading && !isError && <dl className="mb-4 flex flex-wrap gap-x-6 gap-y-2 border-y py-3 text-sm">
+        {([['Active', activeJobs.length], ['Completed', completedJobs.length], ['Failed', failedJobs.length]] as const).map(([label, count]) => (
+          <div key={label} className="flex gap-2"><dt className="text-muted-foreground">{label}</dt><dd className="font-mono font-semibold">{count}</dd></div>
+        ))}
+      </dl>}
 
       {/* Jobs List */}
       <Card>
         <CardHeader>
           <CardTitle>Recent Jobs</CardTitle>
           <CardDescription>
-            Last 50 jobs from the {activeQueue} queue
+            Last <span className="font-mono">50</span> jobs from the {activeQueue} queue
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -196,39 +165,38 @@ export default function JobsPage() {
                 </div>
               ))}
             </div>
+          ) : isError ? (
+            <ResultState kind="error" message={error.message} action={<Button variant="outline" onClick={handleRefresh}>Retry</Button>} />
           ) : jobs.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">No jobs found</p>
+            <ResultState kind="no-records" message={`No recent jobs in the ${activeQueue} queue.`} />
           ) : (
-            <div className="space-y-2">
+            <div className="divide-y border-y">
               {jobs.map((job) => {
                 const status = getJobStatus(job);
                 return (
                   <div
                     key={job.id}
-                    className="flex items-center justify-between p-4 border rounded-container"
+                    className="flex min-w-0 items-center justify-between py-3"
                   >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex flex-wrap items-center gap-3">
                         <JobStatusBadge status={status} />
-                        <span className="font-medium">
+                        <span className="min-w-0 break-words font-medium">
                           {job.data.subscriptionName || job.data.importSourceName || `Job ${job.id.slice(0, 8)}`}
                         </span>
-                        {/* Show owner badge for admins */}
+                        {/* Owners remain visible only to admins. */}
                         {currentUser?.role === 'admin' && job.user && job.data.userId !== currentUser.id && (
-                          <Badge variant="outline" className="text-xs">
-                            <User className="h-3 w-3 mr-1" />
-                            {job.user.displayName || job.user.username}
-                          </Badge>
+                          <span className="text-xs text-muted-foreground">Owner: {job.user.displayName || job.user.username}</span>
                         )}
                       </div>
-                      <div className="text-sm text-muted-foreground flex gap-4">
-                        <span>Started: {formatTime(job.timestamp)}</span>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+                        <span>Job {job.id} · Started: {formatTime(job.timestamp)}</span>
                         <span>Duration: {formatDuration(job.timestamp, job.finishedOn)}</span>
                       </div>
                       {status === 'completed' && job.returnvalue && (
                         <div className="text-sm mt-1">
                           {job.returnvalue.artistsFound !== undefined && (
-                            <span className="text-status-success">
+                            <span className="font-mono">
                               Found: {job.returnvalue.artistsFound}, Added: {job.returnvalue.artistsAdded || 0}
                             </span>
                           )}

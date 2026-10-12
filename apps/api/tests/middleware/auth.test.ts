@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response, NextFunction } from 'express';
 
-// Mock the middleware functions inline since we can't import ES modules easily in tests
+// Inline authentication middleware doubles for isolated tests.
 function createRequireAuth() {
   return function requireAuth(req: Request, res: Response, next: NextFunction): void {
     if (req.isAuthenticated && req.isAuthenticated()) {

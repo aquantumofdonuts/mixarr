@@ -1,110 +1,54 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { ArtistCard } from '@/components/ArtistCard';
-import { BulkActionBar } from './BulkActionBar';
-import type { ArtistResult } from '../hooks/useSearch';
+import { BulkToolbar } from '@/components/ui/bulk-toolbar';
+import { Button } from '@/components/ui/button';
+import { removeActedItems, retainSelection } from '@/lib/list-state';
+import { useListContext } from '@/hooks/useListContext';
+import { artistResultKey, type ArtistResult } from '../hooks/useSearch';
+import type { BatchAddResult } from '../hooks/useArtistAdd';
 
 export interface ArtistSearchProps {
   results: ArtistResult[];
-  /** ID of the artist currently being added (foreignArtistId or artistName) */
   addingArtistId: string | null;
+  pendingIds?: Set<string>;
   isBulkAdding: boolean;
+  disabled?: boolean;
   onAddArtist: (artist: ArtistResult) => void;
-  onBatchAdd: (ids: Set<string>) => Promise<any>;
+  onBatchAdd: (ids: Set<string>) => Promise<BatchAddResult | null>;
   onSearchSlskd: (artist: { name: string; image?: string }) => void;
 }
 
-/**
- * Renders the artist search results grid with multi-select and bulk add support.
- * Manages its own local `selectedIds` state.
- */
-export function ArtistSearch({
-  results,
-  addingArtistId,
-  isBulkAdding,
-  onAddArtist,
-  onBatchAdd,
-  onSearchSlskd,
-}: ArtistSearchProps) {
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  // Reset selection when results change (e.g. new search)
+export function ArtistSearch({ results, addingArtistId, pendingIds, isBulkAdding, disabled = false, onAddArtist, onBatchAdd, onSearchSlskd }: ArtistSearchProps) {
+  const { selected: selectedIds, setSelected, remember } = useListContext({ ready: !disabled, retainSelectionOnScopeChange: true });
   useEffect(() => {
-    setSelectedIds(new Set());
-  }, [results]);
-
-  const toggleSelect = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
-
-  const selectAll = useCallback(() => {
-    const allIds = results
-      .filter((r) => !r.inLibrary)
-      .map((r) => r.foreignArtistId);
-    setSelectedIds(new Set(allIds));
-  }, [results]);
-
-  const deselectAll = useCallback(() => {
-    setSelectedIds(new Set());
-  }, []);
-
-  const handleBulkAdd = useCallback(async () => {
-    const result = await onBatchAdd(selectedIds);
-    if (result) {
-      setSelectedIds(new Set());
-    }
-  }, [selectedIds, onBatchAdd]);
-
-  return (
-    <>
-      <BulkActionBar
-        selectedCount={selectedIds.size}
-        totalCount={results.length}
-        onSelectAll={selectAll}
-        onDeselectAll={deselectAll}
-        onBulkAdd={handleBulkAdd}
-        isAdding={isBulkAdding}
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {results.map((artist, i) => (
-          <ArtistCard
-            key={`${artist.foreignArtistId || artist.artistName}-${i}`}
-            artistName={artist.artistName}
-            foreignArtistId={artist.foreignArtistId}
-            imageUrl={artist.imageUrl}
-            sources={artist.sources}
-            inLibrary={artist.inLibrary}
-            genres={artist.lastfm?.tags}
-            popularity={artist.popularity}
-            followers={artist.followers}
-            fans={artist.fans}
-            listeners={artist.lastfm?.listeners}
-            spotifyId={artist.spotifyId}
-            mbid={artist.foreignArtistId}
-            showCheckbox={true}
-            isSelected={selectedIds.has(artist.foreignArtistId)}
-            onSelect={() => toggleSelect(artist.foreignArtistId)}
-            onAdd={() => onAddArtist(artist)}
-            onSearchSlskd={() =>
-              onSearchSlskd({ name: artist.artistName, image: artist.imageUrl })
-            }
-            isAdding={
-              addingArtistId === artist.foreignArtistId ||
-              addingArtistId === artist.artistName
-            }
-          />
-        ))}
-      </div>
-    </>
-  );
+    if (disabled) return;
+    const available = new Set(results.filter(row => !row.inLibrary && row.foreignArtistId).map(artistResultKey));
+    setSelected(previous => retainSelection(previous, available));
+  }, [results, disabled, setSelected]);
+  const toggle = useCallback((id: string) => setSelected(previous => {
+    const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next;
+  }), [setSelected]);
+  async function bulkAdd() {
+    const ids = new Set(results.filter(row => selectedIds.has(artistResultKey(row))).map(row => row.foreignArtistId));
+    const outcome = await onBatchAdd(ids);
+    if (outcome) setSelected(previous => removeActedItems(previous, new Set([...outcome.added, ...outcome.skipped])));
+  }
+  return <>
+    <div className="flex flex-wrap items-center gap-3 border-y py-2 text-sm">
+      <Button variant="outline" size="sm" disabled={disabled || isBulkAdding} onClick={() => setSelected(new Set(results.filter(row => !row.inLibrary && row.foreignArtistId).map(artistResultKey)))}>Select this page</Button>
+      <span className="text-muted-foreground">Artist additions · this page only · unidentified artists require individual identity selection</span>
+    </div>
+    <div className="divide-y border-b">
+      {results.map(artist => <ArtistCard key={artistResultKey(artist)} artistName={artist.artistName} foreignArtistId={artist.foreignArtistId} imageUrl={artist.imageUrl}
+        sources={artist.sources} inLibrary={artist.inLibrary} genres={artist.lastfm?.tags} popularity={artist.popularity} followers={artist.followers} fans={artist.fans} listeners={artist.lastfm?.listeners}
+        spotifyId={artist.spotifyId} mbid={artist.foreignArtistId} showCheckbox isSelected={selectedIds.has(artistResultKey(artist))} onSelect={() => toggle(artistResultKey(artist))}
+        onAdd={() => onAddArtist(artist)} onSearchSlskd={() => onSearchSlskd({ name: artist.artistName, image: artist.imageUrl })}
+        onOpen={remember} disabled={disabled || isBulkAdding} acquisitionError={artist.acquisitionError}
+        isAdding={pendingIds ? pendingIds.has(artistResultKey(artist)) : addingArtistId === artistResultKey(artist)} />)}
+    </div>
+    <BulkToolbar selectedCount={selectedIds.size} scopeLabel="This page · adds selected artists to Lidarr" pending={isBulkAdding || !!pendingIds?.size}
+      actions={[{ label: 'Add selected artists', onClick: () => { void bulkAdd(); }, disabled }]} onClear={() => setSelected(new Set())} />
+  </>;
 }

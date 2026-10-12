@@ -1,21 +1,10 @@
 /**
- * divert-lidarr-queue.ts — one-off backlog sweep, invoked via
- * `node dist/scripts/divert-lidarr-queue.js` inside this container.
+ * Sweep the current Lidarr download queue and try Soulseek for each album.
+ * On a match, remove the queued download without blocklisting or redownloading
+ * and unmonitor the album to prevent immediate re-grabs. Record every attempt
+ * in soulseek_diversions for the scheduled sweep.
  *
- * Iterates Lidarr's CURRENT download queue and tries Soulseek first for each item —
- * this exists specifically for cleaning up a backlog that reached qBittorrent because
- * the caller (Glen's playlist_sync.py) was pushing directly to Lidarr's own AlbumSearch
- * instead of trying Soulseek first, confirmed live 2026-07-22 (93 items, all via
- * qBittorrent, zero via Soulseek). That caller is now fixed to use divert-album.ts
- * instead going forward — this script is for clearing what already leaked through.
- *
- * For each queue item found via Soulseek: removes it from qBittorrent (blocklist=false,
- * skipRedownload=true) and unmonitors the album, so Lidarr's own periodic search
- * doesn't just re-grab it immediately — same pattern as the original
- * move_queue_to_soulseek.js. Records every attempt (found or not) in
- * soulseek_diversions so the existing 30-day sweep job can act on it later.
- *
- * Requires LIDARR_HOST, LIDARR_KEY env vars (same as the original ad-hoc script).
+ * Run node dist/scripts/divert-lidarr-queue.js with LIDARR_HOST and LIDARR_KEY.
  */
 import { PrismaClient } from "@prisma/client";
 import http from "http";

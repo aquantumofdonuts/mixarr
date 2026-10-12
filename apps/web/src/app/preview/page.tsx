@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { ResultState } from '@/components/ui/result-state';
 import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { api } from '@/lib/api';
@@ -13,10 +13,7 @@ import CheckCircle from 'lucide-react/dist/esm/icons/check-circle';
 import Download from 'lucide-react/dist/esm/icons/download';
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
 import Music2 from 'lucide-react/dist/esm/icons/music-2';
-import Radio from 'lucide-react/dist/esm/icons/radio';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
-import Users from 'lucide-react/dist/esm/icons/users';
 import XCircle from 'lucide-react/dist/esm/icons/x-circle';
 
 interface Artist {
@@ -55,6 +52,7 @@ export default function PreviewPage() {
 
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [previewError, setPreviewError] = useState('');
   const [selectedArtists, setSelectedArtists] = useState<Set<string>>(new Set());
   const [isImporting, setIsImporting] = useState(false);
   const [importResults, setImportResults] = useState<Array<{ name: string; success: boolean; message: string }>>([]);
@@ -63,6 +61,7 @@ export default function PreviewPage() {
     if (!connectionId || !connectionType) return;
 
     setIsLoading(true);
+    setPreviewError('');
     const params = new URLSearchParams();
     if (includeAI) params.set('ai', 'true');
     if (includeSimilar && connectionType === 'lastfm') params.set('similar', 'true');
@@ -77,10 +76,12 @@ export default function PreviewPage() {
       setSelectedArtists(new Set(data.artists.map(a => a.name)));
     }
     if (error) {
-      addToast({ type: 'error', title: 'Failed to load preview', message: error });
+      setPreviewError(error);
+      setPreviewData(null);
+      setSelectedArtists(new Set());
     }
     setIsLoading(false);
-  }, [connectionId, connectionType, addToast]);
+  }, [connectionId, connectionType]);
 
   useEffect(() => {
     fetchPreview();
@@ -160,24 +161,25 @@ export default function PreviewPage() {
 
   if (!connectionId || !connectionType) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <p className="text-muted-foreground mb-4">No connection specified</p>
-        <Button onClick={() => router.push('/connections')}>
-          <ArrowLeft className="h-4 w-4 mr-2" /> Back to Connections
-        </Button>
-      </div>
+      <>
+        <PageHeader title="Preview artists" />
+        <div className="border-y py-6">
+          <p className="mb-4 text-muted-foreground">No connection specified</p>
+          <Button onClick={() => router.push('/connections')}>
+            <ArrowLeft className="h-4 w-4 mr-2" /> Back to Connections
+          </Button>
+        </div>
+      </>
     );
   }
-
-  const TypeIcon = connectionType === 'spotify' ? Music2 : Radio;
 
   return (
     <>
       <PageHeader
         title={`Preview ${connectionType === 'spotify' ? 'Spotify' : 'Last.fm'} Artists`}
-        description={previewData ? `${previewData.total} artists not in your Lidarr library (${previewData.filtered} filtered)` : 'Loading...'}
+        description={previewData ? <><span className="font-mono">{previewData.total}</span> artists not in your Lidarr library (<span className="font-mono">{previewData.filtered}</span> filtered)</> : isLoading ? 'Loading artists…' : 'Review artists from this connection.'}
       >
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => router.push('/connections')}>
             <ArrowLeft className="h-4 w-4 mr-2" /> Back
           </Button>
@@ -186,10 +188,10 @@ export default function PreviewPage() {
           </Button>
           <Button
             onClick={handleImport}
-            disabled={isImporting || selectedArtists.size === 0}
+            disabled={isImporting || isLoading || selectedArtists.size === 0}
           >
             <Download className={`h-4 w-4 mr-2 ${isImporting ? 'animate-pulse' : ''}`} />
-            Import {selectedArtists.size} Artist{selectedArtists.size !== 1 ? 's' : ''}
+            <span>Import <span className="font-mono">{selectedArtists.size}</span> Artist{selectedArtists.size !== 1 ? 's' : ''}</span>
           </Button>
         </div>
       </PageHeader>
@@ -198,17 +200,19 @@ export default function PreviewPage() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
+      ) : previewError ? (
+        <ResultState kind="error" message={previewError} action={<Button variant="outline" onClick={() => fetchPreview()}>Retry</Button>} />
       ) : previewData ? (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* Selection Controls */}
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             <Button variant="outline" size="sm" onClick={selectAll}>
               Select All
             </Button>
             <Button variant="outline" size="sm" onClick={selectNone}>
               Select None
             </Button>
-            <span className="text-sm text-muted-foreground">
+            <span className="font-mono text-sm text-muted-foreground">
               {selectedArtists.size} selected
             </span>
           </div>
@@ -242,55 +246,49 @@ export default function PreviewPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
-                <TypeIcon className="h-5 w-5" />
                 <CardTitle>
                   {connectionType === 'spotify' ? 'Your Spotify Artists' : 'Top Artists'}
                 </CardTitle>
               </div>
               <CardDescription>
-                {previewData.artists.length} artists from your {connectionType === 'spotify' ? 'followed artists and liked songs' : 'charts'}
+                <span className="font-mono">{previewData.artists.length}</span> artists from your {connectionType === 'spotify' ? 'followed artists and liked songs' : 'charts'}
               </CardDescription>
             </CardHeader>
             <CardContent>
               {previewData.artists.length === 0 ? (
-                <p className="text-muted-foreground text-center py-4">
-                  All artists are already in your Lidarr library!
-                </p>
+                <ResultState kind="no-records" message="This source returned no artists available to import." />
               ) : (
-                <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+                <div className="divide-y border-y">
                   {previewData.artists.map((artist) => (
-                    <div
+                    <label
                       key={artist.id || artist.name}
-                      onClick={() => toggleArtist(artist.name)}
-                      className={`flex items-center gap-3 p-3 rounded-container border cursor-pointer transition-colors ${
+                      className={`flex min-w-0 items-center gap-3 px-2 py-3 cursor-pointer transition-colors ${
                         selectedArtists.has(artist.name)
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
+                          ? 'bg-muted'
+                          : 'hover:bg-muted/50'
                       }`}
                     >
+                      <input type="checkbox" className="h-4 w-4 shrink-0 accent-foreground" aria-label={`Select ${artist.name}`} checked={selectedArtists.has(artist.name)} onChange={() => toggleArtist(artist.name)} />
                       {artist.images?.[0]?.url ? (
                         <img
                           src={artist.images[0].url}
                           alt={artist.name}
-                          className="h-10 w-10 rounded-full object-cover"
+                          className="h-10 w-10 rounded-button object-cover"
                         />
                       ) : (
-                        <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                        <div className="h-10 w-10 rounded-button bg-muted flex items-center justify-center">
                           <Music2 className="h-5 w-5 text-muted-foreground" />
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">{artist.name}</p>
                         {artist.listeners && (
-                          <p className="text-xs text-muted-foreground tabular-nums">
+                          <p className="text-xs font-mono text-muted-foreground tabular-nums">
                             {parseInt(artist.listeners).toLocaleString()} listeners
                           </p>
                         )}
                       </div>
-                      {selectedArtists.has(artist.name) && (
-                        <CheckCircle className="h-5 w-5 text-primary shrink-0" />
-                      )}
-                    </div>
+                    </label>
                   ))}
                 </div>
               )}
@@ -302,7 +300,6 @@ export default function PreviewPage() {
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-2">
-                  <Users className="h-5 w-5" />
                   <CardTitle>Similar Artists</CardTitle>
                 </div>
                 <CardDescription>
@@ -310,27 +307,24 @@ export default function PreviewPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+                <div className="divide-y border-y">
                   {previewData.similarArtists.map((artist) => (
-                    <div
+                    <label
                       key={artist.name}
-                      onClick={() => toggleArtist(artist.name)}
-                      className={`flex items-center gap-3 p-3 rounded-container border cursor-pointer transition-colors ${
+                      className={`flex min-w-0 items-center gap-3 px-2 py-3 cursor-pointer transition-colors ${
                         selectedArtists.has(artist.name)
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
+                          ? 'bg-muted'
+                          : 'hover:bg-muted/50'
                       }`}
                     >
-                      <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                      <input type="checkbox" className="h-4 w-4 shrink-0 accent-foreground" aria-label={`Select ${artist.name}`} checked={selectedArtists.has(artist.name)} onChange={() => toggleArtist(artist.name)} />
+                      <div className="h-10 w-10 rounded-button bg-muted flex items-center justify-center">
                         <Music2 className="h-5 w-5 text-muted-foreground" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">{artist.name}</p>
                       </div>
-                      {selectedArtists.has(artist.name) && (
-                        <CheckCircle className="h-5 w-5 text-primary shrink-0" />
-                      )}
-                    </div>
+                    </label>
                   ))}
                 </div>
               </CardContent>
@@ -342,39 +336,31 @@ export default function PreviewPage() {
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5" />
                   <CardTitle>AI Recommendations</CardTitle>
-                  <Badge variant="secondary">AI</Badge>
                 </div>
                 <CardDescription>
                   Suggested artists based on your taste
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+                <div className="divide-y border-y">
                   {previewData.aiRecommendations.map((rec) => (
-                    <div
+                    <label
                       key={rec.name}
-                      onClick={() => toggleArtist(rec.name)}
-                      className={`flex items-center gap-3 p-3 rounded-container border cursor-pointer transition-colors ${
+                      className={`flex min-w-0 items-center gap-3 px-2 py-3 cursor-pointer transition-colors ${
                         selectedArtists.has(rec.name)
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
+                          ? 'bg-muted'
+                          : 'hover:bg-muted/50'
                       }`}
                     >
-                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-secondary to-primary flex items-center justify-center">
-                        <Sparkles className="h-5 w-5 text-white" />
-                      </div>
+                      <input type="checkbox" className="h-4 w-4 shrink-0 accent-foreground" aria-label={`Select ${rec.name}`} checked={selectedArtists.has(rec.name)} onChange={() => toggleArtist(rec.name)} />
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">{rec.name}</p>
                         <p className="text-xs text-muted-foreground">
                           via {rec.source} • {rec.strategy}
                         </p>
                       </div>
-                      {selectedArtists.has(rec.name) && (
-                        <CheckCircle className="h-5 w-5 text-primary shrink-0" />
-                      )}
-                    </div>
+                    </label>
                   ))}
                 </div>
               </CardContent>
@@ -382,9 +368,7 @@ export default function PreviewPage() {
           )}
         </div>
       ) : (
-        <div className="text-center py-12 text-muted-foreground">
-          Failed to load preview data
-        </div>
+<ResultState kind="no-records" message="This connection returned no preview data." />
       )}
     </>
   );

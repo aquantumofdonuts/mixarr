@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { addOptionsSchema } from '../lib/add-options.js';
 
 /**
  * Query schema for GET /api/discover/library
@@ -24,12 +25,10 @@ export const discoverSimilarSchema = z.object({
  * qualityProfileId, metadataProfileId, and rootFolderPath are optional
  * because the route falls back to connection config defaults
  */
-export const addArtistSchema = z.object({
+export const addArtistSchema = addOptionsSchema.extend({
   artistName: z.string().min(1, 'Artist name is required').max(500),
-  mbid: z.string().uuid('Must be a valid UUID').optional(),
-  qualityProfileId: z.number().int().positive().optional(),
-  metadataProfileId: z.number().int().positive().optional(),
-  rootFolderPath: z.string().min(1).max(1000).optional(),
+  mbid: z.string().uuid('Must be a valid UUID').transform(value => value.toLowerCase()).optional(),
+
 });
 
 /**

@@ -1,449 +1,198 @@
-/**
- * Review Queue API Tests
- * 
- * Tests:
- * - Review item CRUD
- * - Approve/reject workflow
- * - Bulk operations
- * - Lidarr integration on approve
- * - Logging of review actions
- * - Multi-tenant access
- */
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import express from 'express';
+import request from 'supertest';
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import {
-  createMockPrisma,
-  createMockUser,
-  createMockAdminUser,
-  createMockReviewItem,
-  createMockLidarrService,
-  createMockLidarrCache,
-  createMockLidarrConnection,
-  resetIdCounter,
-} from '../utils/fixtures.js';
+const mocks = vi.hoisted(() => ({
+  findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), transaction: vi.fn(),
+  connection: vi.fn(), exists: vi.fn(), addArtist: vi.fn(), addAlbum: vi.fn(),
+  profiles: vi.fn(), folders: vi.fn(), log: vi.fn(), notify: vi.fn(),
+}));
+vi.mock('../../src/lib/db.js', () => ({ default: {
+  reviewItem: { findFirst: mocks.findFirst, findMany: mocks.findMany, updateMany: mocks.updateMany },
+  connection: { findFirst: mocks.connection }, $transaction: mocks.transaction,
+} }));
+vi.mock('../../src/middleware/auth.js', () => ({ requireAuth: (req: any, _res: any, next: any) => {
+  req.user = { id: Number(req.headers['x-user'] || 1), role: req.headers['x-admin'] ? 'admin' : 'user' }; next();
+} }));
+vi.mock('../../src/jobs/scheduler.js', () => ({ addImportScheduledJob: vi.fn(), removeImportScheduledJob: vi.fn() }));
+vi.mock('../../src/services/spotify.js', () => ({ SpotifyService: vi.fn() }));
+vi.mock('../../src/services/lastfm.js', () => ({ LastfmService: vi.fn() }));
+vi.mock('../../src/services/ai.js', () => ({ AIService: vi.fn() }));
+vi.mock('../../src/services/musicbrainz.js', () => ({ MusicBrainzService: vi.fn() }));
+vi.mock('../../src/services/artist-images.js', () => ({ getArtistImages: vi.fn() }));
+vi.mock('../../src/services/public-playlist.js', () => ({ parseSpotifyPlaylistUrl: vi.fn(), importPublicPlaylist: vi.fn() }));
+vi.mock('../../src/services/notifications.js', () => ({ notificationService: { send: mocks.notify } }));
+vi.mock('../../src/routes/logs.js', () => ({ addLogEntry: mocks.log }));
+vi.mock('../../src/services/lidarr.js', () => ({
+  LidarrService: class {
+    addArtistWithCacheWarm = mocks.addArtist; addAlbumWithCacheWarm = mocks.addAlbum;
+    getQualityProfiles = mocks.profiles; getMetadataProfiles = mocks.profiles; getRootFolders = mocks.folders;
+  },
+  LidarrCache: class { refresh = vi.fn(); exists = mocks.exists; },
+}));
+vi.mock('../../src/lib/logger.js', () => ({ createLogger: () => ({ info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 
-describe('Review Queue API', () => {
-  let mockPrisma: ReturnType<typeof createMockPrisma>;
-  let testUser: ReturnType<typeof createMockUser>;
-  let adminUser: ReturnType<typeof createMockAdminUser>;
-  let mockLidarr: ReturnType<typeof createMockLidarrService>;
-  let mockCache: ReturnType<typeof createMockLidarrCache>;
+import { importsRouter } from '../../src/routes/imports.js';
+const now = new Date('2026-10-08T00:00:00.000Z').getTime();
+const mbid = '11111111-1111-4111-8111-111111111111';
+let rows: Array<{ id: number; userId: number; status: string; updatedAt: Date; source: string;
+  artistName: string; mbid: string; itemType: string; albumMbid: string | null }>;
+let app: express.Application;
+let updates: any[];
 
-  beforeEach(() => {
-    resetIdCounter();
-    mockPrisma = createMockPrisma();
-    testUser = createMockUser();
-    adminUser = createMockAdminUser();
-    mockLidarr = createMockLidarrService();
-    mockCache = createMockLidarrCache();
+beforeEach(() => {
+  vi.resetAllMocks(); vi.spyOn(Date, 'now').mockReturnValue(now);
+  process.env.SESSION_SECRET = 'test-review-undo-secret';
+  rows = [1, 2].map(id => ({ id, userId: 1, status: 'pending', updatedAt: new Date(now), source: 'subscription:one',
+    artistName: 'Same Name', mbid, itemType: 'artist', albumMbid: null }));
+  updates = [];
+  const matches = (row: typeof rows[number], where: any) =>
+    (where.id === undefined || typeof where.id === 'number' && where.id === row.id || where.id?.in?.includes(row.id)) &&
+    (where.userId === undefined || where.userId === row.userId) &&
+    (where.status === undefined || where.status === row.status) &&
+    (where.mbid === undefined || where.mbid === row.mbid) &&
+    (where.updatedAt === undefined || where.updatedAt.getTime() === row.updatedAt.getTime());
+  mocks.findFirst.mockImplementation(async ({ where }) => {
+    const row = rows.find(row => matches(row, where)); return row ? { ...row } : null;
   });
-
-  describe('GET /api/imports/review', () => {
-    it('should return pending review items for user', async () => {
-      const items = [
-        createMockReviewItem({ userId: testUser.id, status: 'pending' }),
-        createMockReviewItem({ userId: testUser.id, status: 'pending' }),
-      ];
-      mockPrisma.reviewItem.findMany.mockResolvedValue(items);
-      
-      const result = await mockPrisma.reviewItem.findMany({
-        where: { userId: testUser.id, status: 'pending' },
-      });
-      
-      expect(result).toHaveLength(2);
-    });
-
-    it('should return all review items for admin', async () => {
-      const items = [
-        createMockReviewItem({ userId: 1 }),
-        createMockReviewItem({ userId: 2 }),
-      ];
-      mockPrisma.reviewItem.findMany.mockResolvedValue(items);
-      
-      const result = await mockPrisma.reviewItem.findMany({});
-      
-      expect(result).toHaveLength(2);
-    });
-
-    it('should support pagination', async () => {
-      const limit = 50;
-      const offset = 0;
-      
-      mockPrisma.reviewItem.findMany.mockResolvedValue([]);
-      mockPrisma.reviewItem.count.mockResolvedValue(100);
-      
-      const total = await mockPrisma.reviewItem.count({ where: { userId: testUser.id } });
-      
-      expect(total).toBe(100);
-      expect(Math.ceil(total / limit)).toBe(2); // 2 pages
-    });
-
-    it('should filter by status', async () => {
-      const pendingItems = [createMockReviewItem({ status: 'pending' })];
-      mockPrisma.reviewItem.findMany.mockResolvedValue(pendingItems);
-      
-      const result = await mockPrisma.reviewItem.findMany({
-        where: { status: 'pending' },
-      });
-      
-      expect(result[0].status).toBe('pending');
-    });
+  mocks.findMany.mockImplementation(async ({ where }) => rows.filter(row => matches(row, where)).map(row => ({ ...row })));
+  mocks.updateMany.mockImplementation(async ({ where, data }) => {
+    updates.push({ where, data });
+    const matching = rows.filter(row => matches(row, where)); matching.forEach(row => Object.assign(row, data));
+    return { count: matching.length };
   });
-
-  describe('PUT /api/imports/review/:id', () => {
-    it('should approve item and add to Lidarr', async () => {
-      const item = createMockReviewItem({ status: 'pending' });
-      mockPrisma.reviewItem.findUnique.mockResolvedValue(item);
-      mockPrisma.connection.findFirst.mockResolvedValue(createMockLidarrConnection(null));
-      mockCache.exists.mockResolvedValue(false);
-      mockCache.refresh.mockResolvedValue(undefined);
-      mockLidarr.searchArtist.mockResolvedValue([{ foreignArtistId: 'mbid123' }]);
-      mockLidarr.getQualityProfiles.mockResolvedValue([{ id: 1 }]);
-      mockLidarr.getMetadataProfiles.mockResolvedValue([{ id: 1 }]);
-      mockLidarr.getRootFolders.mockResolvedValue([{ path: '/music' }]);
-      mockLidarr.addArtist.mockResolvedValue({ id: 1 });
-      mockPrisma.reviewItem.update.mockResolvedValue({ ...item, status: 'approved' });
-      
-      // Verify item exists and user can access
-      const found = await mockPrisma.reviewItem.findUnique({ where: { id: item.id } });
-      expect(found).toBeDefined();
-      
-      // Mock the approval workflow
-      const updatedItem = await mockPrisma.reviewItem.update({
-        where: { id: item.id },
-        data: { status: 'approved' },
-      });
-      
-      expect(updatedItem.status).toBe('approved');
-    });
-
-    it('should mark as approved if already in library', async () => {
-      const item = createMockReviewItem({ status: 'pending' });
-      mockPrisma.reviewItem.findUnique.mockResolvedValue(item);
-      mockCache.exists.mockResolvedValue(true); // Already in library
-      
-      const alreadyInLibrary = await mockCache.exists({ name: item.artistName });
-      
-      expect(alreadyInLibrary).toBe(true);
-      // Should still mark as approved, not add again
-    });
-
-    it('should reject item', async () => {
-      const item = createMockReviewItem({ status: 'pending' });
-      mockPrisma.reviewItem.findUnique.mockResolvedValue(item);
-      mockPrisma.reviewItem.update.mockResolvedValue({ ...item, status: 'rejected' });
-      
-      const result = await mockPrisma.reviewItem.update({
-        where: { id: item.id },
-        data: { status: 'rejected' },
-      });
-      
-      expect(result.status).toBe('rejected');
-    });
-
-    it('should reset to pending', async () => {
-      const item = createMockReviewItem({ status: 'rejected' });
-      mockPrisma.reviewItem.findUnique.mockResolvedValue(item);
-      mockPrisma.reviewItem.update.mockResolvedValue({ ...item, status: 'pending' });
-      
-      const result = await mockPrisma.reviewItem.update({
-        where: { id: item.id },
-        data: { status: 'pending' },
-      });
-      
-      expect(result.status).toBe('pending');
-    });
-
-    it('should require valid status', () => {
-      const validStatuses = ['pending', 'approved', 'rejected'];
-      const invalidStatus = 'invalid';
-      
-      expect(validStatuses.includes(invalidStatus)).toBe(false);
-    });
-
-    it('should prevent user from approving other users items', async () => {
-      const otherUserItem = createMockReviewItem({ userId: 999 });
-      mockPrisma.reviewItem.findUnique.mockResolvedValue(otherUserItem);
-      
-      const found = await mockPrisma.reviewItem.findUnique({ where: { id: otherUserItem.id } });
-      const canUpdate = found?.userId === testUser.id || testUser.role === 'admin';
-      
-      expect(canUpdate).toBe(false);
-    });
-
-    it('should allow admin to approve any item', async () => {
-      const otherUserItem = createMockReviewItem({ userId: 999 });
-      mockPrisma.reviewItem.findUnique.mockResolvedValue(otherUserItem);
-      
-      const found = await mockPrisma.reviewItem.findUnique({ where: { id: otherUserItem.id } });
-      const canUpdate = found?.userId === adminUser.id || adminUser.role === 'admin';
-      
-      expect(canUpdate).toBe(true);
-    });
-
-    it('should approve album and call addAlbum when itemType is album', async () => {
-      const albumItem = createMockReviewItem({ 
-        status: 'pending',
-        itemType: 'album',
-        artistName: 'Test Artist',
-        albumName: 'Test Album',
-        mbid: 'artist-mbid-123',
-        albumMbid: 'album-mbid-456',
-      });
-      mockPrisma.reviewItem.findUnique.mockResolvedValue(albumItem);
-      mockPrisma.connection.findFirst.mockResolvedValue(createMockLidarrConnection(null));
-      mockCache.exists.mockResolvedValue(false);
-      mockCache.refresh.mockResolvedValue(undefined);
-      mockLidarr.getQualityProfiles.mockResolvedValue([{ id: 1 }]);
-      mockLidarr.getMetadataProfiles.mockResolvedValue([{ id: 1 }]);
-      mockLidarr.getRootFolders.mockResolvedValue([{ path: '/music' }]);
-      mockLidarr.addAlbum.mockResolvedValue({ artist: { id: 1 }, album: { id: 1 }, isNewArtist: false });
-      mockPrisma.reviewItem.update.mockResolvedValue({ ...albumItem, status: 'approved' });
-      
-      // Verify item exists and is an album type
-      const found = await mockPrisma.reviewItem.findUnique({ where: { id: albumItem.id } });
-      expect(found).toBeDefined();
-      expect(found?.itemType).toBe('album');
-      expect(found?.albumMbid).toBe('album-mbid-456');
-      
-      // Simulate the approval workflow for album
-      // Should call addAlbum instead of addArtist
-      if (found?.itemType === 'album' && found?.albumMbid) {
-        await mockLidarr.addAlbum(
-          found.mbid!,
-          found.albumMbid,
-          1, // qualityProfileId
-          1, // metadataProfileId
-          '/music' // rootFolderPath
-        );
-      } else {
-        await mockLidarr.addArtist(found!.mbid!, 1, 1, '/music');
-      }
-      
-      expect(mockLidarr.addAlbum).toHaveBeenCalledWith(
-        'artist-mbid-123',
-        'album-mbid-456',
-        1,
-        1,
-        '/music'
-      );
-      expect(mockLidarr.addArtist).not.toHaveBeenCalled();
-    });
-
-    it('should approve artist (default behavior) when itemType is artist', async () => {
-      const artistItem = createMockReviewItem({ 
-        status: 'pending',
-        itemType: 'artist',
-        artistName: 'Test Artist',
-        mbid: 'artist-mbid-123',
-      });
-      mockPrisma.reviewItem.findUnique.mockResolvedValue(artistItem);
-      mockPrisma.connection.findFirst.mockResolvedValue(createMockLidarrConnection(null));
-      mockCache.exists.mockResolvedValue(false);
-      mockCache.refresh.mockResolvedValue(undefined);
-      mockLidarr.searchArtist.mockResolvedValue([{ foreignArtistId: 'artist-mbid-123' }]);
-      mockLidarr.getQualityProfiles.mockResolvedValue([{ id: 1 }]);
-      mockLidarr.getMetadataProfiles.mockResolvedValue([{ id: 1 }]);
-      mockLidarr.getRootFolders.mockResolvedValue([{ path: '/music' }]);
-      mockLidarr.addArtist.mockResolvedValue({ id: 1 });
-      mockPrisma.reviewItem.update.mockResolvedValue({ ...artistItem, status: 'approved' });
-      
-      // Verify item exists and is an artist type
-      const found = await mockPrisma.reviewItem.findUnique({ where: { id: artistItem.id } });
-      expect(found).toBeDefined();
-      expect(found?.itemType).toBe('artist');
-      
-      // Simulate the approval workflow for artist
-      if (found?.itemType === 'album' && found?.albumMbid) {
-        await mockLidarr.addAlbum(found.mbid!, found.albumMbid, 1, 1, '/music');
-      } else {
-        await mockLidarr.addArtist(found!.mbid!, 1, 1, '/music');
-      }
-      
-      expect(mockLidarr.addArtist).toHaveBeenCalledWith('artist-mbid-123', 1, 1, '/music');
-      expect(mockLidarr.addAlbum).not.toHaveBeenCalled();
-    });
+  mocks.transaction.mockImplementation(async callback => {
+    const snapshot = rows.map(row => ({ ...row }));
+    try { return await callback({ reviewItem: { findFirst: mocks.findFirst, findMany: mocks.findMany, updateMany: mocks.updateMany } }); }
+    catch (error) { rows = snapshot; throw error; }
   });
+  mocks.connection.mockResolvedValue({ config: { url: 'http://lidarr.test', apiKey: 'secret' } });
+  mocks.exists.mockResolvedValue(false); mocks.addArtist.mockResolvedValue({}); mocks.addAlbum.mockResolvedValue({});
+  mocks.profiles.mockResolvedValue([{ id: 1 }]); mocks.folders.mockResolvedValue([{ path: '/music' }]);
+  mocks.log.mockResolvedValue(undefined); mocks.notify.mockResolvedValue(undefined);
+  app = express(); app.use(express.json()); app.use('/api/imports', importsRouter);
+});
+afterEach(() => vi.restoreAllMocks());
+const bulk = (ids: number[], status = 'rejected') => request(app).post('/api/imports/review/bulk').send({ ids, status });
 
-  describe('POST /api/imports/review/bulk', () => {
-    it('should bulk approve items', async () => {
-      const items = [
-        createMockReviewItem({ id: 1, status: 'pending' }),
-        createMockReviewItem({ id: 2, status: 'pending' }),
-        createMockReviewItem({ id: 3, status: 'pending' }),
-      ];
-      mockPrisma.reviewItem.findMany.mockResolvedValue(items);
-      
-      let added = 0;
-      let failed = 0;
-      
-      for (const item of items) {
-        try {
-          // Simulate approval
-          added++;
-        } catch {
-          failed++;
-        }
-      }
-      
-      expect(added).toBe(3);
-      expect(failed).toBe(0);
-    });
-
-    it('should bulk reject items', async () => {
-      const ids = [1, 2, 3];
-      mockPrisma.reviewItem.updateMany.mockResolvedValue({ count: 3 });
-      
-      const result = await mockPrisma.reviewItem.updateMany({
-        where: { id: { in: ids }, userId: testUser.id },
-        data: { status: 'rejected' },
-      });
-      
-      expect(result.count).toBe(3);
-    });
-
-    it('should skip items already in library', async () => {
-      const items = [
-        createMockReviewItem({ id: 1, artistName: 'Existing Artist' }),
-        createMockReviewItem({ id: 2, artistName: 'New Artist' }),
-      ];
-      
-      mockCache.exists
-        .mockResolvedValueOnce(true) // First artist exists
-        .mockResolvedValueOnce(false); // Second doesn't
-      
-      let added = 0;
-      let skipped = 0;
-      
-      for (const item of items) {
-        if (await mockCache.exists({ name: item.artistName })) {
-          skipped++;
-        } else {
-          added++;
-        }
-      }
-      
-      expect(added).toBe(1);
-      expect(skipped).toBe(1);
-    });
-
-    it('should continue processing on individual failures', async () => {
-      const items = [
-        createMockReviewItem({ id: 1 }),
-        createMockReviewItem({ id: 2 }),
-        createMockReviewItem({ id: 3 }),
-      ];
-      
-      mockLidarr.addArtist
-        .mockResolvedValueOnce({ id: 1 })
-        .mockRejectedValueOnce(new Error('Failed'))
-        .mockResolvedValueOnce({ id: 3 });
-      
-      let added = 0;
-      let failed = 0;
-      
-      for (const item of items) {
-        try {
-          await mockLidarr.addArtist('mbid', 1, 1, '/music');
-          added++;
-        } catch {
-          failed++;
-        }
-      }
-      
-      expect(added).toBe(2);
-      expect(failed).toBe(1);
-    });
-
-    it('should require valid request body', () => {
-      const body = { ids: [], status: 'approved' };
-      
-      const isValid = Array.isArray(body.ids) && 
-        ['pending', 'approved', 'rejected'].includes(body.status);
-      
-      expect(isValid).toBe(true);
-    });
+describe('review acquisitions through the actual Express router', () => {
+  it('returns ID-keyed mixed outcomes for equal names and keeps failed identities pending', async () => {
+    rows.push({ ...rows[0], id: 3, mbid: null as never }, { ...rows[0], id: 4 }, { ...rows[0], id: 5 });
+    mocks.exists.mockResolvedValueOnce(true).mockResolvedValue(false);
+    mocks.addArtist.mockResolvedValueOnce({}).mockRejectedValueOnce(Object.assign(new Error('secret provider payload'), { status: 400 }))
+      .mockRejectedValueOnce(new Error('socket disconnected'));
+    const response = await bulk([1, 2, 3, 4, 5], 'approved');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ added: 1, alreadyInLibrary: 1, failed: 3, addedIds: [1, 2], failedIds: [3, 4, 5] });
+    expect(response.body.outcomes.map((o: any) => [o.id, o.state])).toEqual([[1, 'already-in-library'], [2, 'added'], [3, 'identity-required'], [4, 'failed'], [5, 'uncertain']]);
+    expect(rows.map(row => row.status)).toEqual(['approved', 'approved', 'pending', 'pending', 'pending']);
+    expect(JSON.stringify(response.body)).not.toContain('secret provider payload');
   });
-
-  describe('DELETE /api/imports/review/:id', () => {
-    it('should delete own review item', async () => {
-      const item = createMockReviewItem({ userId: testUser.id });
-      mockPrisma.reviewItem.findUnique.mockResolvedValue(item);
-      mockPrisma.reviewItem.delete.mockResolvedValue(item);
-      
-      const found = await mockPrisma.reviewItem.findUnique({ where: { id: item.id } });
-      const canDelete = found?.userId === testUser.id;
-      
-      expect(canDelete).toBe(true);
-    });
+  it.each([408, 429, 500, 503])('keeps HTTP %i provider outcomes uncertain and pending', async status => {
+    mocks.addArtist.mockRejectedValue(Object.assign(new Error('raw error'), { status }));
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
+    expect(response.status).toBe(200); expect(response.body.success).toBe(false);
+    expect(response.body.outcomes[0]).toMatchObject({ id: 1, state: 'uncertain' });
+    expect(rows[0].status).toBe('pending'); expect(updates).toHaveLength(0);
   });
-
-  describe('Logging', () => {
-    it('should log successful approval', async () => {
-      mockPrisma.logEntry.create.mockResolvedValue({
-        id: 1,
-        level: 'info',
-        category: 'review',
-        message: 'Added artist "Test Artist" to Lidarr',
-        metadata: { artistName: 'Test Artist', mbid: 'mbid123' },
-        createdAt: new Date(),
-      });
-      
-      const log = await mockPrisma.logEntry.create({
-        data: {
-          level: 'info',
-          category: 'review',
-          message: 'Added artist "Test Artist" to Lidarr',
-          metadata: { artistName: 'Test Artist', mbid: 'mbid123' },
-        },
-      });
-      
-      expect(log.category).toBe('review');
-      expect(log.level).toBe('info');
+  it.each(['single', 'bulk'])('keeps %s album HTTP 400 acquisition outcomes uncertain after a possible provider effect', async kind => {
+    rows[0].itemType = 'album'; rows[0].albumMbid = mbid;
+    if (kind === 'single') rows[0].mbid = null as never;
+    mocks.addAlbum.mockRejectedValue(Object.assign(new Error('Search command rejected after monitoring changed'), { status: 400 }));
+    const response = kind === 'single'
+      ? await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid })
+      : await bulk([1], 'approved');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ success: false, added: 0, failed: 1, failedIds: [1] });
+    expect(response.body.outcomes[0]).toMatchObject({ id: 1, state: 'uncertain' });
+    expect(response.body.outcomes[0].message).toContain('Check the library');
+    expect(response.body.outcomes[0].message).not.toContain('did not accept');
+    expect(rows[0]).toMatchObject({ status: 'pending', mbid });
+    expect(mocks.addAlbum).toHaveBeenCalledTimes(1); expect(mocks.addArtist).not.toHaveBeenCalled();
+    expect(updates.every(update => update.data.status !== 'approved')).toBe(true);
+  });
+  it('requires a single explicit artist choice and rejects a conflicting identity', async () => {
+    rows[0].mbid = null as never;
+    let response = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
+    expect(response.status).toBe(422); expect(response.body.outcomes[0].state).toBe('identity-required');
+    response = await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid });
+    expect(response.body.outcomes[0].state).toBe('added'); expect(rows[0].mbid).toBe(mbid);
+    response = await request(app).put('/api/imports/review/2').send({ status: 'approved', mbid: '22222222-2222-4222-8222-222222222222' });
+    expect(response.status).toBe(409); expect(response.body.code).toBe('IDENTITY_CONFLICT'); expect(rows[1].status).toBe('pending');
+  });
+  it('persists an explicit owned identity before acquisition and reuses it after an uncertain failure', async () => {
+    rows[0].mbid = null as never;
+    mocks.addArtist.mockImplementationOnce(async () => {
+      expect(rows[0].mbid).toBe(mbid); expect(rows[0].status).toBe('pending');
+      expect(rows[0].updatedAt.getTime()).toBe(now + 1);
+      throw new Error('connection lost');
+    }).mockResolvedValueOnce({});
+    const first = await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid });
+    expect(first.body.outcomes[0].state).toBe('uncertain');
+    expect(rows[0]).toMatchObject({ mbid, status: 'pending' });
+    const retry = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
+    expect(retry.body.outcomes[0].state).toBe('added');
+    expect(rows[0].updatedAt.getTime()).toBe(now + 2); expect(mocks.addArtist).toHaveBeenCalledTimes(2);
+    expect(mocks.addArtist.mock.calls[1][0]).toBe(mbid);
+  });
+  it('uses the persisted identity revision when finalizing an explicit choice', async () => {
+    rows[0].mbid = null as never;
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid });
+    expect(response.body.outcomes[0].state).toBe('added'); expect(updates).toHaveLength(2);
+    expect(updates[0].where).toMatchObject({ id: 1, userId: 1, status: 'pending', mbid: null });
+    expect(updates[0].data).toMatchObject({ mbid, updatedAt: new Date(now + 1) });
+    expect(updates[1].where.updatedAt.getTime()).toBe(now + 1);
+    expect(rows[0].updatedAt.getTime()).toBe(now + 2);
+  });
+  it.each([false, true])('stops membership and acquisition for a competing identity with revision advanced=%s', async advanced => {
+    rows[0].mbid = null as never;
+    const other = '22222222-2222-4222-8222-222222222222';
+    mocks.profiles.mockImplementation(async () => {
+      rows[0].mbid = other; if (advanced) rows[0].updatedAt = new Date(now + 10); return [{ id: 1 }];
     });
-
-    it('should log already in library', async () => {
-      mockPrisma.logEntry.create.mockResolvedValue({
-        id: 1,
-        level: 'info',
-        category: 'review',
-        message: 'Artist "Test Artist" already in library',
-        metadata: {},
-        createdAt: new Date(),
-      });
-      
-      const log = await mockPrisma.logEntry.create({
-        data: {
-          level: 'info',
-          category: 'review',
-          message: 'Artist "Test Artist" already in library',
-          metadata: {},
-        },
-      });
-      
-      expect(log.message).toContain('already in library');
-    });
-
-    it('should log failures', async () => {
-      mockPrisma.logEntry.create.mockResolvedValue({
-        id: 1,
-        level: 'error',
-        category: 'review',
-        message: 'Failed to add artist: Connection refused',
-        metadata: { error: 'Connection refused' },
-        createdAt: new Date(),
-      });
-      
-      const log = await mockPrisma.logEntry.create({
-        data: {
-          level: 'error',
-          category: 'review',
-          message: 'Failed to add artist: Connection refused',
-          metadata: { error: 'Connection refused' },
-        },
-      });
-      
-      expect(log.level).toBe('error');
-    });
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid });
+    expect(response.status).toBe(409); expect(response.body.code).toBe('DECISION_CONFLICT');
+    expect(rows[0].mbid).toBe(other); expect(rows[0].updatedAt.getTime()).toBe(advanced ? now + 10 : now);
+    expect(mocks.exists).not.toHaveBeenCalled(); expect(mocks.addArtist).not.toHaveBeenCalled();
+  });
+  it('refuses foreign single and bulk acquisitions even for administrators', async () => {
+    rows[1].userId = 2;
+    expect((await request(app).put('/api/imports/review/2').set('x-admin', '1').send({ status: 'approved', mbid })).status).toBe(404);
+    expect((await request(app).post('/api/imports/review/bulk').set('x-admin', '1').send({ ids: [1, 2], status: 'approved' })).status).toBe(409);
+    expect(mocks.addArtist).not.toHaveBeenCalled(); expect(updates).toHaveLength(0);
+  });
+  it('preserves false options and original IDs for explicit identity retries', async () => {
+    rows[0].mbid = null as never;
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved', mbid, searchOnAdd: false, monitorOption: 'future', monitorNewItems: 'none' });
+    expect(response.body.outcomes[0]).toMatchObject({ id: 1, state: 'added' });
+    expect(mocks.addArtist).toHaveBeenCalledWith(mbid, 1, 1, '/music', true, false, false, 'future', 'none');
+  });
+  it('distinguishes a confirmed membership race from a cache warming result', async () => {
+    mocks.addArtist.mockResolvedValueOnce({ alreadyInLibrary: true, cacheWarmed: false }).mockResolvedValueOnce({ cacheWarmed: false });
+    const response = await bulk([1, 2], 'approved');
+    expect(response.body).toMatchObject({ added: 1, alreadyInLibrary: 1, failed: 0 });
+    expect(response.body.outcomes.map((o: any) => o.state)).toEqual(['already-in-library', 'added']);
+  });
+  it('keeps a provider-success/CAS-conflict uncertain and preserves the newer decision', async () => {
+    mocks.addArtist.mockImplementation(async () => { rows[0].status = 'rejected'; rows[0].updatedAt = new Date(now + 10); });
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
+    expect(response.status).toBe(409); expect(response.body.outcomes[0].state).toBe('uncertain'); expect(rows[0].status).toBe('rejected');
+  });
+  it('does not announce an existing artist as a new addition', async () => {
+    mocks.addArtist.mockResolvedValue({ alreadyInLibrary: true });
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
+    expect(response.body.outcomes[0].state).toBe('already-in-library'); expect(mocks.notify).not.toHaveBeenCalled();
+    expect(mocks.log.mock.calls[0][2]).toContain('already in Lidarr');
+  });
+  it('normalizes a stored canonical artist identity before provider acquisition', async () => {
+    const lower = 'abcdefab-1234-4234-8234-123456abcdef'; rows[0].mbid = lower.toUpperCase();
+    const response = await request(app).put('/api/imports/review/1').send({ status: 'approved' });
+    expect(response.body.outcomes[0].state).toBe('added'); expect(mocks.addArtist.mock.calls[0][0]).toBe(lower); expect(rows[0].mbid).toBe(lower);
+  });
+  it('keeps successful acquisition truthful when logging fails', async () => {
+    mocks.log.mockRejectedValue(new Error('logs unavailable'));
+    const response = await bulk([1, 2], 'approved');
+    expect(response.body).toMatchObject({ added: 2, failed: 0 });
+    expect(rows.every(row => row.status === 'approved')).toBe(true);
   });
 });

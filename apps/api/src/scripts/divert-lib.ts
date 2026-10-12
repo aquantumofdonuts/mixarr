@@ -1,9 +1,6 @@
 /**
- * divert-lib.ts — shared core for divert-album.ts (per-track, called by Glen) and
- * divert-lidarr-queue.ts (batch, for sweeping an existing Lidarr queue backlog). See
- * divert-album.ts for the full rationale — this just factors out the one piece both
- * need: try Soulseek via the existing SlskdSubscriptionProcessor, then record a
- * soulseek_diversions row regardless of outcome so the 30-day sweep job can act on it.
+ * Try Soulseek through SlskdSubscriptionProcessor for a Lidarr album.
+ * Record every outcome in soulseek_diversions for the scheduled sweep.
  */
 import { PrismaClient } from "@prisma/client";
 import { SlskdService } from "../services/slskd.js";

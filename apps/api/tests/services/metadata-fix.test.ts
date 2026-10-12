@@ -666,7 +666,6 @@ describe('MetadataFixService', () => {
 
         // Should only call getJobStatus once at the start to cache the jobId
         // (plus cancel key checks which are separate)
-        // Previously it would call getJobStatus 3 times per artist
         expect(getJobStatusCalls).toBe(1);
         
         // Verify all status updates use the cached jobId

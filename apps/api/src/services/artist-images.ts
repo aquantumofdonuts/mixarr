@@ -1,10 +1,7 @@
 /**
- * Cached artist image lookup.
- *
- * Drop-in replacement for the uncached fetchDeezerArtistImages():
- * Redis-backed (7-day positive TTL, 1-hour negative TTL), deduplicates
- * names that normalize identically, and bounds Deezer concurrency so a
- * 500-row page cannot burst-exhaust the public API quota.
+ * Cached artist image lookup with a seven-day positive TTL and one-hour
+ * negative TTL. Deduplicate normalized names and bound Deezer concurrency
+ * to limit requests from large pages.
  */
 
 import { fetchDeezerArtistImage } from './deezer.js';
@@ -21,9 +18,7 @@ import { mapWithConcurrency } from '../lib/concurrency.js';
 const IMAGE_FETCH_CONCURRENCY = 5;
 
 /**
- * Normalize an artist name for cache keys and deduplication.
- * Must stay in sync with FeedService.normalizeName (Task 4 makes
- * FeedService import this one).
+ * Normalize artist names for cache keys and deduplication.
  */
 export function normalizeArtistName(name: string): string {
   return name
@@ -33,9 +28,8 @@ export function normalizeArtistName(name: string): string {
 }
 
 /**
- * Resolve image URLs for a list of artist names.
- * Returns a Map keyed by the ORIGINAL input names (same contract as
- * fetchDeezerArtistImages) so call sites can swap imports 1:1.
+ * Resolve image URLs keyed by the original input names, matching
+ * the fetchDeezerArtistImages contract.
  */
 export async function getArtistImages(
   artistNames: string[],

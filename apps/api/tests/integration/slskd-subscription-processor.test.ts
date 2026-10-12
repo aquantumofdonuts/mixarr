@@ -39,7 +39,7 @@ describe("SlskdSubscriptionProcessor - Per-File Download Model", () => {
     );
   });
 
-  // IMPORTANT FIX #6: Add cleanup
+  // Clean up processor resources after each test.
   afterEach(async () => {
     if (processor) {
       await processor.close();

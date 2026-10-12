@@ -1,8 +1,5 @@
 /**
- * Subscription Presets
- * 
- * Complete library of preset subscription configurations.
- * Extracted from routes/subscriptions.ts for maintainability.
+ * Preset subscription configurations.
  */
 
 export interface SubscriptionPreset {

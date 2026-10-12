@@ -148,6 +148,13 @@ describe('Scheduler Service', () => {
       });
     });
 
+    it('should register the daily constellation orbit re-wake job', async () => {
+      await initializeScheduler();
+
+      const expressions = vi.mocked(CronJob).mock.calls.map((c) => c[0]);
+      expect(expressions).toContain('0 4 * * *');
+    });
+
     it('should query active import sources with schedules', async () => {
       await initializeScheduler();
 
@@ -366,6 +373,21 @@ describe('Scheduler Service', () => {
   // ── startDataRetentionJob ───────────────────────────────────────────────
 
   describe('startDataRetentionJob', () => {
+    it('preserves active claims and recent decision revisions during retention', async () => {
+      const now = new Date('2026-10-08T00:00:00.000Z').getTime();
+      vi.spyOn(Date, 'now').mockReturnValue(now);
+      startDataRetentionJob();
+      const retentionCall = vi.mocked(CronJob).mock.calls.find(call => call[0] === '0 3 * * *');
+      await (retentionCall![1] as Function)();
+      expect(prisma.subscriptionResult.deleteMany).toHaveBeenCalledWith({
+        where: {
+          createdAt: { lt: expect.any(Date) },
+          status: { not: 'adding' },
+          OR: [{ processedAt: null }, { processedAt: { lt: new Date(now - 120_000) } }],
+        },
+      });
+    });
+
     it('should create a CronJob for daily data retention cleanup', () => {
       startDataRetentionJob();
 

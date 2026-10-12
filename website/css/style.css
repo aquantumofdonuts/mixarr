@@ -248,7 +248,7 @@ img {
 .slides-container {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 36 / 25;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: var(--shadow);
@@ -411,7 +411,7 @@ img {
 
 .feature-img {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 36 / 25;
   overflow: hidden;
   background: var(--bg-primary);
 }
@@ -456,7 +456,7 @@ img {
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 36 / 25;
   background: var(--bg-card);
   border: 1px solid var(--border);
   transition: all var(--transition);

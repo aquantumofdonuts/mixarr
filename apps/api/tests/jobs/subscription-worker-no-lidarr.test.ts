@@ -22,16 +22,9 @@ import {
 } from '../utils/fixtures.js';
 
 /**
- * These tests validate the expected behavior when Lidarr is not configured.
- * 
- * Due to the subscription-worker's architecture (internal processSubscription function
- * with many module-level dependencies), we test the logic through behavioral expectations:
- * 
- * 1. The worker should NOT throw 'No active Lidarr connection' error
- * 2. Preview mode should work - just records results without Lidarr
- * 3. Queue mode should work - adds to review queue without Lidarr
- * 4. Auto mode should degrade to queue mode with skipReason 'no_lidarr_connection'
- * 5. Library dedup check should be skipped when lidarrCache is null
+ * Behavioral simulations without a Lidarr connection; these tests do not invoke
+ * processSubscription. Preview and queue handling remain available, auto mode
+ * falls back to the queue, and library deduplication requires a cache.
  */
 describe('Subscription Worker - No Lidarr Connection Logic', () => {
   let mockPrisma: ReturnType<typeof createMockPrisma>;
@@ -71,10 +64,9 @@ describe('Subscription Worker - No Lidarr Connection Logic', () => {
 
   describe('Lidarr Optional Logic', () => {
     it('should make lidarr and lidarrCache nullable when no connection', () => {
-      // This tests the NEW behavior we're implementing
       const lidarrConn = null; // No Lidarr connection
       
-      // The new code pattern:
+      // Keep the service and cache nullable without a connection.
       let lidarr: unknown = null;
       let lidarrCache: unknown = null;
 
@@ -109,7 +101,7 @@ describe('Subscription Worker - No Lidarr Connection Logic', () => {
       const lidarrCache: ReturnType<typeof createMockLidarrCache> | null = null;
       const artist = { name: 'Test Artist', mbid: 'mbid-123' };
 
-      // The NEW pattern: check if lidarrCache exists before calling exists()
+      // Require a library cache before checking artist membership
       let isInLibrary = false;
       if (lidarrCache && await lidarrCache.exists({ name: artist.name, mbid: artist.mbid })) {
         isInLibrary = true;
@@ -152,7 +144,7 @@ describe('Subscription Worker - No Lidarr Connection Logic', () => {
       // Simulate the review item creation
       const mockFindOrCreateReviewItem = vi.fn().mockResolvedValue({ created: true, item: { id: 1 } });
 
-      // Simulate the new auto_add degradation logic
+      // Simulate auto-add fallback without Lidarr
       if (resultHandling === 'auto_add') {
         const sourcesArray = artist.source.includes(',') ? artist.source.split(',') : [artist.source];
 

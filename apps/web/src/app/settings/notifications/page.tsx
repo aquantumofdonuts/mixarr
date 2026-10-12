@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ConfirmDialog, EmptyState, Skeleton } from '@/components/ui';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
-import { Modal } from '@/components/ui/modal';
+import { Modal, ModalFooter } from '@/components/ui/modal';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PageHeader } from '@/components/layout/page-header';
 import { api } from '@/lib/api';
@@ -23,7 +23,7 @@ import TestTube from 'lucide-react/dist/esm/icons/test-tube';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import Webhook from 'lucide-react/dist/esm/icons/webhook';
 import X from 'lucide-react/dist/esm/icons/x';
-import Link from 'next/link';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 
 interface NotificationChannel {
   id: number;
@@ -34,6 +34,8 @@ interface NotificationChannel {
   isActive: boolean;
   createdAt: string;
 }
+
+const SECRET_MASK = '••••••••';
 
 const channelTypeIcons: Record<string, React.ElementType> = {
   discord: MessageCircle,
@@ -51,11 +53,28 @@ const channelTypeLabels: Record<string, string> = {
   email: 'Email',
 };
 
+function isChannel(value: unknown): value is NotificationChannel {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const channel = value as NotificationChannel;
+  return Number.isSafeInteger(channel.id) && channel.id > 0 &&
+    typeof channel.type === 'string' && Object.hasOwn(channelTypeLabels, channel.type) && typeof channel.name === 'string' &&
+    typeof channel.isActive === 'boolean' && Array.isArray(channel.events) &&
+    channel.events.every(event => typeof event === 'string') && !!channel.config &&
+    typeof channel.config === 'object' && !Array.isArray(channel.config) &&
+    ['webhookUrl', 'username', 'url', 'method'].every(key => channel.config[key] == null || typeof channel.config[key] === 'string');
+}
+
 export default function NotificationsSettingsPage() {
   const { addToast } = useToast();
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [events, setEvents] = useState<NotificationEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [channelsReady, setChannelsReady] = useState(false);
+  const [eventsReady, setEventsReady] = useState(false);
+  const [channelsError, setChannelsError] = useState<string | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const channelRead = useRef(0);
+  const eventRead = useRef(0);
   const [showModal, setShowModal] = useState(false);
   const [editingChannel, setEditingChannel] = useState<NotificationChannel | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
@@ -74,30 +93,53 @@ export default function NotificationsSettingsPage() {
     isActive: true,
   });
 
-  useEffect(() => {
-    fetchChannels();
-    fetchEvents();
-  }, []);
+  const [baseline, setBaseline] = useState(form);
+  const [saving, setSaving] = useState(false);
+  const [errorField, setErrorField] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const active = useRef(false);
+  const draftVersion = useRef(0);
+  const dirty = showModal && JSON.stringify(form) !== JSON.stringify(baseline);
+  const { confirmDiscard } = useUnsavedChanges(dirty);
+  const closeModal = () => {
+    if (saving || (dirty && !confirmDiscard())) return;
+    draftVersion.current++; setShowModal(false); setError(null); setErrorField(null);
+  };
 
-  const fetchChannels = async () => {
+  const fetchChannels = useCallback(async () => {
+    const generation = ++channelRead.current;
     setLoading(true);
     const { data, error } = await api.get<NotificationChannel[]>('/api/notifications/channels');
-    if (error) {
-      addToast({ type: 'error', title: 'Failed to load channels', message: error });
+    if (!active.current || generation !== channelRead.current) return;
+    if (error || !Array.isArray(data) || !data.every(isChannel)) {
+      setChannelsError(`Failed to load channels: ${error || 'invalid response.'}`);
     } else {
-      setChannels(data || []);
+      setChannels(data); setChannelsReady(true); setChannelsError(null);
     }
     setLoading(false);
-  };
+  }, []);
 
-  const fetchEvents = async () => {
-    const { data } = await api.get<string[]>('/api/notifications/events');
-    if (data) setEvents(formatEvents(data));
-  };
+  const fetchEvents = useCallback(async () => {
+    const generation = ++eventRead.current;
+    const { data, error } = await api.get<string[]>('/api/notifications/events');
+    if (!active.current || generation !== eventRead.current) return;
+    if (error || !Array.isArray(data) || !data.every(event => typeof event === 'string')) {
+      setEventsError(`Failed to load events: ${error || 'invalid response.'}`);
+    } else {
+      setEvents(formatEvents(data)); setEventsReady(true); setEventsError(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    active.current = true;
+    void fetchChannels(); void fetchEvents();
+    return () => { active.current = false; channelRead.current++; eventRead.current++; };
+  }, [fetchChannels, fetchEvents]);
 
   const openAddModal = () => {
+    draftVersion.current++; setError(null); setErrorField(null);
     setEditingChannel(null);
-    setForm({
+    const initial: typeof form = {
       type: 'discord',
       name: '',
       webhookUrl: '',
@@ -107,33 +149,39 @@ export default function NotificationsSettingsPage() {
       headers: '',
       events: [],
       isActive: true,
-    });
+    };
+    setForm(initial); setBaseline(initial);
     setShowModal(true);
   };
 
   const openEditModal = (channel: NotificationChannel) => {
+    draftVersion.current++; setError(null); setErrorField(null);
     setEditingChannel(channel);
-    setForm({
+    const initial: typeof form = {
       type: channel.type,
       name: channel.name,
       webhookUrl: channel.config.webhookUrl || '',
       username: channel.config.username || '',
       url: channel.config.url || '',
       method: channel.config.method || 'POST',
-      headers: channel.config.headers ? JSON.stringify(channel.config.headers) : '',
+      headers: channel.config.headers === SECRET_MASK ? SECRET_MASK : channel.config.headers ? JSON.stringify(channel.config.headers) : '',
       events: channel.events,
       isActive: channel.isActive,
-    });
+    };
+    setForm(initial); setBaseline(initial);
     setShowModal(true);
   };
 
   const handleSave = async () => {
+    if (saving || !eventsReady) return;
+    setError(null); setErrorField(null);
+    const invalid = (message: string, id: string) => { setError(message); setErrorField(id); document.getElementById(id)?.focus(); };
     // Build config based on type
     let config: Record<string, any> = {};
     
     if (form.type === 'discord') {
       if (!form.webhookUrl) {
-        addToast({ type: 'error', title: 'Validation Error', message: 'Discord webhook URL is required' });
+        invalid('Discord webhook URL is required', 'channel-webhook-url');
         return;
       }
       config = {
@@ -142,18 +190,25 @@ export default function NotificationsSettingsPage() {
       };
     } else if (form.type === 'webhook') {
       if (!form.url) {
-        addToast({ type: 'error', title: 'Validation Error', message: 'Webhook URL is required' });
+        invalid('Webhook URL is required', 'channel-url');
         return;
+      }
+      let headers;
+      if (editingChannel?.config.headers === SECRET_MASK && form.headers === SECRET_MASK && form.headers === baseline.headers) {
+        headers = SECRET_MASK;
+      } else if (form.headers) {
+        try { headers = JSON.parse(form.headers); if (!headers || Array.isArray(headers) || typeof headers !== 'object' || Object.values(headers).some(value => typeof value !== 'string')) throw new Error(); }
+        catch { invalid('Headers must be a JSON object with string values.', 'channel-headers'); return; }
       }
       config = {
         url: form.url,
         method: form.method,
-        headers: form.headers ? JSON.parse(form.headers) : undefined,
+        headers,
       };
     }
 
     if (form.events.length === 0) {
-      addToast({ type: 'error', title: 'Validation Error', message: 'Select at least one event' });
+      invalid('Select at least one event', 'channel-first-event');
       return;
     }
 
@@ -165,14 +220,20 @@ export default function NotificationsSettingsPage() {
       isActive: form.isActive,
     };
 
+    const submitted = { ...form };
+    const version = draftVersion.current;
+    setSaving(true);
     const { error } = editingChannel
       ? await api.put(`/api/notifications/channels/${editingChannel.id}`, payload)
       : await api.post('/api/notifications/channels', payload);
 
+    if (!active.current || version !== draftVersion.current) return;
+    setSaving(false);
     if (error) {
-      addToast({ type: 'error', title: 'Failed to save channel', message: error });
+      setError(error);
     } else {
       addToast({ type: 'success', title: editingChannel ? 'Channel updated' : 'Channel created' });
+      setBaseline(submitted);
       setShowModal(false);
       fetchChannels();
     }
@@ -183,6 +244,7 @@ export default function NotificationsSettingsPage() {
     if (confirmTarget === null) return;
 
     const { error } = await api.delete(`/api/notifications/channels/${confirmTarget}`);
+    if (!active.current) return;
     if (error) {
       addToast({ type: 'error', title: 'Failed to delete channel', message: error });
     } else {
@@ -195,8 +257,8 @@ export default function NotificationsSettingsPage() {
   const handleTest = async (id: number) => {
     setTestingId(id);
     const { error } = await api.post(`/api/notifications/channels/${id}/test`);
+    if (!active.current) return;
     setTestingId(null);
-    
     if (error) {
       addToast({ type: 'error', title: 'Test failed', message: error });
     } else {
@@ -217,6 +279,7 @@ export default function NotificationsSettingsPage() {
     const { error } = await api.put(`/api/notifications/channels/${channel.id}`, {
       isActive: !channel.isActive,
     });
+    if (!active.current) return;
     if (error) {
       addToast({ type: 'error', title: 'Failed to update channel', message: error });
     } else {
@@ -228,7 +291,7 @@ export default function NotificationsSettingsPage() {
     <>
       <nav aria-label="Breadcrumb" className="mb-4">
         <ol className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <li><Link href="/settings" className="hover:text-foreground transition-colors">Settings</Link></li>
+          <li><a href="/settings" className="hover:text-foreground transition-colors">Settings</a></li>
           <li className="text-muted-foreground/50">/</li>
           <li className="text-foreground font-medium">Notifications</li>
         </ol>
@@ -237,13 +300,15 @@ export default function NotificationsSettingsPage() {
         title="Notifications"
         description="Configure notification channels for Mixarr events"
       >
-        <Button onClick={openAddModal}>
+        <Button onClick={openAddModal} disabled={!channelsReady || !eventsReady}>
           <Plus className="w-4 h-4 mr-2" />
           Add Channel
         </Button>
       </PageHeader>
 
       <div className="p-6 space-y-6">
+        {channelsError && <div><p role="alert">{channelsError}</p><Button variant="outline" onClick={fetchChannels}>Retry loading channels</Button></div>}
+        {eventsError && <div><p role="alert">{eventsError}</p><Button variant="outline" onClick={fetchEvents}>Retry loading events</Button></div>}
         {loading ? (
           <div className="space-y-4">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -256,12 +321,12 @@ export default function NotificationsSettingsPage() {
               </div>
             ))}
           </div>
-        ) : channels.length === 0 ? (
+        ) : !channelsReady ? null : channels.length === 0 ? (
           <EmptyState
             icon={Bell}
             title="No Notification Channels"
             description="Add a notification channel to receive alerts about subscriptions, artist additions, and more."
-            action={{ label: 'Add Your First Channel', onClick: openAddModal }}
+            action={eventsReady ? { label: 'Add Your First Channel', onClick: openAddModal } : undefined}
           />
         ) : (
           <div className="grid gap-4">
@@ -342,13 +407,14 @@ export default function NotificationsSettingsPage() {
       />
 
       {/* Add/Edit Modal */}
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingChannel ? 'Edit Channel' : 'Add Notification Channel'}>
-        <div className="space-y-4">
+      <Modal isOpen={showModal} onClose={closeModal} title={editingChannel ? 'Edit Channel' : 'Add Notification Channel'}>
+        <fieldset disabled={saving} className="space-y-4">
+          <p role={error ? "alert" : "status"} className={error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>{error || (saving ? "Saving channel…" : dirty ? "Unsaved channel changes" : "Channel draft unchanged")}</p>
           {/* Channel Type */}
           {!editingChannel && (
             <div>
-              <label className="text-sm font-medium">Channel Type</label>
-              <Select
+              <label htmlFor="channel-type" className="text-sm font-medium">Channel Type</label>
+              <Select id="channel-type"
                 value={form.type}
                 onChange={(e) => setForm({ ...form, type: e.target.value as NotificationChannel['type'] })}
                 options={[
@@ -362,8 +428,8 @@ export default function NotificationsSettingsPage() {
 
           {/* Name */}
           <div>
-            <label className="text-sm font-medium">Name</label>
-            <Input
+            <label htmlFor="channel-name" className="text-sm font-medium">Name</label>
+            <Input id="channel-name"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder={`My ${channelTypeLabels[form.type]}`}
@@ -374,8 +440,8 @@ export default function NotificationsSettingsPage() {
           {form.type === 'discord' && (
             <>
               <div>
-                <label className="text-sm font-medium">Webhook URL</label>
-                <Input
+                <label htmlFor="channel-webhook-url" className="text-sm font-medium">Webhook URL</label>
+                <Input id="channel-webhook-url" error={errorField === "channel-webhook-url" ? error || undefined : undefined}
                   value={form.webhookUrl}
                   onChange={(e) => setForm({ ...form, webhookUrl: e.target.value })}
                   placeholder="https://discord.com/api/webhooks/..."
@@ -385,8 +451,8 @@ export default function NotificationsSettingsPage() {
                 </p>
               </div>
               <div>
-                <label className="text-sm font-medium">Bot Username (optional)</label>
-                <Input
+                <label htmlFor="channel-username" className="text-sm font-medium">Bot Username (optional)</label>
+                <Input id="channel-username"
                   value={form.username}
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
                   placeholder="Mixarr"
@@ -399,16 +465,16 @@ export default function NotificationsSettingsPage() {
           {form.type === 'webhook' && (
             <>
               <div>
-                <label className="text-sm font-medium">URL</label>
-                <Input
+                <label htmlFor="channel-url" className="text-sm font-medium">URL</label>
+                <Input id="channel-url" error={errorField === "channel-url" ? error || undefined : undefined}
                   value={form.url}
                   onChange={(e) => setForm({ ...form, url: e.target.value })}
                   placeholder="https://..."
                 />
               </div>
               <div>
-                <label className="text-sm font-medium">Method</label>
-                <Select
+                <label htmlFor="channel-method" className="text-sm font-medium">Method</label>
+                <Select id="channel-method"
                   value={form.method}
                   onChange={(e) => setForm({ ...form, method: e.target.value })}
                   options={[
@@ -418,8 +484,8 @@ export default function NotificationsSettingsPage() {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium">Headers (JSON, optional)</label>
-                <Input
+                <label htmlFor="channel-headers" className="text-sm font-medium">Headers (JSON, optional)</label>
+                <Input id="channel-headers" error={errorField === "channel-headers" ? error || undefined : undefined}
                   value={form.headers}
                   onChange={(e) => setForm({ ...form, headers: e.target.value })}
                   placeholder='{"Authorization": "Bearer token"}'
@@ -432,9 +498,9 @@ export default function NotificationsSettingsPage() {
           <div>
             <label className="text-sm font-medium mb-2 block">Events to Notify</label>
             <div className="space-y-2 bg-muted/50 rounded-container p-3">
-              {events.map(event => (
+              {events.map((event, index) => (
                 <label key={event.value} className="flex items-start gap-3 cursor-pointer">
-                  <Checkbox
+                  <Checkbox id={index === 0 ? "channel-first-event" : undefined} aria-invalid={index === 0 && errorField === "channel-first-event" ? true : undefined}
                     checked={form.events.includes(event.value)}
                     onCheckedChange={() => toggleEvent(event.value)}
                   />
@@ -457,15 +523,15 @@ export default function NotificationsSettingsPage() {
           </label>
 
           {/* Actions */}
-          <div className="flex justify-end gap-2 pt-4">
-            <Button variant="outline" onClick={() => setShowModal(false)}>
+          <ModalFooter>
+            <Button variant="outline" onClick={closeModal} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={handleSave}>
-              {editingChannel ? 'Save Changes' : 'Create Channel'}
+            <Button onClick={handleSave} disabled={saving || !eventsReady}>
+              {saving ? 'Saving…' : editingChannel ? 'Save channel changes' : 'Create Channel'}
             </Button>
-          </div>
-        </div>
+          </ModalFooter>
+        </fieldset>
       </Modal>
     </>
   );

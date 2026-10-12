@@ -333,3 +333,5 @@ export interface GlobalSettings {
   setupCompleted: boolean;
   registrationEnabled: boolean;
 }
+
+export type { AcquisitionState, AcquisitionOutcome, ArtistSourceRecord, ArtistDetail, UndoDecisionResponse, LabelArtistPage } from './artist.js';

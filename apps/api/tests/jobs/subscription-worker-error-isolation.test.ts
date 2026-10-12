@@ -1,17 +1,6 @@
 /**
- * Subscription Worker - Per-Artist Error Isolation Tests
- *
- * Regression tests for a real production incident: a transient MusicBrainz
- * "503 Service Unavailable" while resolving one artist's MBID aborted the
- * *entire* subscription run (the whole loop over `artists` ran with no
- * per-iteration try/catch, so the error propagated to the run-level catch).
- * The run was then recorded with `lastRunCount: 0`, hiding any artists that
- * had already been added successfully earlier in the same run.
- *
- * These tests validate the fixed behavior via the same "simulate the logic"
- * approach used by subscription-worker-no-lidarr.test.ts, since
- * processSubscription has too many module-level dependencies to invoke
- * directly in isolation.
+ * Behavioral simulations of per-artist error isolation and partial-progress
+ * reporting on run-fatal errors. These tests do not invoke processSubscription.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -41,7 +30,7 @@ describe('Subscription Worker - Per-Artist Error Isolation', () => {
     const runId = 1;
     const subscriptionId = 1;
 
-    // Mirrors the fixed per-artist loop body in subscription-worker.ts:
+    // Simulate per-artist errors while continuing the remaining artists:
     // each MusicBrainz lookup has its own try/catch, and the whole artist's
     // processing is additionally wrapped so ANY unexpected error just fails
     // that one artist instead of throwing out of the loop.
@@ -103,9 +92,7 @@ describe('Subscription Worker - Per-Artist Error Isolation', () => {
   });
 
   it('run-level failure handler should report real partial progress instead of hardcoded 0', () => {
-    // Mirrors the fixed outer catch: added/skipped/queued are hoisted above
-    // the try block so a genuinely fatal error (not a per-artist one, which
-    // is now isolated) still reports what actually happened before it hit.
+    // Preserve counters when a run-fatal error occurs.
     let added = 3; // 3 artists were successfully added before the fatal error
     let queued = 1;
     let skipped = 2;
@@ -120,8 +107,7 @@ describe('Subscription Worker - Per-Artist Error Isolation', () => {
       lastRunCount: added + queued,
     };
 
-    // Before the fix these were unconditionally 0, making a partially
-    // successful run indistinguishable from one that added nothing at all.
+    // Include successful additions and queued artists in partial progress.
     expect(runUpdateData.addedCount).toBe(3);
     expect(subscriptionUpdateData.lastRunCount).toBe(4);
     expect(subscriptionUpdateData.lastRunCount).not.toBe(0);

@@ -124,7 +124,7 @@ describe('Public Playlist Import', () => {
     });
 
     it('fetches and parses playlist data from new Spotify format (title/subtitle)', async () => {
-      // New Spotify embed format uses title for song name and subtitle for artist
+      // Spotify embed data uses title for song name and subtitle for artist
       const mockHtml = `
         <!DOCTYPE html>
         <html>

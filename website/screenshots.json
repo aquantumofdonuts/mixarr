@@ -1,0 +1,51 @@
+{
+  "sourceCommit": "d24565c0def955c18576feb1dda3bbcef712e858",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "theme": "light",
+  "data": "Fictional, intercepted API fixtures. UI presentation only; no provider authentication, connection tests or Lidarr writes.",
+  "captures": [
+    {
+      "file": "img/mixarr-discover.png",
+      "route": "/"
+    },
+    {
+      "file": "img/mixarr-dashboard.png",
+      "route": "/"
+    },
+    {
+      "file": "img/mixarr-artist-inspector.png",
+      "route": "/?artist=11111111-1111-4111-8111-000000000001"
+    },
+    {
+      "file": "img/mixarr-subscriptions.png",
+      "route": "/subscriptions"
+    },
+    {
+      "file": "img/mixarr-subscription-results.png",
+      "route": "/subscriptions/11?tab=results"
+    },
+    {
+      "file": "img/mixarr-connections.png",
+      "route": "/connections"
+    },
+    {
+      "file": "img/mixarr-user-management.png",
+      "route": "/users"
+    },
+    {
+      "file": "img/mixarr-search.png",
+      "route": "/search?q=Harbor&sources=deezer"
+    },
+    {
+      "file": "img/mixarr-review-queue.png",
+      "route": "/queue"
+    },
+    {
+      "file": "img/mixarr-constellation.png",
+      "route": "/constellation?seed=11111111-1111-4111-8111-000000000001&focus=1"
+    }
+  ]
+}

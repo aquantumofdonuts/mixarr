@@ -1,150 +1,119 @@
 'use client';
 
-import { useMemo } from 'react';
+import type { ArtistAddOptions } from '@/components/artists/AddArtistOptions';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/layout/page-header';
 import { DashboardTiles } from '@/components/feed/DashboardTiles';
-import { StatsBar } from '@/components/feed/StatsBar';
 import { FeedGrid } from '@/components/feed/FeedGrid';
-import { Skeleton } from '@/components/ui';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { useFeed, useApproveFeedItem, useDismissFeedItem } from '@/lib/hooks';
+import { useListContext } from '@/hooks/useListContext';
+import { updateQuery } from '@/lib/list-state';
+import { useFeed, useApproveFeedItem, useDismissFeedItem, useRestoreDecision, type FeedItem } from '@/lib/hooks';
 
 export default function Home() {
   const { addToast } = useToast();
-  
-  const {
-    data,
-    isLoading,
-    isFetchingNextPage,
-    hasNextPage,
-    fetchNextPage,
-    error,
-    refetch,
-  } = useFeed();
-
-  const approveMutation = useApproveFeedItem();
-  const dismissMutation = useDismissFeedItem();
-
-  // Flatten pages into single items array
+  const params = useSearchParams(), pathname = usePathname(), router = useRouter();
+  const view = params.get('view') === 'artwork' ? 'artwork' : 'list';
+  const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, error, refetch } = useFeed();
+  const { remember } = useListContext({ ready: !!data && !isLoading });
+  const approveMutation = useApproveFeedItem(), dismissMutation = useDismissFeedItem(), restoreMutation = useRestoreDecision('feed');
+  // session-only recent outcomes keep feedback visible without changing server offsets.
+  const [recent, setRecent] = useState<FeedItem[]>([]);
+  const [loadingIds, setLoadingIds] = useState(new Set<string>());
+  const pending = useRef(new Set<string>());
+  const live = useRef(true);
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   const items = useMemo(() => {
-    if (!data?.pages) return [];
-    return data.pages.flatMap((page) => page.items);
-  }, [data]);
-
-  // Get stats from first page (they're the same across pages)
-  const stats = data?.pages[0]?.stats ?? { pending: 0, addedToday: 0 };
-
-  // Track which items have pending mutations
-  const loadingIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (approveMutation.isPending && approveMutation.variables) {
-      ids.add(approveMutation.variables);
-    }
-    if (dismissMutation.isPending && dismissMutation.variables) {
-      ids.add(dismissMutation.variables);
-    }
-    return ids;
-  }, [approveMutation.isPending, approveMutation.variables, dismissMutation.isPending, dismissMutation.variables]);
-
-  const handleApprove = async (id: string) => {
-    // Find the item to get artist name for error message
-    const item = items.find((i) => i.id === id);
-    const artistName = item?.artistName || 'Artist';
-    
+    const rows = new Map((data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item]));
+    for (const item of recent) rows.set(item.id, { ...rows.get(item.id), ...item });
+    return [...rows.values()];
+  }, [data, recent]);
+  const truncation = data?.pages[0]?.truncation;
+  function keep(item: FeedItem) {
+    if (live.current) setRecent(previous => [...previous.filter(row => row.id !== item.id), item].slice(-20));
+  }
+  function begin(id: string) {
+    if (pending.current.has(id)) return false;
+    pending.current.add(id); setLoadingIds(new Set(pending.current)); return true;
+  }
+  function finish(id: string) {
+    pending.current.delete(id);
+    if (live.current) setLoadingIds(new Set(pending.current));
+  }
+  async function handleApprove(id: string, options?: ArtistAddOptions) {
+    const item = items.find(row => row.id === id);
+    if (!item || !begin(id)) return;
+    keep({ ...item, status: 'adding', acquisitionState: 'adding', acquisitionMessage: 'Waiting for Lidarr confirmation…' });
     try {
-      const result = await approveMutation.mutateAsync(id);
-      addToast({ 
-        type: 'success', 
-        title: 'Added to Lidarr', 
-        message: `${result.artistName} added successfully` 
-      });
-    } catch {
-      addToast({ 
-        type: 'error', 
-        title: 'Failed to Add', 
-        message: `Could not add ${artistName}` 
-      });
-    }
-  };
-
-  const handleDismiss = async (id: string) => {
-    // Find the item to get artist name for error message
-    const item = items.find((i) => i.id === id);
-    const artistName = item?.artistName || 'Artist';
-    
+      const result = await approveMutation.mutateAsync(options ? { id, options } : id);
+      if (!live.current) return;
+      const confirmed = result.outcome.state === 'added' || result.outcome.state === 'already-in-library';
+      keep({ ...item, status: confirmed ? 'added' : 'failed', acquisitionState: result.outcome.state, acquisitionMessage: result.outcome.message });
+      if (confirmed) addToast({ type: 'success', title: result.outcome.state === 'already-in-library' ? 'Already in Lidarr' : confirmed ? 'Added to Lidarr' : 'Addition unconfirmed', message: result.outcome.message });
+      if (!confirmed) throw Object.assign(new Error(result.outcome.message), { outcomeHandled: true });
+    } catch (failure) {
+      if (!live.current) return;
+      const error = failure as Error & { code?: string; outcomeHandled?: boolean };
+      const state = error.code === 'IDENTITY_REQUIRED' ? 'identity-required' : error.code === 'CONNECTION_REQUIRED' ? 'connection-required' : error.code === 'IN_PROGRESS' ? 'adding' : 'uncertain';
+      if (error.outcomeHandled) { /* The returned provider outcome is already retained above. */ }
+      else if (state === 'adding') setRecent(previous => previous.filter(row => row.id !== id));
+      else keep({ ...item, status: 'failed', acquisitionState: state, acquisitionMessage: error.message });
+      addToast({ type: 'error', title: 'Addition unconfirmed', message: error.message });
+      throw failure;
+    } finally { finish(id); }
+  }
+  async function handleDismiss(id: string) {
+    const item = items.find(row => row.id === id);
+    if (!item || !begin(id)) return;
     try {
       const result = await dismissMutation.mutateAsync(id);
-      addToast({ 
-        type: 'info', 
-        title: 'Dismissed', 
-        message: `${result.artistName} removed from feed` 
-      });
-    } catch {
-      addToast({ 
-        type: 'error', 
-        title: 'Failed to Dismiss', 
-        message: `Could not dismiss ${artistName}` 
-      });
-    }
-  };
-
-  const handleLoadMore = () => {
-    if (!isFetchingNextPage && hasNextPage) {
-      fetchNextPage();
-    }
-  };
-
-  // Initial loading state (fixes DF-007)
-  if (isLoading && items.length === 0) {
-    return (
-      <>
-        <PageHeader title="Discovery Feed" description="Review and approve artist recommendations" />
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="rounded-container border bg-card overflow-hidden">
-              <Skeleton className="aspect-square w-full" />
-              <div className="p-3 space-y-2">
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-3 w-1/2" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </>
-    );
+      if (!live.current) return;
+      setRecent(previous => previous.filter(row => row.id !== id));
+      const expires = Math.min(Date.now() + 10_000, Date.parse(result.undoExpiresAt));
+      let used = false, restoring = false;
+      async function undo() {
+        if (used || restoring || !live.current) return;
+        if (!Number.isFinite(expires) || Date.now() >= expires) {
+          used = true; addToast({ type: 'info', title: 'Undo expired', message: 'The dismissal remains saved.' }); return;
+        }
+        restoring = true;
+        try {
+          await restoreMutation.mutateAsync(result.undoToken);
+          used = true;
+          if (!live.current) return;
+          addToast({ type: 'info', title: 'Restored', message: `${item!.artistName} returned to discovery` });
+        } catch (failure) {
+          if (!live.current) return;
+          const remaining = expires - Date.now();
+          addToast({ type: 'error', title: 'Undo failed', message: (failure as Error).message,
+            ...(remaining > 0 ? { duration: remaining, action: { label: 'Retry Undo', onClick: undo } } : {}) });
+        } finally { restoring = false; }
+      }
+      addToast({ type: 'info', title: 'Dismissed', message: `${result.artistName} removed from discovery`, duration: Math.max(0, expires - Date.now()),
+        ...(Number.isFinite(expires) && expires > Date.now() ? { action: { label: 'Undo', onClick: undo } } : {}) });
+    } catch (failure) {
+      if (live.current) addToast({ type: 'error', title: 'Failed to dismiss', message: (failure as Error).message });
+    } finally { finish(id); }
   }
-
-  if (error) {
-    return (
-      <>
-        <PageHeader title="Discovery Feed" description="Review and approve artist recommendations" />
-        <div className="text-center py-16">
-          <p className="text-destructive mb-4">Failed to load feed. Please try again.</p>
-          <button
-            onClick={() => refetch()}
-            className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-container transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </>
-    );
+  function handleLoadMore() {
+    if (!isFetchingNextPage && hasNextPage && !error) void fetchNextPage();
   }
-
-  return (
-    <>
-      <PageHeader title="Discovery Feed" description="Review and approve artist recommendations" />
-      <DashboardTiles />
-      <StatsBar pending={stats.pending} addedToday={stats.addedToday} />
-      <FeedGrid
-        items={items}
-        onApprove={handleApprove}
-        onDismiss={handleDismiss}
-        onLoadMore={handleLoadMore}
-        hasMore={hasNextPage ?? false}
-        isLoading={isFetchingNextPage}
-        loadingIds={loadingIds}
-      />
-    </>
-  );
+  function changeView(next: 'list' | 'artwork') {
+    router.replace(`${pathname}${updateQuery(new URLSearchParams(params.toString()), { view: next })}`, { scroll: false });
+  }
+  return <>
+    <PageHeader title="Discovery" description="Review artists found through your sources">
+      <div role="group" aria-label="Discovery view" className="flex gap-1">
+        <Button variant="outline" aria-pressed={view === 'list'} onClick={() => changeView('list')}>List</Button>
+        <Button variant="outline" aria-pressed={view === 'artwork'} onClick={() => changeView('artwork')}>Artwork</Button>
+      </div>
+    </PageHeader>
+    <DashboardTiles />
+    {error && <div role="alert" className="mb-4 border p-3 text-sm"><p>{items.length ? 'Some discoveries are unavailable. Existing discoveries remain visible.' : 'Discovery is unavailable. Please try again.'}</p><Button variant="outline" className="mt-2" onClick={() => void refetch()}>Retry discovery</Button></div>}
+    {truncation?.aggregationTruncated && <p role="status" className="mb-3 text-sm text-muted-foreground">Showing a capped discovery sample from <span className="font-mono">{truncation.totalBeforeAggregationCap}</span> eligible source records. More records may contain additional artists.</p>}
+    {(!error || items.length > 0) && <FeedGrid items={items} onApprove={handleApprove} onDismiss={handleDismiss} onLoadMore={handleLoadMore}
+      hasMore={!!hasNextPage && !error} isLoading={isLoading || isFetchingNextPage} loadingIds={loadingIds} view={view} onOpen={remember} />}
+  </>;
 }

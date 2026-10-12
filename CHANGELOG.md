@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+---
+
+## [v3.0.0] - 2026-10-11
+
+A compact music catalog, explicit acquisition outcomes, and credited collaboration exploration.
+This is a major release because custom API clients must adapt to the contracts below.
+
+### Added
+- **Compact music catalog:** artwork rows, source provenance, persistent list context, URL-backed filters, page-scoped selection, and responsive light/dark layouts across Discovery, Search, Library, Subscriptions, Queue, Connections, and Settings.
+- **Shared artist inspector:** inspect MusicBrainz identity, confirmed library membership, recorded discovery sources, and release chronology without losing your place in a list.
+- **Collaboration Constellation:** explore credited musicians, producers, songwriters, and engineers; filter roles, follow collaboration paths, inspect releases, and request an artist or individual album in Lidarr. The visible graph retains the hard **300-person cap**.
+- **Constellation playback and data sources:** Deezer previews with YouTube search links as fallback; library ownership is a badge, not library streaming. Live Discogs is the default. An optional local Discogs dump index adds offline credit lookup and genre coloring.
+- **Bounded orbit warming:** recent Last.fm/ListenBrainz artists and the Lidarr library seed background crawls. Configurable edge and daily live-API budgets apply to crawling and interactive expansion; exhausted daily budgets display the UTC reset time.
+
+### Changed
+- **Explicit acquisition outcomes:** pending, confirmed added, already in library, failed, uncertain, and identity-required outcomes stay distinct. Missing identities require an explicit choice; a timeout does not imply a successful add. Selected quality profiles, folders, and monitoring options accompany supported add actions.
+- **Safer decisions:** dismiss/reject actions offer server-validated, revision-bound Undo. Conflicting decisions and concurrent acquisition claims are checked before changes are committed.
+- **Queue and label pagination:** review queues support search and stable cursors; label browsing tracks releases traversed separately from unique artists loaded. Bulk actions act on the selected page rather than implying all results.
+- **Connection and settings feedback:** connection attempts and authentication state are reported separately; settings validate fields and guard unsaved changes.
+- **Project website:** refreshed capability descriptions, Mixarr branding, and screenshots captured with Playwright from fictional demo records.
+
+### Fixed
+- Prevent stale requests, cached data, and feedback from crossing authenticated-user or artist boundaries.
+- Improve keyboard focus, dialog cleanup, narrow layouts, contrast, zoom support, and persistent-player spacing.
+- Keep review items recoverable when acquisition cannot be confirmed, enforce ownership on affected result/download mutations, and preserve partial subscription-run counts.
+- Preserve unmanaged tables during upgrades with checked Prisma migration baselines; stop startup on migration failure and wait for dependencies and restored schedules before starting queue workers or accepting requests.
+- Build and rehearse both published Docker variants in PR CI, including v2.3.5 upgrades, restart, schema-drift rejection, and fresh installation.
+- Build shared types before API compilation in Docker images and smoke CI; include the native build toolchain required by the optional SQLite credit index. CI fetches comparison history and fails on invalid diffs rather than silently skipping source lint.
+- Reject creation of unsupported Telegram, Pushover, and email notification channels instead of accepting configurations that cannot deliver. Unsupported SSO test handlers report failure.
+- Remove incomplete and nested markup delimiters from artist metadata before returning display text.
+- Replace development-history comments with functional explanations.
+
+### Breaking changes and upgrade notes
+- **Custom API clients must adapt to the acquisition contracts.** Review approvals return per-record `outcomes` and separate `added`, `alreadyInLibrary`, and `failed` counts. Bulk responses no longer provide the old `failedItems` shape. Read each outcome rather than treating HTTP 200 as confirmation that every item was added.
+- Review decision requests accept `approved` or `rejected`; setting `pending` directly is no longer supported. Restore an eligible rejection through `POST /api/imports/review/restore` with its Undo token. Bulk review requests are limited to **100 IDs**.
+- Label-artist pages expose `releasesProcessed`, `totalReleases`, and `nextReleaseOffset`; advance using the release offset rather than the number of artists returned.
+- Back up the persistent data/database before upgrading. The Prisma schema adds constellation tables; the normal deployment/startup path verifies a v2.3.5 or already-current schema, records its migration baseline, and applies checked additive migrations. Unmanaged tables are preserved. Unsupported schema drift or failed migrations stop startup and require inspection; never reset or accept data loss to bypass this guard. Keep existing data, connections, and `SESSION_SECRET`; no data reset is required. See [upgrade instructions](README.md#upgrading). The local Discogs index is optional and requires downloading and parsing the full releases dump; automatic index refresh is unavailable.
+
+### Verification limits
+- Live provider compatibility remains separate work: **C137 deferred: provider verification will be performed separately**. Automated UI captures use fictional data and do not establish provider compatibility.
+- Existing provider and security issues remain tracked in [docs/ISSUES.md](docs/ISSUES.md), including TIDAL endpoint compatibility. This release does not claim to resolve every existing integration or security finding.
+
+---
+
 ## [v2.3.5] - 2026-09-05
 
 Fixes first-run setup for every deployment that does not terminate TLS in front of Mixarr.

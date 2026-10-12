@@ -7,15 +7,6 @@ import { ProtectedLayout } from '@/components/layout/protected-layout';
 import { ServiceWorkerRegistration } from '@/lib/service-worker';
 import { OfflineIndicator } from '@/components/ui/offline-indicator';
 import './globals.css';
-import { DM_Sans } from 'next/font/google';
-
-const dmSans = DM_Sans({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-body',
-  display: 'swap',
-});
-
 export const metadata: Metadata = {
   title: 'Mixarr',
   description: 'Music discovery and import tool for Lidarr',
@@ -56,8 +47,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f8f6f3' },
-    { media: '(prefers-color-scheme: dark)', color: '#1c1b19' },
+    { media: '(prefers-color-scheme: light)', color: '#F7F8F8' },
+    { media: '(prefers-color-scheme: dark)', color: '#171A1D' },
   ],
   width: 'device-width',
   initialScale: 1,
@@ -70,7 +61,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${dmSans.variable} font-sans`}>
+      <body className="font-sans">
         <ThemeProvider
           attribute="data-theme"
           defaultTheme="system"

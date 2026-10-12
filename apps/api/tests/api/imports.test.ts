@@ -558,7 +558,7 @@ describe('Import Sources API', () => {
     it('should accept valid status', () => {
       expect(updateReviewItemSchema.safeParse({ status: 'approved' }).success).toBe(true);
       expect(updateReviewItemSchema.safeParse({ status: 'rejected' }).success).toBe(true);
-      expect(updateReviewItemSchema.safeParse({ status: 'pending' }).success).toBe(true);
+      expect(updateReviewItemSchema.safeParse({ status: 'pending' }).success).toBe(false);
     });
 
     it('should reject invalid status', () => {

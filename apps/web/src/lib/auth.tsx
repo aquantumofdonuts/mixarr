@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryFunctionContext } from '@tanstack/react-query';
 
 interface User {
   id: number;
@@ -30,6 +30,12 @@ interface AuthContextValue {
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
+export function safeReturnTo(value: string | null): string {
+  if (!value?.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) return '/';
+  const target = new URL(value, 'https://mixarr.invalid');
+  return target.origin === 'https://mixarr.invalid' ? `${target.pathname}${target.search}${target.hash}` : '/';
+}
+
 export function useAuth() {
   const context = React.useContext(AuthContext);
   if (!context) {
@@ -39,9 +45,10 @@ export function useAuth() {
 }
 
 // Auth query function - can be used outside of React components
-async function fetchAuthStatus(): Promise<AuthResponse> {
+async function fetchAuthStatus({ signal }: QueryFunctionContext): Promise<AuthResponse> {
   const res = await fetch('/api/auth/me', {
     credentials: 'include',
+    signal,
   });
   
   if (!res.ok) {
@@ -74,6 +81,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
     refetchInterval: shouldPoll ? 2000 : false, // Keep polling if API is down
   });
 
+  const [cacheActor, setCacheActor] = React.useState<number | null | undefined>(() =>
+    data && !data.apiError ? data.user?.id ?? null : undefined);
+  const actor = data && !data.apiError ? data.user?.id ?? null : cacheActor;
+  const protectedQueries = { predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] !== 'auth' };
+
+  // Hold consumers during session changes so old data cannot paint or refill a new session.
+  React.useEffect(() => {
+    if (actor === cacheActor) return;
+    let current = true;
+    void queryClient.cancelQueries({ predicate: query => query.queryKey[0] !== 'auth' }).then(() => {
+      if (!current) return;
+      queryClient.removeQueries({ predicate: query => query.queryKey[0] !== 'auth' });
+      setCacheActor(actor);
+    });
+    return () => { current = false; };
+  }, [actor, cacheActor, queryClient]);
+
   // Update polling state based on API error
   React.useEffect(() => {
     setShouldPoll(data?.apiError ?? false);
@@ -96,8 +120,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       return res.json();
     },
-    onSuccess: (data) => {
-      // Update auth cache immediately - use setupRequired from server response
+    onSuccess: async (data) => {
+      await queryClient.cancelQueries({ queryKey: ['auth'], exact: true });
+      await queryClient.cancelQueries(protectedQueries);
+      queryClient.removeQueries(protectedQueries);
+      setCacheActor(data.user?.id ?? null);
+      // Publish the authenticated actor only after protected reads have been removed.
       queryClient.setQueryData(['auth'], { 
         user: data.user, 
         setupRequired: data.setupRequired ?? false 
@@ -108,15 +136,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Logout mutation
   const logoutMutation = useMutation({
     mutationFn: async () => {
-      await fetch('/api/auth/logout', {
+      const res = await fetch('/api/auth/logout', {
         method: 'POST',
         credentials: 'include',
       });
+      if (!res.ok) throw new Error('Logout failed');
     },
-    onSuccess: () => {
-      // Clear auth cache and all other cached data
+    onSuccess: async () => {
+      await queryClient.cancelQueries({ queryKey: ['auth'], exact: true });
+      await queryClient.cancelQueries(protectedQueries);
+      queryClient.removeQueries(protectedQueries);
+      setCacheActor(null);
+      // Publish the logged-out actor after cancelling and removing protected reads.
       queryClient.setQueryData(['auth'], { user: null, setupRequired: false });
-      queryClient.invalidateQueries(); // Invalidate all queries on logout
       router.push('/login');
     },
   });
@@ -149,7 +181,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         refetchAuth,
       }}
     >
-      {children}
+      {/* Reset consumer state and detach old notification closures when the verified actor changes. */}
+      {cacheActor === actor ? <React.Fragment key={String(cacheActor)}>{children}</React.Fragment> : null}
     </AuthContext.Provider>
   );
 }

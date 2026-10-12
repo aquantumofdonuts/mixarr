@@ -45,10 +45,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
   // Declare slskdProcessor outside try block so it's accessible in finally block for cleanup
   let slskdProcessor: SlskdSubscriptionProcessor | null = null;
 
-  // Hoisted above the try block so the outer catch can report the artists that
-  // actually got processed before a fatal error, instead of always reporting 0
-  // (previously a single artist's error — e.g. a transient MusicBrainz 503 —
-  // aborted the whole run and the run was recorded as "0 added").
+  // Retain partial counters for the run-level failure handler.
   let added = 0;
   let skipped = 0;
   let queued = 0;
@@ -106,10 +103,10 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
       connectionMap.set(subscription.connection.type, subscription.connection);
     }
 
-    // Helper to find connection by type (now O(1) lookup)
-    function findConnection(type: string) {
+    // Look up a connection by type.
+    const findConnection = (type: string) => {
       return connectionMap.get(type) || null;
-    }
+    };
 
     // Get all connections from the pre-built map
     const lidarrConn = findConnection('lidarr');
@@ -147,7 +144,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     let artists: ArtistToAdd[] = [];
     let albumsToAdd: AlbumToAdd[] = [];
 
-    // Try strategy registry first (extracted subscription types)
+    // Dispatch registered subscription strategies before fallback handling
     const strategyContext: StrategyContext = {
       config,
       connections: connectionMap as Map<string, { id: number; type: string; config: unknown }>,
@@ -208,16 +205,12 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
     // Funnel metrics counters
     let alreadyInLibrary = 0;
     let noMbidFound = 0;
-    let dedupedCount = artistsForDedup.length - artists.length;
+    const dedupedCount = artistsForDedup.length - artists.length;
 
     for (let i = 0; i < artists.length; i++) {
       const artist = artists[i];
 
-      // Isolate this artist's processing: any unexpected error here (a
-      // MusicBrainz outage, a transient DB hiccup, etc.) must not abort the
-      // rest of the playlist/run. Previously this whole loop body ran
-      // outside any per-iteration try/catch, so a single failure propagated
-      // to the run-level catch and killed the entire subscription run.
+      // Isolate per-artist errors so a provider or database failure does not abort the remaining artists.
       try {
 
       // Check if already in library (skip if no Lidarr connection)
@@ -670,7 +663,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
           queued++;
         }
       }
-      // Note: auto_add for albums would require MBID lookup, deferred for now
+      // Album auto-add requires MBID lookup and is not supported here.
       
       await job.updateProgress({
         phase: 'processing-albums',
@@ -730,11 +723,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    // added/skipped/queued reflect whatever this run actually got through
-    // before hitting a fatal error (e.g. the playlist fetch itself failing,
-    // or a DB outage) — per-artist errors no longer reach this block, so
-    // this now only fires for genuinely run-fatal failures, and should
-    // report real partial progress rather than always claiming 0.
+    // Report partial progress for run-fatal errors; per-artist failures are handled inside the loop.
     await prisma.subscriptionRun.update({
       where: { id: run.id },
       data: {
@@ -771,7 +760,7 @@ async function processSubscription(job: Job<SubscriptionJobData>): Promise<void>
 
     throw error;
   } finally {
-    // CRITICAL FIX #1: Clean up slskdProcessor resources
+    // Release slskd processor resources.
     if (slskdProcessor) {
       await slskdProcessor.close();
     }
