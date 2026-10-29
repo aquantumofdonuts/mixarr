@@ -8,7 +8,7 @@ import { z } from 'zod';
 export const slskdSearchSchema = z.object({
   query: z.string().min(1, 'Query is required').max(500),
   options: z.object({
-    searchTimeout: z.number().int().positive().max(120).optional(),
+    searchTimeout: z.number().int().positive().max(120).optional().describe('Search timeout in seconds'),
     maximumPeerQueueLength: z.number().int().nonnegative().optional(),
     minimumPeerUploadSpeed: z.number().int().nonnegative().optional(),
     filterResponses: z.boolean().optional(),

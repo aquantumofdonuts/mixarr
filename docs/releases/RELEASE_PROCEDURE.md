@@ -1,120 +1,56 @@
 # Release Procedure
 
-## Branch model
+## Branches and checks
 
-| Branch | Purpose |
-|--------|---------|
-| `dev`  | Integration branch. All work happens here via direct commits or merged PRs. |
-| `prod` | Production. **Never commit directly.** Only updated via reviewed PR from `dev`. |
+All release changes land in `dev` through a PR. Update `prod` through the reviewed `dev` → `prod` release PR; do not commit directly to `prod`. Preserve repository review and signature rules.
 
-Branch protection on `prod` requires a passing CI check and at least one approved PR before merge.
+Require passing lint/type checks, tests, application builds, release migration safety, both release-image rehearsals, browser smoke tests, and CodeQL on the final candidate. Run the same checks on the final production commit before tagging it.
 
-## How it works
+## Prepare in dev
 
-`version.ts` and `constants.ts` derive their values from their respective
-`package.json` files — no more manual string updates. The only files you touch
-at release time are the three `package.json` files and `website/index.html`.
-Pushing a `v*.*.*` tag to `prod` automatically triggers the Docker image build.
+1. Update the root and four workspace `package.json` versions and regenerate `package-lock.json`. For a new version, use `npm version <version> --workspaces --include-workspace-root --no-git-tag-version`. Skip the bump if the intended version is already prepared; do not create a release tag on dev.
+2. Update `website/index.html` (`softwareVersion` and visible release text), `CHANGELOG.md`, and `docs/releases/vX.Y.Z.md`. Cover breaking changes, upgrades, rollback, validation, and known limitations. Application version strings derive from package manifests.
+3. Commit on a preparation branch, open a PR to `dev`, and merge after checks pass. Update the `dev` → `prod` release PR with the final scope and evidence.
 
-## Steps
+## Merge production
 
-### 1. Prepare the release in dev
+Verify release checks and issue-resolution evidence before merging. The production merge updates the public website and starts production CI; it does not publish images or migrate users' databases.
 
-Make sure `dev` is clean and all intended commits are present.
+Containers migrate their own databases when users upgrade. Database Migrations is an optional manual workflow for an operator-managed external database. Configure its `production` environment `DATABASE_URL` secret and back up the target before dispatching it. Never dispatch against an unverified database or use reset/data-loss flags to bypass the schema guard.
 
-```bash
-git checkout dev && git pull
-```
+## Tag the tested production commit
 
-### 2. Bump the version
-
-Run in the repo root:
+Wait for all production checks, including both image rehearsals and browser smoke tests. Create the tag explicitly at the final production commit:
 
 ```bash
-npm version minor --workspaces --include-workspace-root
-# Or: patch / major as appropriate.
-# This updates package.json, apps/api/package.json, apps/web/package.json,
-# creates a git commit, and creates a vX.Y.Z tag locally.
+git fetch origin
+git switch prod
+git merge --ff-only origin/prod
+git tag -a vX.Y.Z -m "Release vX.Y.Z" origin/prod
+git push origin refs/tags/vX.Y.Z
 ```
 
-Then update the one remaining manual location:
+Do not reuse a tag from before the release PR merged, rely on `--follow-tags`, or move an existing published tag. Publication rejects tags that do not match current production code, package/lockfile versions, and successful release checks.
 
-| File | What to change |
-|------|----------------|
-| `website/index.html` | `"softwareVersion"` in JSON-LD (line ~56) |
+## Publish and verify
 
-### 3. Update CHANGELOG.md
+The tag starts Publish Docker Images. Unified and slim images build on native AMD64 and ARM64 runners. Neither stable manifest is updated until all four platform builds succeed. Wait for both manifest jobs and inspect both architectures for:
 
-Add a new `[vX.Y.Z] - YYYY-MM-DD` section at the top. Update the comparison links at the bottom of the file.
+- `ghcr.io/aquantumofdonuts/mixarr:vX.Y.Z` and `:latest`
+- `ghcr.io/aquantumofdonuts/mixarr:vX.Y.Z-slim` and `:slim`
 
-### 4. Write release notes
+Rehearse upgrades with published versioned images and disposable data. Verify API health, the bundled frontend proxy, preserved records and sessions, restored schedules, restart, and fresh installation. Users must back up the database and persistent data, retain volume mounts and `SESSION_SECRET`, and upgrade the web/API bundle together. Rollback requires restoring the pre-upgrade backup.
 
-Create `docs/releases/vX.Y.Z.md` using a previous release as the template. Cover new features, fixes, upgrade instructions, and any breaking changes.
+Manual publication is only a recovery path: dispatch from `prod` with the existing release tag and satisfy the same checks. It cannot publish arbitrary dev code or an unversioned alias.
 
-### 5. Commit and push dev
+After image publication and verification, create the GitHub Release:
 
 ```bash
-git add -A
-git commit --amend --no-edit   # fold website + changelog into the version bump commit
-git push origin dev
+gh release create vX.Y.Z --verify-tag --title "vX.Y.Z" --notes-file docs/releases/vX.Y.Z.md
 ```
 
-Do **not** push the tag yet — that happens after the PR merges to prod.
+For each resolved issue, add a friendly comment thanking the requester, describing the fix and upgrade steps, and linking the published release. Close it as completed; keep unresolved or partially fulfilled requests open.
 
-### 6. Open a PR from dev → prod
+## Synchronize branches
 
-```bash
-gh pr create --base prod --title "release: vX.Y.Z" \
-  --body "$(cat docs/releases/vX.Y.Z.md)"
-```
-
-CI runs automatically. Review and merge when it passes.
-
-### 7. Push the tag (triggers Docker build)
-
-After the PR merges:
-
-```bash
-git checkout prod && git pull
-git push origin prod --follow-tags
-```
-
-Pushing the `vX.Y.Z` tag triggers `publish-docker.yml` automatically — both `unified` and `slim` images are built and published to GHCR.
-
-### 8. Create the GitHub Release
-
-After the Docker build completes:
-
-```bash
-gh release create vX.Y.Z --title "vX.Y.Z" --notes-file docs/releases/vX.Y.Z.md --target prod
-```
-
-### 9. Verify
-
-- Check [Actions → Publish Docker Images](https://github.com/aquantumofdonuts/mixarr/actions/workflows/publish-docker.yml) — both builds should succeed.
-- Confirm the images are published: `ghcr.io/aquantumofdonuts/mixarr:vX.Y.Z` and `:latest`.
-
-### 10. Backmerge prod into dev
-
-```bash
-git checkout dev && git merge prod && git push origin dev
-```
-
-This keeps dev in sync with any merge commit that landed on prod.
-
-## Hotfix procedure
-
-Never fix a production bug by going through `dev`. Instead:
-
-```bash
-git checkout prod
-git checkout -b hotfix/description
-# fix the bug, commit
-git push origin hotfix/description
-# open PR → prod, merge after CI passes
-git checkout prod && git pull
-npm version patch --workspaces --include-workspace-root
-git push origin prod --follow-tags
-# then backmerge to dev:
-git checkout dev && git merge prod && git push origin dev
-```
+Open a PR to bring the production release commit back into `dev`, preserve its code exactly, and merge through normal repository rules. Confirm both branch trees agree and the working tree is clean. Hotfixes start from `prod`, land through a production PR, receive a new version/tag after checks, and are synchronized back into `dev`.

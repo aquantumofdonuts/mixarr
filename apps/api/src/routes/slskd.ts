@@ -133,7 +133,11 @@ router.post('/search', validateBody(slskdSearchSchema), async (req: Request, res
       return;
     }
 
-    const result = await slskd.service.search(query, options);
+    const result = await slskd.service.search(query, options && {
+      ...options,
+      // Mixarr's public API uses seconds; slskd's search engine uses milliseconds.
+      ...(options.searchTimeout === undefined ? {} : { searchTimeout: options.searchTimeout * 1000 }),
+    });
     res.json(result);
   } catch (error) {
     log.error('slskd search failed', { error: error instanceof Error ? error.message : error });

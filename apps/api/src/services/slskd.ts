@@ -26,6 +26,8 @@ export interface SlskdConnectionResult {
 
 export interface SlskdSearchRequest {
   searchText: string;
+  /** slskd's search timeout, in milliseconds. */
+  searchTimeout?: number;
   filterResponses?: boolean;
   maximumPeerQueueLength?: number;
   minimumPeerUploadSpeed?: number;

@@ -822,6 +822,8 @@ describe('slskd input validation', () => {
         .send({ query: 'Tool', options: { searchTimeout: 60, filterResponses: true } });
 
       expect(response.status).toBe(200);
+      const upstreamRequest = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+      expect(upstreamRequest.searchTimeout).toBe(60000);
     });
   });
 

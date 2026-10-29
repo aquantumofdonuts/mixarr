@@ -33,6 +33,14 @@ type ConnectionTestResult = {
 };
 
 const connectionTestHandlers: Record<string, (config: Record<string, any>) => Promise<ConnectionTestResult>> = {
+  slskd: async (config) => {
+    const result = await new SlskdService({ url: config.url, apiKey: config.apiKey }).testConnection();
+    return {
+      success: result.success,
+      message: result.success ? `Connected to slskd v${result.version}` : result.error || 'Connection failed',
+      details: { version: result.version },
+    };
+  },
   lidarr: async (config) => {
     const service = new LidarrService({
       url: config.url,

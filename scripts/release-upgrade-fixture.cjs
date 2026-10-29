@@ -70,6 +70,9 @@ const snapshot = async () => {
   } else if (mode === 'snapshot') {
     console.log(JSON.stringify(await snapshot()));
   } else if (mode === 'verify') {
+    const proxy = await fetch('http://127.0.0.1:3000/api/health', { signal: AbortSignal.timeout(10000) });
+    assert.equal(proxy.status, 200, 'Bundled frontend proxies the API without an API_URL override');
+    assert.equal((await proxy.json()).status, 'ok');
     const before = JSON.parse(fs.readFileSync('/tmp/upgrade-before.json', 'utf8'));
     assert.deepEqual(await snapshot(), before);
     assert.deepEqual(await db.$queryRaw`SELECT marker FROM soulseek_diversions WHERE id=1`, [{ marker: 'retained diversion' }]);

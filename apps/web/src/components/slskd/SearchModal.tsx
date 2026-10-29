@@ -191,7 +191,7 @@ export function SlskdSearchModal({ isOpen, onClose, artistName, artistImage }: S
       const { data, error } = await api.post<SlskdSearchResult>('/api/slskd/search', {
         query: artistName,
         options: {
-          searchTimeout: 30000,
+          searchTimeout: 30,
           filterResponses: true,
           minimumPeerUploadSpeed: 0,
         },
