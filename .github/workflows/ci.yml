@@ -50,6 +50,9 @@ jobs:
 
           echo "$CHANGED_FILES" | xargs npx eslint
 
+      - name: Verify release publication guard
+        run: node --test scripts/verify-release.test.cjs
+
       - name: Typecheck
         run: npm run typecheck
 

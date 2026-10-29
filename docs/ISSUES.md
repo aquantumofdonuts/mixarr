@@ -1,6 +1,6 @@
 # Mixarr Issues & Technical Debt
 
-> **Last Updated:** October 11, 2026
+> **Last Updated:** October 29, 2026
 > **Status:** PRODUCTION READY (v2.3.5) — Collaboration Constellation unreleased on `dev`
 > 
 > For completed issues, see [ISSUES-FIXED.md](ISSUES-FIXED.md)  
@@ -40,7 +40,8 @@ PR #85 exposed incomplete artist-text sanitization, which now removes remaining 
 ## 🐛 OPEN GITHUB ISSUES WITH KNOWN FIXES
 
 - **#81 — TIDAL subscriptions 404.** All seven calls in `apps/api/src/services/tidal.ts` use the `/userCollections/{id}` and `/userRecommendations/{id}` paths TIDAL removed on 2026-09-14; the issue lists the replacement `/userCollection*/me/…` paths.
-- **#66 — "No test handler for type: slskd".** The `connectionTestHandlers` map in `apps/api/src/routes/connections.ts` has no `slskd` entry; the pre-save test endpoint in the same file does.
+- **#87 — Jellyfin authentication header compatibility.** The service still uses `X-Emby-Token`; compatibility with the reporter's newer Jellyfin version remains separate provider work.
+- **Resolved in the v3.0.0 candidate:** saved slskd connection tests (#66), manual search timeout units (#88), and the slim default API proxy/setup path (#60). Close the reports with upgrade guidance after verifying the published images.
 
 ---
 

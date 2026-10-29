@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [v3.0.0] - 2026-10-11
+## [v3.0.0] - 2026-10-29
 
 A compact music catalog, explicit acquisition outcomes, and credited collaboration exploration.
 This is a major release because custom API clients must adapt to the contracts below.
@@ -31,6 +31,9 @@ This is a major release because custom API clients must adapt to the contracts b
 - **Project website:** refreshed capability descriptions, Mixarr branding, and screenshots captured with Playwright from fictional demo records.
 
 ### Fixed
+- Restore saved slskd connection tests (#66) and align manual search timeout units with API validation and slskd's millisecond search engine (#88).
+- Verify the slim frontend's default API proxy and authenticated upgrade path without an `API_URL` override (#60).
+- Guard publication with successful production checks and matching release versions; wait for all platform builds before updating stable manifests. External database migrations are an explicit manual operation.
 - Prevent stale requests, cached data, and feedback from crossing authenticated-user or artist boundaries.
 - Improve keyboard focus, dialog cleanup, narrow layouts, contrast, zoom support, and persistent-player spacing.
 - Keep review items recoverable when acquisition cannot be confirmed, enforce ownership on affected result/download mutations, and preserve partial subscription-run counts.
