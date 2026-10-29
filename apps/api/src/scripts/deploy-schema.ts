@@ -11,7 +11,12 @@ const execute = promisify(execFile);
 const prismaCli = createRequire(import.meta.url).resolve('prisma/build/index.js');
 const schema = fileURLToPath(new URL('../../prisma/schema.prisma', import.meta.url));
 const baseline = fileURLToPath(new URL('../../prisma/baseline.prisma', import.meta.url));
+// Exact schemas from the v2.0.0 and v2.1.0–v2.2.0 release tags.
+const legacySchemas = ['v2.1.0', 'v2.0.0'].map(version =>
+  fileURLToPath(new URL(`../../prisma/upgrade-schemas/${version}.prisma`, import.meta.url)),
+);
 const BASELINE = '0_v2_3_5';
+const LEGACY_ENUMS = '20261011000000_legacy_enum_expansion';
 const CONSTELLATION = '20261012000000_constellation';
 
 /** Extra tables are ignored only in schema comparisons; this SQL is never executed. */
@@ -49,13 +54,29 @@ export async function deploySchema(): Promise<void> {
       'migrate', 'diff', '--from-schema-datasource', schema, '--to-schema-datamodel', target, '--script',
     ), managed);
 
-    if (tables.some(t => t.name !== '_prisma_migrations') && !applied.has(BASELINE)) {
+    // Check existing layouts before the enum migration can touch stored values,
+    // including databases that already recorded the shared table baseline.
+    if (tables.some(t => t.name !== '_prisma_migrations') && (!applied.has(BASELINE) || !applied.has(LEGACY_ENUMS))) {
       const alreadyCurrent = await matches(schema);
-      if (!alreadyCurrent && !await matches(baseline)) {
-        throw new Error('Database does not match v2.3.5 or the current schema. Back up and inspect schema drift; no data or migration history was changed.');
+      const currentEnums = alreadyCurrent || await matches(baseline);
+      let knownLegacy = false;
+      if (!currentEnums && !applied.has(LEGACY_ENUMS)) {
+        for (const legacy of legacySchemas) {
+          if (await matches(legacy)) { knownLegacy = true; break; }
+        }
       }
-      console.log('Verified existing schema; recording the migration baseline.');
-      console.log(await prisma('migrate', 'resolve', '--schema', schema, '--applied', BASELINE));
+      if (!currentEnums && !knownLegacy) {
+        throw new Error('Database does not match a released v2.x or the current schema. Back up and inspect schema drift; no data or migration history was changed.');
+      }
+      console.log('Verified supported release schema; adopting migration history.');
+      // Released v2 layouts share the baseline tables; the checked pending
+      // migration expands their older enums before creating constellation tables.
+      if (!applied.has(BASELINE)) {
+        console.log(await prisma('migrate', 'resolve', '--schema', schema, '--applied', BASELINE));
+      }
+      if (currentEnums && !applied.has(LEGACY_ENUMS)) {
+        console.log(await prisma('migrate', 'resolve', '--schema', schema, '--applied', LEGACY_ENUMS));
+      }
       if (alreadyCurrent && !applied.has(CONSTELLATION)) {
         console.log(await prisma('migrate', 'resolve', '--schema', schema, '--applied', CONSTELLATION));
       }

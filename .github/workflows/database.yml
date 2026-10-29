@@ -7,6 +7,7 @@ on:
       - 'apps/api/prisma/schema.prisma'
       - 'apps/api/prisma/migrations/**'
       - 'apps/api/prisma/baseline.prisma'
+      - 'apps/api/prisma/upgrade-schemas/**'
       - 'apps/api/src/scripts/deploy-schema.ts'
   workflow_dispatch:
 

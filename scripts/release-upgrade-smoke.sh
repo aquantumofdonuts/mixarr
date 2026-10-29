@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-variant=${1:?Usage: release-upgrade-smoke.sh unified|slim [candidate-image]}
+variant=${1:?Usage: release-upgrade-smoke.sh unified|slim [candidate-image] [v2.3.5|v2.2.0|v2.0.0]}
 case "$variant" in unified|slim) ;; *) exit 2 ;; esac
 candidate=${2:-mixarr-release-check:$variant}
+release_schema=${3:-v2.3.5}
+case "$release_schema" in v2.3.5|v2.2.0|v2.0.0) ;; *) exit 2 ;; esac
 prefix="mixarr-upgrade-${GITHUB_RUN_ID:-local}-${variant}-$$"
 root=$(cd "$(dirname "$0")/.." && pwd)
 artifacts=$(mktemp -d)
@@ -21,7 +23,7 @@ cleanup() {
 }
 trap cleanup EXIT
 sudo docker network create "$prefix" >/dev/null
-common=(--network "$prefix" --label mixarr.task=release-upgrade-smoke -e SESSION_SECRET=disposable-release-upgrade-session -e LOG_LEVEL=info)
+common=(--network "$prefix" --label mixarr.task=release-upgrade-smoke -e SESSION_SECRET=disposable-release-upgrade-session -e LOG_LEVEL=info -e "RELEASE_UPGRADE_FROM=$release_schema")
 if [[ "$variant" == unified ]]; then
   baseline=ghcr.io/aquantumofdonuts/mixarr@sha256:ff482f3e5ecffbc900c2bd6c6d576882fbee384e9225486d009e418d0cf82910
   common+=(-e DISABLE_CADDY=1)
@@ -46,6 +48,14 @@ fixture() {
 sudo docker run -d --name "$prefix-old" "${common[@]}" -v "$prefix-data:/data" "$baseline" >/dev/null
 wait_health "$prefix-old"
 fixture "$prefix-old" seed
+if [[ "$release_schema" != v2.3.5 ]]; then
+  schema_file=v2.1.0
+  [[ "$release_schema" == v2.0.0 ]] && schema_file=v2.0.0
+  sudo docker cp "$root/apps/api/prisma/upgrade-schemas/$schema_file.prisma" "$prefix-old:/tmp/upgrade-schema.prisma" >/dev/null
+  # Restore the released enum definitions on synthetic data in the pinned image.
+  # The database suite separately creates and verifies each full historical schema.
+  fixture "$prefix-old" legacy-schema
+fi
 fixture "$prefix-old" snapshot > "$artifacts/before.json"
 sudo docker cp "$prefix-old:/tmp/upgrade-cookie.txt" "$artifacts/cookie.txt" >/dev/null
 sleep 2
@@ -84,4 +94,4 @@ fi
 sudo docker run -d --name "$prefix-fresh" "${common[@]}" -v "$prefix-fresh-data:/data" "$candidate" >/dev/null
 wait_health "$prefix-fresh"
 fixture "$prefix-fresh" fresh
-echo "$variant upgrade, restart, drift rejection and fresh-install checks passed."
+echo "$variant $release_schema schema upgrade, restart, drift rejection and fresh-install checks passed."
