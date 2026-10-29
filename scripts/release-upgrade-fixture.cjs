@@ -39,14 +39,34 @@ const snapshot = async () => {
     await db.userSetting.create({ data: { userId, key: 'preferences', value: { theme: 'dark', defaultResultHandling: 'queue' } } });
     await db.globalSetting.create({ data: { key: 'setupCompleted', value: true } });
     await db.globalSetting.create({ data: { key: 'baseUrl', value: 'http://localhost:3000' } });
-    await db.ssoProvider.create({ data: { type: 'oidc', name: 'Retained SSO', isEnabled: false, config: { issuer: 'https://example.invalid', clientId: 'fixture', clientSecret: 'synthetic-secret' } } });
-    await db.authIdentity.create({ data: { userId, provider: 'oidc', providerUserId: 'fixture-subject', email: 'fixture@example.invalid' } });
+    const provider = process.env.RELEASE_UPGRADE_FROM === 'v2.3.5' ? 'oidc' : 'google';
+    await db.ssoProvider.create({ data: { type: provider, name: 'Retained SSO', isEnabled: false, config: { issuer: 'https://example.invalid', clientId: 'fixture', clientSecret: 'synthetic-secret' } } });
+    await db.authIdentity.create({ data: { userId, provider, providerUserId: 'fixture-subject', email: 'fixture@example.invalid' } });
     await db.notificationChannel.create({ data: { userId, type: 'webhook', name: 'Retained channel', isActive: false, config: { url: 'https://example.invalid' }, events: ['subscription_complete'] } });
     await db.aISettings.create({ data: { openaiEnabled: false, openaiApiKey: 'synthetic-key', openaiModel: 'retained-model' } });
     const slskd = await db.connection.create({ data: { userId, type: 'slskd', name: 'Retained download connection', isActive: false, config: { url: 'https://example.invalid', apiKey: 'synthetic-key' } } });
     await db.slskdDownload.create({ data: { connectionId: slskd.id, artistName: 'Retained artist', albumName: 'Retained album', username: 'synthetic-peer', filename: 'track.flac', fileSize: 12345n, status: 'completed', finalPath: '/music/fixture/track.flac' } });
     await db.$executeRawUnsafe('CREATE TABLE soulseek_diversions (id INT PRIMARY KEY, marker VARCHAR(100))');
     await db.$executeRaw`INSERT INTO soulseek_diversions VALUES (1, 'retained diversion')`;
+  } else if (mode === 'legacy-schema') {
+    assert.ok(['v2.0.0', 'v2.2.0'].includes(process.env.RELEASE_UPGRADE_FROM));
+    const schema = fs.readFileSync('/tmp/upgrade-schema.prisma', 'utf8');
+    const enumValues = name => {
+      const match = new RegExp(`enum ${name}\\s*\\{([^}]+)\\}`).exec(schema);
+      assert.ok(match, name);
+      const entries = match[1].replace(/\/\/[^\n]*/g, '').trim().split(/\s+/);
+      assert.ok(entries.every(value => /^[a-z_]+$/.test(value)));
+      return entries;
+    };
+    const values = name => enumValues(name).map(value => `'${value}'`).join(',');
+    await db.$executeRawUnsafe(`ALTER TABLE sso_providers MODIFY COLUMN type ENUM(${values('SsoProviderType')}) NOT NULL`);
+    await db.$executeRawUnsafe(`ALTER TABLE auth_identities MODIFY COLUMN provider ENUM(${values('SsoProviderType')}) NOT NULL`);
+    await db.$executeRawUnsafe(`ALTER TABLE subscriptions MODIFY COLUMN type ENUM(${values('SubscriptionType')}) NOT NULL`);
+    const user = await db.user.findFirstOrThrow();
+    for (const type of enumValues('SubscriptionType')) {
+      await db.subscription.create({ data: { userId: user.id, name: `Retained ${type}`, type, config: {}, isActive: false } });
+    }
+    console.log(`Prepared synthetic ${process.env.RELEASE_UPGRADE_FROM} schema in the pinned v2.3.5 image.`);
   } else if (mode === 'snapshot') {
     console.log(JSON.stringify(await snapshot()));
   } else if (mode === 'verify') {
@@ -71,7 +91,7 @@ const snapshot = async () => {
     assert.equal(await db.user.count(), 0);
     assert.equal(await db.constellationPerson.count(), 0);
     assert.equal((await api('/api/auth/setup-required')).body.setupRequired, true);
-    console.log('Fresh install is ready with both migrations applied.');
+    console.log('Fresh install is ready with all release migrations applied.');
   } else if (mode === 'drift') {
     await db.$executeRawUnsafe('ALTER TABLE users ADD COLUMN upgrade_guard_test VARCHAR(100)');
   } else { throw new Error('Unknown fixture mode'); }

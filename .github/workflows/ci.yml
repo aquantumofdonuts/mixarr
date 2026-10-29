@@ -183,7 +183,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run db:generate
-      - name: Verify real legacy migration safety
+      - name: Verify released v2 schemas and legacy migration safety
         working-directory: apps/api
         run: npx vitest run tests/scripts/deploy-schema.database.test.ts
         env:
@@ -193,7 +193,7 @@ jobs:
     name: Release image (${{ matrix.variant }})
     runs-on: ubuntu-latest
     needs: [lint, test, build]
-    timeout-minutes: 25
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -214,5 +214,8 @@ jobs:
           tags: mixarr-release-check:${{ matrix.variant }}
           cache-from: type=gha,scope=release-check-${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=release-check-${{ matrix.variant }}
-      - name: Rehearse v2.3.5 upgrade and fresh install
-        run: bash scripts/release-upgrade-smoke.sh '${{ matrix.variant }}'
+      - name: Rehearse released v2 schemas, restart and fresh install
+        run: |
+          for version in v2.0.0 v2.2.0 v2.3.5; do
+            bash scripts/release-upgrade-smoke.sh '${{ matrix.variant }}' 'mixarr-release-check:${{ matrix.variant }}' "$version"
+          done

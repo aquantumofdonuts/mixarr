@@ -1,0 +1,20 @@
+-- Expand only verified released v2 enum definitions. Existing rows keep their
+-- string values; no column, enum value, table or record is removed.
+-- The deployment script marks this applied for schemas with current enums.
+ALTER TABLE `sso_providers` MODIFY COLUMN `type` ENUM('ldap', 'saml', 'google', 'plex', 'oidc') NOT NULL;
+
+ALTER TABLE `auth_identities` MODIFY COLUMN `provider` ENUM('ldap', 'saml', 'google', 'plex', 'oidc') NOT NULL;
+
+ALTER TABLE `subscriptions` MODIFY COLUMN `type` ENUM(
+    'lastfm_chart', 'lastfm_tag', 'lastfm_geo', 'lastfm_library', 'lastfm_similar',
+    'lastfm_tag_albums', 'lastfm_tag_similar', 'lastfm_user_albums', 'lastfm_weekly_artists', 'lastfm_weekly_albums',
+    'musicbrainz', 'musicbrainz_new', 'combined',
+    'spotify_playlist', 'spotify_new_releases', 'spotify_followed', 'spotify_saved_albums', 'spotify_liked_songs',
+    'spotify_discover_weekly', 'spotify_release_radar', 'spotify_daily_mix', 'spotify_on_repeat', 'spotify_featured',
+    'spotify_category', 'spotify_library', 'spotify_public_playlist', 'ai_recommendation', 'tautulli_similar', 'jellyfin_similar',
+    'deezer_favorites', 'deezer_playlists', 'deezer_playlist', 'deezer_flow', 'deezer_chart', 'deezer_history', 'deezer_genre', 'deezer_search',
+    'tidal_favorites', 'tidal_followed_artists', 'tidal_playlists', 'tidal_playlist', 'tidal_discovery', 'tidal_new_arrivals', 'tidal_mix',
+    'listenbrainz_top', 'listenbrainz_similar', 'listenbrainz_recommendations', 'listenbrainz_fresh_releases',
+    'listenbrainz_weekly_jams', 'listenbrainz_weekly_exploration', 'listenbrainz_year', 'listenbrainz_playlist',
+    'listenbrainz_radio', 'listenbrainz_loved', 'discogs_label', 'discogs_style', 'bandcamp_tag', 'bandcamp_new'
+) NOT NULL;
