@@ -158,7 +158,8 @@ export function SlskdSearchModal({ isOpen, onClose, artistName, artistImage }: S
           setResults(data);
           
           // Stop searching when complete
-          if (data.state === 'Completed' || data.state === 'Errored') {
+          const states = data.state.split(',').map(state => state.trim());
+          if (states.some(state => ['Completed', 'Errored', 'TimedOut', 'Cancelled'].includes(state))) {
             setIsSearching(false);
             setSearchId(null);
             return; // Stop polling
