@@ -34,7 +34,7 @@ Do not reuse a tag from before the release PR merged, rely on `--follow-tags`, o
 
 ## Publish and verify
 
-The tag starts Publish Docker Images. Unified and slim images build on native AMD64 and ARM64 runners. Neither stable manifest is updated until all four platform builds succeed. Wait for both manifest jobs and inspect both architectures for:
+The tag starts Publish Docker Images. Unified and slim images build and rehearse a v2.3.5 upgrade on native AMD64 and ARM64 runners. Neither stable manifest is updated until all four platform builds and rehearsals succeed. Wait for both manifest jobs and inspect both architectures for:
 
 - `ghcr.io/aquantumofdonuts/mixarr:vX.Y.Z` and `:latest`
 - `ghcr.io/aquantumofdonuts/mixarr:vX.Y.Z-slim` and `:slim`

@@ -64,6 +64,7 @@ jobs:
   build-unified:
     name: Build Unified (${{ matrix.platform }})
     needs: validate-release
+    timeout-minutes: 45
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -112,6 +113,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
           build-args: |
             API_URL=http://localhost:3005
+
+      - name: Rehearse published unified platform image
+        run: bash scripts/release-upgrade-smoke.sh unified '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}' v2.3.5
 
       - name: Export digest
         run: |
@@ -179,6 +183,7 @@ jobs:
   build-slim:
     name: Build Slim (${{ matrix.platform }})
     needs: validate-release
+    timeout-minutes: 45
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -227,6 +232,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=slim-${{ matrix.platform }}
           build-args: |
             API_URL=http://localhost:3005
+
+      - name: Rehearse published slim platform image
+        run: bash scripts/release-upgrade-smoke.sh slim '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}' v2.3.5
 
       - name: Export digest
         run: |
