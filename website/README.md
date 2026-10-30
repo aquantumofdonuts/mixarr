@@ -2,7 +2,9 @@
 
 `index.html` is the static project website. Pages deploys changes under `website/` only after a push to `prod` (or a manual workflow dispatch). Updating `dev` does not publish the site.
 
-The gallery shows the 3.0.0 catalog with fictional demonstration data. Docker Compose builds from `prod`; Docker Run uses the stable `:latest` image. Images are published separately by the version-tag workflow. Release preparation on `dev` does not publish a website or image.
+The public site announces [v3.0.0](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0), released October 29, 2026. Unified `:v3.0.0` and slim `:v3.0.0-slim` images are published for AMD64 and ARM64; `:latest` and `:slim` are moving stable aliases. The Compose and Docker Run examples use the versioned unified image and a saved session secret. Existing users follow the root README's upgrade instructions with their current volumes and environment.
+
+The gallery shows the v3.0.0 catalog with fictional demonstration data. UI captures do not establish live provider compatibility. Known issues include TIDAL and Jellyfin compatibility and remain linked from the site.
 
 To refresh screenshots, build and start the web app locally, then run from the repository root:
 
@@ -18,17 +20,15 @@ The capture suite reuses the strict catalog browser fixtures, blocks external re
 
 The commands run ESLint without its cache because the current dependency override causes Next’s cached lint command to fail with `flatCache.load is not a function`.
 
-Copy sources: `packages/shared-types/src/subscription.ts` (56 registered types), the app routes and artist/Constellation components (catalog behavior), and the root README/Compose files (deployment). Provider compatibility is separate from UI presentation; known issues remain in `docs/ISSUES.md`, including TIDAL subscriptions. C137 provider verification remains deferred.
+Copy sources: `packages/shared-types/src/subscription.ts` (56 registered types), the app routes and artist/Constellation components (catalog behavior), the root README/Compose files (deployment), and `docs/releases/v3.0.0.md` (release announcement). Keep provider limitations visible when refreshing copy.
 
 Serve this directory locally to check the static page, for example `python3 -m http.server 3028 --directory website`. Check the gallery/lightbox, carousel, installation tabs, image loading, and mobile navigation before committing.
 
-## Refresh verification — October 10, 2026
+## Release documentation maintenance
 
-| Requested result | Implementation and browser evidence |
-| --- | --- |
-| Replace the M before captures | Sidebar uses the existing Mixarr icon; light/dark logo loading and collapse/expand passed. |
-| Reflect current capabilities | Copy follows the source registry and implemented catalog surfaces; dev preview, stable images, and provider limitations are distinguished. |
-| Capture and update images | Playwright regenerated ten PNGs, including the README dashboard image. Nine gallery views load at their original aspect ratio; carousel, lightbox, and install tabs passed. |
-| Work only on dev | Logo and website changes stay on dev; prod and the Pages deployment workflow are unchanged. |
+- Keep the visible release heading, social metadata, structured `softwareVersion`, image examples, release links, and `sitemap.xml` date consistent.
+- Update the README, deployment templates, changelog, and release-note source together. Keep versioned image tags distinct from moving stable aliases.
+- Retain the same published release tag and image digests for documentation-only corrections. Update the existing GitHub release body from the release-note source; do not create a duplicate announcement or rebuild application images.
+- After a documentation PR reaches `prod`, verify the Pages deployment and public HTML. Preserve production history when synchronizing the update into `dev`.
 
-Completion audit and changed-file quality review passed. The production web build (with uncached lint run separately), capture-script TypeScript, and 11 existing Chromium navigation checks passed. Desktop and mobile static-page checks found no browser errors or horizontal overflow. No live provider verification or Pages publication is claimed.
+The October 10 screenshot capture predates publication; its fictional fixtures remain suitable for the v3.0.0 gallery. See `screenshots.json` for capture provenance and `docs/releases/RELEASE_PROCEDURE.md` for the publication workflow.

@@ -1,35 +1,37 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>mixarr</Name>
-  <Repository>ghcr.io/aquantumofdonuts/mixarr:v1.1.0</Repository>
+  <Repository>ghcr.io/aquantumofdonuts/mixarr:v3.0.0</Repository>
   <Registry>https://github.com/aquantumofdonuts/mixarr/pkgs/container/mixarr</Registry>
   <Branch>
     <Tag>latest</Tag>
-    <TagDescription>Latest stable release</TagDescription>
-  </Branch>
-  <Branch>
-    <Tag>develop</Tag>
-    <TagDescription>Development builds (may be unstable)</TagDescription>
+    <TagDescription>Moving stable release (v3.0.0 is also available as a pinned tag)</TagDescription>
   </Branch>
   <Network>bridge</Network>
   <WebUI>https://[IP]:[PORT:443]</WebUI>
-  <Icon>https://raw.githubusercontent.com/aquantumofdonuts/mixarr/main/apps/web/public/icon-512.png</Icon>
+  <Icon>https://raw.githubusercontent.com/aquantumofdonuts/mixarr/prod/apps/web/public/icons/icon-512x512.png</Icon>
   <Overview>
-Mixarr is a fully self-contained music discovery and library management tool that integrates with Lidarr.
+Mixarr v3.0.0 is a self-hosted music discovery and catalog companion for Lidarr.
 
 This is an all-in-one container that includes everything needed to run - no external database or Redis required!
 
 Features:
-- Multi-Service Integration: Spotify, TIDAL, Deezer, Last.fm, MusicBrainz, Plex/Tautulli
+- Compact music catalog with a shared artist inspector and discovery sources
+- Collaboration Constellation: explore credited musicians, producers, songwriters, and engineers
+- Review queue with clear acquisition outcomes and eligible decision Undo
+- Music sources include Spotify, TIDAL, Deezer, Last.fm, ListenBrainz, MusicBrainz, Plex, Jellyfin, Discogs, and Bandcamp
 - Automated Subscriptions: Scheduled sync from connected services
 - AI-Powered Discovery: Get recommendations based on your library
-- PWA Support: Installable app with offline capabilities
+- Installable PWA; provider discovery requires network access
 - Built-in MariaDB and Redis - no external dependencies needed
+
+Unified and slim images are available for AMD64 and ARM64. This template uses the unified image.
+Before upgrading, back up /data and retain its mapping and SESSION_SECRET. Released v2 schemas migrate directly; do not reset the database. Read the v3.0.0 release notes for custom API changes and known provider limitations.
   </Overview>
   <Category>MediaApp:Music Tools:</Category>
-  <Support>https://forums.unraid.net/topic/xxxxx-mixarr-support/</Support>
+  <Support>https://github.com/aquantumofdonuts/mixarr/issues</Support>
   <Project>https://github.com/aquantumofdonuts/mixarr</Project>
-  <ReadMe>https://github.com/aquantumofdonuts/mixarr/blob/main/README.md</ReadMe>
+  <ReadMe>https://github.com/aquantumofdonuts/mixarr/blob/prod/README.md</ReadMe>
   <ExtraSearchTerms>lidarr music spotify tidal deezer lastfm plex discovery recommendation</ExtraSearchTerms>
   
   <!-- Ports -->
@@ -72,7 +74,7 @@ Features:
     Name="Session Secret" 
     Target="SESSION_SECRET" 
     Default="" 
-    Description="Random secret string for session encryption. Generate with: openssl rand -hex 32" 
+    Description="Persistent secret for session signing. Generate once with: openssl rand -hex 32. Retain the existing value during upgrades."
     Type="Variable" 
     Display="always" 
     Required="true" 
@@ -99,9 +101,15 @@ Features:
     Mask="false"></Config>
 
   <!-- Template Metadata -->
-  <TemplateURL>https://raw.githubusercontent.com/aquantumofdonuts/mixarr/main/unraid/mixarr.xml</TemplateURL>
+  <TemplateURL>https://raw.githubusercontent.com/aquantumofdonuts/mixarr/prod/deploy/unraid.xml</TemplateURL>
   <Maintainer>aquantumofdonuts</Maintainer>
   <Changes>
+### 2026-10-29 — v3.0.0
+- Compact catalog, artist inspector, Collaboration Constellation, and clearer review outcomes
+- Slim proxy and slskd connection/search fixes
+- Checked direct upgrades from released v2 schemas; retain /data and SESSION_SECRET
+- Published unified and slim images for AMD64 and ARM64
+
 ### 2026-01-04
 - Initial Unraid Community Apps release
 - Fully self-contained: includes MariaDB, Redis, API, Web UI, and Caddy

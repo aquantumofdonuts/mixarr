@@ -1,5 +1,5 @@
 # =============================================================================
-# Mixarr BYO Infrastructure
+# Mixarr v3.0.0 BYO Infrastructure
 # For users with existing MariaDB/MySQL and Redis
 #
 # Usage:
@@ -9,6 +9,7 @@
 #   docker compose -f docker-compose.byo.yml up -d
 #
 # Or create a .env file with these variables.
+# Keep the same session secret and persistent data for upgrades; see README.md#upgrading.
 #
 # Ports:
 #   - 3000: Web UI
@@ -18,7 +19,7 @@
 
 services:
   mixarr:
-    image: ghcr.io/aquantumofdonuts/mixarr:slim
+    image: ghcr.io/aquantumofdonuts/mixarr:v3.0.0-slim
     container_name: mixarr
     ports:
       - "3000:3000"    # Web UI

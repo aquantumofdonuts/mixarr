@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 A compact music catalog, explicit acquisition outcomes, and credited collaboration exploration.
 This is a major release because custom API clients must adapt to the contracts below.
 
+[Release announcement and images](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0) · [Installation and upgrade guide](README.md#upgrading)
+
 ### Added
 - **Compact music catalog:** artwork rows, source provenance, persistent list context, URL-backed filters, page-scoped selection, and responsive light/dark layouts across Discovery, Search, Library, Subscriptions, Queue, Connections, and Settings.
 - **Shared artist inspector:** inspect MusicBrainz identity, confirmed library membership, recorded discovery sources, and release chronology without losing your place in a list.
@@ -543,6 +545,8 @@ Version-stamps and tags two hotfixes that shipped to production after v2.3.3.
 
 ---
 
+[Unreleased]: https://github.com/aquantumofdonuts/mixarr/compare/v3.0.0...dev
+[v3.0.0]: https://github.com/aquantumofdonuts/mixarr/compare/v2.3.5...v3.0.0
 [v2.3.5]: https://github.com/aquantumofdonuts/mixarr/compare/v2.3.4...v2.3.5
 [v2.3.1]: https://github.com/aquantumofdonuts/mixarr/compare/v2.2.0...v2.3.1
 [v2.2.0]: https://github.com/aquantumofdonuts/mixarr/compare/v2.1.6...v2.2.0

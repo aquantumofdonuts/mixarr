@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
   copyBtns.forEach(btn => {
     btn.addEventListener('click', async () => {
       const targetId = btn.dataset.target;
-      const codeElement = document.querySelector(`#${targetId} code`);
+      const codeElement = document.querySelector(`#${targetId} pre code`);
       
       if (!codeElement) return;
       
