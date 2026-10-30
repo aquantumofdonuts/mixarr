@@ -51,6 +51,7 @@ body {
 
 section {
   padding: 80px 0;
+  scroll-margin-top: 70px;
 }
 
 h1, h2, h3 {

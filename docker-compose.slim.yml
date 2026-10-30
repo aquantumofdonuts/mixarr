@@ -1,5 +1,5 @@
 # =============================================================================
-# Mixarr Slim Stack
+# Mixarr v3.0.0 Slim Stack
 # Production deployment using slim image with external MariaDB and Redis
 #
 # Usage:
@@ -7,6 +7,8 @@
 #
 # Requirements:
 #   - Set SESSION_SECRET in environment or .env file
+#   - Preserve the same SESSION_SECRET and volumes when upgrading
+#   - Read README.md#upgrading before updating an existing installation
 #
 # Ports:
 #   - 3000: Web UI
@@ -19,7 +21,7 @@ services:
   # Mixarr Application (API + Web)
   # ---------------------------------------------------------------------------
   mixarr:
-    image: ghcr.io/aquantumofdonuts/mixarr:slim
+    image: ghcr.io/aquantumofdonuts/mixarr:v3.0.0-slim
     container_name: mixarr
     ports:
       - "3000:3000"    # Web UI
