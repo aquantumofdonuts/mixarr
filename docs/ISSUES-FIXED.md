@@ -4,6 +4,22 @@
 
 ---
 
+## v3.0.0 release — October 29, 2026
+
+The [v3.0.0 release](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0) includes the compact catalog, artist inspector, Collaboration Constellation, and these completed reports:
+
+| Report | Resolution |
+| --- | --- |
+| [#60 — Slim image API URL and setup](https://github.com/aquantumofdonuts/mixarr/issues/60) | Bundled frontend proxy works without an API_URL override; plain-HTTP setup/login and retained sessions are covered. |
+| [#66 — Saved slskd connection test](https://github.com/aquantumofdonuts/mixarr/issues/66) | Tests the saved connection, reports the server version or error, and enforces connection ownership. |
+| [#88 — Manual slskd search timeout](https://github.com/aquantumofdonuts/mixarr/issues/88) | UI sends seconds, the API converts to slskd milliseconds, and compound terminal states show results. |
+
+All three reports were closed with friendly requester comments and upgrade guidance after the published AMD64/ARM64 unified/slim images were verified. Checked migrations preserve released v2 schemas and existing records; startup restores readiness and schedules before workers and requests resume. See the [upgrade guide](../README.md#upgrading).
+
+Live provider verification and unresolved security findings are still tracked in [ISSUES.md](ISSUES.md). Older entries below are historical records, not a certification of current upstream provider availability.
+
+---
+
 ## ✅ CODE QUALITY CLEANUP (January 2026)
 
 5-sprint cleanup completed to address technical debt identified in code review.

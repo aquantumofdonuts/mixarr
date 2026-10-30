@@ -1,33 +1,33 @@
 # Mixarr Issues & Technical Debt
 
-> **Last Updated:** October 29, 2026
-> **Status:** PRODUCTION READY (v2.3.5) — Collaboration Constellation unreleased on `dev`
+> **Last Updated:** October 30, 2026
+> **Status:** [v3.0.0 released](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0) — catalog and Collaboration Constellation shipped; unresolved provider/security findings remain below.
 > 
 > For completed issues, see [ISSUES-FIXED.md](ISSUES-FIXED.md)  
-> For future feature ideas, see [ROADMAP.md](ROADMAP.md)
+> For future feature ideas, see [GitHub feature requests](https://github.com/aquantumofdonuts/mixarr/issues?q=is%3Aissue%20is%3Aopen)
 > 
-> The three Feb 18 implementation plans (critical security, input validation, architecture) shipped in v2.1.x–v2.2.0 and are archived under [plans/archive/](plans/archive/).
+> The three Feb 18 implementation plans (critical security, input validation, architecture) shipped in v2.1.x–v2.2.0 and are archived under plans/archive/ (historical plan).
 
 ---
 
 ## 🔴 OPEN SECURITY FINDINGS (from the 2026-07-04 adversarial review)
 
-The 2026-10-07 snapshot identified six merge-blocking items from [plans/2026-07-04-adversarial-code-review.md](plans/2026-07-04-adversarial-code-review.md). Item 5 and the user-facing ownership portion of item 6 are repaired and verified on the local `feat/music-catalog-ux` branch; they have not been integrated or released. The remaining findings stay open:
+The 2026-10-07 snapshot identified six findings from the July 4 adversarial review. Item 5 and the user-facing ownership portion of item 6 are repaired, verified, and included in v3.0.0. The remaining findings stay open:
 
 1. SAML accepts unsigned assertions and an empty IdP certificate — `apps/api/src/auth/strategies/saml.ts`
 2. Plex `restrictToServerId` is declared but never enforced — `apps/api/src/auth/strategies/plex.ts`
 3. No session regeneration on login (session fixation) — `apps/api/src/auth/passport.ts` and every `logIn` path
 4. Connection config is an open record (`z.record(z.unknown())`), bypassing per-type schemas; SSRF surface on test endpoints — `apps/api/src/schemas/connection.ts`, `apps/api/src/routes/connections.ts`
-5. **Resolved locally:** Result rejection reads by result ID, subscription ID, and owner, then conditionally writes with that ownership scope and the expected status/revision — `apps/api/src/routes/subscriptions.ts`. T07 implemented the fix; T15 reverified foreign owners (including admins), foreign result bindings, active claims, and competing decisions in `tests/api/subscription-decisions.test.ts`. Approval uses the same ownership boundary.
-6. **Partially resolved locally:** T25 scopes user-facing slskd search/download operations to owned connections (administrators retain access), rejects foreign tracking mutations before effects, and retries through the record's exact active connection. Independent spec/quality reviews passed actual router/auth tests with mocked external boundaries. The webhook still sits behind session auth and uses unscoped configuration/record matching; those findings remain open — `apps/api/src/routes/slskd.ts`.
+5. **Resolved in v3.0.0:** Result rejection reads by result ID, subscription ID, and owner, then conditionally writes with that ownership scope and the expected status/revision — `apps/api/src/routes/subscriptions.ts`. T07 implemented the fix; T15 reverified foreign owners (including admins), foreign result bindings, active claims, and competing decisions in `tests/api/subscription-decisions.test.ts`. Approval uses the same ownership boundary.
+6. **Partially resolved in v3.0.0:** T25 scopes user-facing slskd search/download operations to owned connections (administrators retain access), rejects foreign tracking mutations before effects, and retries through the record's exact active connection. Independent spec/quality reviews passed actual router/auth tests with mocked external boundaries. The webhook still sits behind session auth and uses unscoped configuration/record matching; those findings remain open — `apps/api/src/routes/slskd.ts`.
 
 Follow-up items 9 (per-artist error isolation) and 13 (pagination clamping) from that review have shipped.
 
 ---
 
-## Release upgrade blockers
+## Release upgrade blockers (resolved in v3.0.0)
 
-The October 12 upgrade rehearsal reproduced missing native build tools in published unified/slim images, destructive schema synchronization against unmanaged tables, and scheduler initialization racing MariaDB readiness. The release-blocker fix replaces production schema pushes with verified baselining and checked migrations, fails startup on migration errors, waits for restored schedules before listening, and adds real migration and both-image upgrade checks to PR CI. The October 26 follow-up adds direct upgrades from all released v2.x schemas: exact v2.0 and v2.1–v2.2 snapshots guard checked enum expansions, while unknown enums or other schema drift are rejected before schema/history writes. Database regressions preserve every historical enum value; both-image rehearsals cover all three v2 schema layouts. See [the original implementation and verification record](plans/2026-10-12-release-upgrade-blockers.md). Production release remains pending; C137 provider verification stays deferred.
+The October 12 upgrade rehearsal reproduced missing native build tools in published unified/slim images, destructive schema synchronization against unmanaged tables, and scheduler initialization racing MariaDB readiness. The release-blocker fix replaces production schema pushes with verified baselining and checked migrations, fails startup on migration errors, waits for restored schedules before listening, and adds real migration and both-image upgrade checks to PR CI. The October 26 follow-up adds direct upgrades from all released v2.x schemas: exact v2.0 and v2.1–v2.2 snapshots guard checked enum expansions, while unknown enums or other schema drift are rejected before schema/history writes. Database regressions preserve every historical enum value; both-image rehearsals cover all three v2 schema layouts. See [the original implementation and verification record](plans/2026-10-12-release-upgrade-blockers.md). These fixes shipped in v3.0.0, with native AMD64/ARM64 published-image upgrade checks verified before announcement. C137 live provider verification stays deferred.
 
 ---
 
@@ -37,17 +37,17 @@ PR #85 exposed incomplete artist-text sanitization, which now removes remaining 
 
 ---
 
-## 🐛 OPEN GITHUB ISSUES WITH KNOWN FIXES
+## GitHub provider reports and v3.0.0 resolutions
 
 - **#81 — TIDAL subscriptions 404.** All seven calls in `apps/api/src/services/tidal.ts` use the `/userCollections/{id}` and `/userRecommendations/{id}` paths TIDAL removed on 2026-09-14; the issue lists the replacement `/userCollection*/me/…` paths.
 - **#87 — Jellyfin authentication header compatibility.** The service still uses `X-Emby-Token`; compatibility with the reporter's newer Jellyfin version remains separate provider work.
-- **Resolved in the v3.0.0 candidate:** saved slskd connection tests (#66), manual search timeout units (#88), and the slim default API proxy/setup path (#60). Close the reports with upgrade guidance after verifying the published images.
+- **Released and closed in v3.0.0:** saved slskd connection tests ([#66](https://github.com/aquantumofdonuts/mixarr/issues/66)), manual search timeout units and compound completion states ([#88](https://github.com/aquantumofdonuts/mixarr/issues/88)), and the slim default API proxy/setup path ([#60](https://github.com/aquantumofdonuts/mixarr/issues/60)). Published images were verified and requesters received upgrade guidance. See the [completed archive](ISSUES-FIXED.md#v300-release--october-29-2026).
 
 ---
 
 ## UI/UX catalog redesign (complete with accepted provider deferral)
 
-**Status:** Local product `ffeb12352704b404130fc73c27ff661c032c7733` is independently SPEC/QUALITY reviewed. T28 has explicit five-surface gallery approval and final 22-check authentic Chromium native-200%-zoom proof. T29's regenerated matrix reports 136 COMPLETE and one ACCEPTED_GAP; gate PASS with the owner’s explicit October 10, 2026 decision: “C137 deferred: provider verification will be performed separately”. Genuine provider compatibility remains unverified. T30 integrated code QUALITY is PASS with no open confirmed Critical/Important findings. Root final verification passed 2,592 API tests (39 skipped), 825 web tests, 194 Chromium and 64 Firefox/mobile browser checks; builds/types/uncached lint passed with existing warnings. Independent backend review passed 877 tests including actual disposable MySQL/Redis; web review passed 89 fresh tests. The actual Settings first-dirty-commit race and mobile player occlusion have causal repairs and retained regressions; outcome consumers now distinguish new/existing membership. The owner-approved hard 300-node cap remains intact. The injected Preview-history observation remains latent; baseline account submissions and legacy automatic-import workers are not certified by this scope. Owned runtimes/test containers are removed; the original main-checkout specification edits are preserved. See the [completion matrix](plans/2026-10-07-music-catalog-ux-completion.md), [full review](plans/2026-10-09-music-catalog-ux-full-review.md), [checkpoint](plans/2026-10-08-music-catalog-ux-progress.md) and [visual review](plans/2026-10-09-music-catalog-visual-review.md). Provider verification remains separate work; integration and release are not claimed.
+**Historical pre-release verification:** Local product `ffeb12352704b404130fc73c27ff661c032c7733` is independently SPEC/QUALITY reviewed. T28 has explicit five-surface gallery approval and final 22-check authentic Chromium native-200%-zoom proof. T29's regenerated matrix reports 136 COMPLETE and one ACCEPTED_GAP; gate PASS with the owner’s explicit October 10, 2026 decision: “C137 deferred: provider verification will be performed separately”. Genuine provider compatibility remains unverified. T30 integrated code QUALITY is PASS with no open confirmed Critical/Important findings. Root final verification passed 2,592 API tests (39 skipped), 825 web tests, 194 Chromium and 64 Firefox/mobile browser checks; builds/types/uncached lint passed with existing warnings. Independent backend review passed 877 tests including actual disposable MySQL/Redis; web review passed 89 fresh tests. The actual Settings first-dirty-commit race and mobile player occlusion have causal repairs and retained regressions; outcome consumers now distinguish new/existing membership. The owner-approved hard 300-node cap remains intact. The injected Preview-history observation remains latent; baseline account submissions and legacy automatic-import workers are not certified by this scope. Owned runtimes/test containers are removed; the original main-checkout specification edits are preserved. See the [completion matrix](plans/2026-10-07-music-catalog-ux-completion.md), [full review](plans/2026-10-09-music-catalog-ux-full-review.md), [checkpoint](plans/2026-10-08-music-catalog-ux-progress.md) and [visual review](plans/2026-10-09-music-catalog-visual-review.md). The catalog and Constellation are now integrated and released in v3.0.0. These records describe pre-release validation; live provider verification remains separate work.
 **Scope:** R01–R28/I01: the 25 UI/UX review recommendations, a distinctive music-catalog identity with the user-confirmed compact artwork-thumbnail feed, and the three October 8 Constellation follow-ups.
 
 - [Design and acceptance criteria](plans/2026-10-07-music-catalog-ux-design.md)
@@ -83,7 +83,7 @@ Artists can be added to Lidarr through multiple paths, each tracking the additio
 - **Subscriptions/Feed** → `SubscriptionResult` with `status: 'added'`
 - **Review Queue** → `ReviewItem` with `status: 'approved'`
 
-The local catalog implementation no longer sums these decision records as confirmed distinct additions. Its owner-scoped dashboard explicitly counts subscription result records marked added in the last 30 days; repeated artist identities and legacy evidence remain possible. A cross-path ledger of confirmed distinct acquisitions is still a separate backlog item.
+The v3.0.0 catalog implementation no longer sums these decision records as confirmed distinct additions. Its owner-scoped dashboard explicitly counts subscription result records marked added in the last 30 days; repeated artist identities and legacy evidence remain possible. A cross-path ledger of confirmed distinct acquisitions is still a separate backlog item.
 
 **Proposed fix:** Create a unified `artist_additions` audit table (or similar) that all add paths write to, so dashboard stats only need one query. This also enables better analytics (e.g., "added via subscription" vs "added via review queue").
 
@@ -336,7 +336,7 @@ A comprehensive review identified violations of three-tier architecture (Databas
 **Priority:** High | **Severity:** High
 
 **Problem:**
-[apps/web/src/components/modals/SearchModal.tsx](apps/web/src/components/modals/SearchModal.tsx) contains a `scoreResult()` function with hardcoded business rules for ranking Soulseek search results (50 pts lossless, 30 pts upload speed, 10 pts free slot, -10 pts queue length).
+`apps/web/src/components/modals/SearchModal.tsx` contains a `scoreResult()` function with hardcoded business rules for ranking Soulseek search results (50 pts lossless, 30 pts upload speed, 10 pts free slot, -10 pts queue length).
 
 **Impact:**
 - Scoring algorithm can't be adjusted without frontend deployment
@@ -352,7 +352,7 @@ A comprehensive review identified violations of three-tier architecture (Databas
 **Priority:** High | **Severity:** High
 
 **Problem:**
-[apps/web/src/components/modals/SearchModal.tsx](apps/web/src/components/modals/SearchModal.tsx) contains `getFileFormat()` and `isLossless()` functions that classify audio file formats.
+`apps/web/src/components/modals/SearchModal.tsx` contains `getFileFormat()` and `isLossless()` functions that classify audio file formats.
 
 **Impact:**
 - Format definitions can't be centralized
@@ -368,7 +368,7 @@ A comprehensive review identified violations of three-tier architecture (Databas
 **Priority:** High | **Severity:** High | **Status:** ✅ Resolved — `GET /api/subscriptions/types` exists in `apps/api/src/routes/subscriptions.ts`
 
 **Problem (historical):**
-[apps/web/src/components/subscriptions/](apps/web/src/components/subscriptions/) contains 50+ subscription types with required fields, descriptions, icons, and validation rules hardcoded in frontend.
+[apps/web/src/components/subscriptions/](../apps/web/src/components/subscriptions/) contains 50+ subscription types with required fields, descriptions, icons, and validation rules hardcoded in frontend.
 
 **Impact:**
 - Backend and frontend can get out of sync
@@ -384,7 +384,7 @@ A comprehensive review identified violations of three-tier architecture (Databas
 **Priority:** High | **Severity:** High
 
 **Problem:**
-[apps/web/src/components/modals/SubscriptionModal.tsx](apps/web/src/components/modals/SubscriptionModal.tsx) contains 30+ lines of `buildConfig()` logic that constructs type-specific config objects.
+`apps/web/src/components/modals/SubscriptionModal.tsx` contains 30+ lines of `buildConfig()` logic that constructs type-specific config objects.
 
 **Impact:**
 - Config structure duplicated between frontend and API
@@ -401,14 +401,14 @@ A comprehensive review identified violations of three-tier architecture (Databas
 
 **Problem:**
 Multiple route files access Prisma directly instead of going through service layer:
-- [apps/api/src/routes/users.ts](apps/api/src/routes/users.ts) - No `UserService`
-- [apps/api/src/routes/connections.ts](apps/api/src/routes/connections.ts) - No `ConnectionService`
-- [apps/api/src/routes/importSources.ts](apps/api/src/routes/importSources.ts) - No `ImportSourceService`
-- [apps/api/src/routes/settings.ts](apps/api/src/routes/settings.ts) - No `SettingsService`
-- [apps/api/src/routes/notifications.ts](apps/api/src/routes/notifications.ts) - Channel CRUD in route
-- [apps/api/src/routes/logs.ts](apps/api/src/routes/logs.ts) - No `LogService`
-- [apps/api/src/routes/duplicates.ts](apps/api/src/routes/duplicates.ts) - No `DuplicateService`
-- [apps/api/src/routes/ai.ts](apps/api/src/routes/ai.ts) - No `AISettingsService`
+- `apps/api/src/routes/users.ts` - No `UserService`
+- [apps/api/src/routes/connections.ts](../apps/api/src/routes/connections.ts) - No `ConnectionService`
+- `apps/api/src/routes/importSources.ts` - No `ImportSourceService`
+- [apps/api/src/routes/settings.ts](../apps/api/src/routes/settings.ts) - No `SettingsService`
+- [apps/api/src/routes/notifications.ts](../apps/api/src/routes/notifications.ts) - Channel CRUD in route
+- [apps/api/src/routes/logs.ts](../apps/api/src/routes/logs.ts) - No `LogService`
+- [apps/api/src/routes/duplicates.ts](../apps/api/src/routes/duplicates.ts) - No `DuplicateService`
+- [apps/api/src/routes/ai.ts](../apps/api/src/routes/ai.ts) - No `AISettingsService`
 
 **Impact:**
 - Business logic mixed with HTTP concerns
@@ -424,9 +424,9 @@ Multiple route files access Prisma directly instead of going through service lay
 **Priority:** Medium | **Severity:** Medium
 
 **Problem:**
-- [apps/api/src/routes/webhooks.ts](apps/api/src/routes/webhooks.ts) contains `formatEventLabel()` and `getEventDescription()` with UI-facing text
-- [apps/api/src/lib/subscriptions/presets.ts](apps/api/src/lib/subscriptions/presets.ts) has massive preset data with UI descriptions
-- [apps/api/src/routes/dashboard.ts](apps/api/src/routes/dashboard.ts) generates description strings like "Added X artists"
+- `apps/api/src/routes/webhooks.ts` contains `formatEventLabel()` and `getEventDescription()` with UI-facing text
+- `apps/api/src/lib/subscriptions/presets.ts` has massive preset data with UI descriptions
+- [apps/api/src/routes/dashboard.ts](../apps/api/src/routes/dashboard.ts) generates description strings like "Added X artists"
 
 **Impact:**
 - UI text changes require API deployment
@@ -475,7 +475,7 @@ Multiple routes return raw Prisma model objects without DTO transformation:
 ---
 
 ### Implementation Plan Reference
-See [docs/plans/2026-01-18-separation-of-concerns-refactor.md](docs/plans/2026-01-18-separation-of-concerns-refactor.md) for detailed implementation plan.
+See docs/plans/2026-01-18-separation-of-concerns-refactor.md (historical plan) for detailed implementation plan.
 
 ### Recommended Implementation Order
 
@@ -848,7 +848,7 @@ The landing page at `https://aquantumofdonuts.github.io/mixarr/` is missing stan
 **Priority:** High  
 **Created:** February 18, 2026  
 **Status:** Backlog  
-**Plan:** [Plan 2, Tasks 1-7](plans/2026-02-18-input-validation-error-handling-plan.md)
+**Plan:** Plan 2, Tasks 1-7 (historical plan)
 
 **Problem:**
 Only 4 route files use Zod validation (connections, subscriptions, feed, notifications, admin users). The remaining 8 route files accept `req.body` and `req.params` without schema validation: ai.ts, slskd.ts, discover.ts, settings.ts, sso.ts, imports.ts, jobs.ts, duplicates.ts.
@@ -864,7 +864,7 @@ Only 4 route files use Zod validation (connections, subscriptions, feed, notific
 **Priority:** High  
 **Created:** February 18, 2026  
 **Status:** Backlog  
-**Plan:** [Plan 3, Phase A](plans/2026-02-18-architecture-code-quality-plan.md)
+**Plan:** Plan 3, Phase A (historical plan)
 
 **Problem:**
 `apps/api/src/workers/subscription-worker.ts` is a single 2,312-line file with a massive switch statement handling 20+ subscription types. It mixes source fetching, artist matching, Lidarr communication, review queue management, notifications, and logging.
@@ -880,7 +880,7 @@ Only 4 route files use Zod validation (connections, subscriptions, feed, notific
 **Priority:** Medium  
 **Created:** February 18, 2026  
 **Status:** Backlog  
-**Plan:** [Plan 1, Task 9](plans/2026-02-18-critical-security-reliability-plan.md)
+**Plan:** Plan 1, Task 9 (historical plan)
 
 **Problem:**
 ~13 catch blocks across auth.ts (6), imports.ts (4), and connections.ts (3) silently swallow errors without logging. Production issues become invisible — the user gets a generic 500, but nothing appears in logs.
@@ -894,7 +894,7 @@ Only 4 route files use Zod validation (connections, subscriptions, feed, notific
 **Priority:** Medium  
 **Created:** February 18, 2026  
 **Status:** Backlog  
-**Plan:** [Plan 1 Task 6, Plan 3 Phase C](plans/2026-02-18-critical-security-reliability-plan.md)
+**Plan:** Plan 1 Task 6, Plan 3 Phase C (historical plan)
 
 **Problem:**
 - `tests/security/security.test.ts` (332 lines): Tests hardcoded strings and local variables. Zero HTTP requests, zero middleware tests. Every test passes tautologically.
@@ -911,7 +911,7 @@ Only 4 route files use Zod validation (connections, subscriptions, feed, notific
 **Priority:** Medium  
 **Created:** February 18, 2026  
 **Status:** Backlog  
-**Plan:** [Plan 1, Task 4](plans/2026-02-18-critical-security-reliability-plan.md)
+**Plan:** Plan 1, Task 4 (historical plan)
 
 **Problem:**
 No global handlers for unhandled promise rejections or uncaught exceptions in `apps/api/src/index.ts`. Unhandled errors crash the process silently with no logging.
@@ -925,7 +925,7 @@ No global handlers for unhandled promise rejections or uncaught exceptions in `a
 **Priority:** Medium  
 **Created:** February 18, 2026  
 **Status:** Backlog  
-**Plan:** [Plan 2, Task 8](plans/2026-02-18-input-validation-error-handling-plan.md)
+**Plan:** Plan 2, Task 8 (historical plan)
 
 **Problem:**
 Most external API calls (~14 service files) use bare `fetch()` without timeout handling. A hung upstream service holds connections open indefinitely, eventually exhausting server resources.
@@ -941,7 +941,7 @@ Most external API calls (~14 service files) use bare `fetch()` without timeout h
 **Priority:** Medium  
 **Created:** February 18, 2026  
 **Status:** Backlog  
-**Plan:** [Plan 3, Phase E Task E3](plans/2026-02-18-architecture-code-quality-plan.md)
+**Plan:** Plan 3, Phase E Task E3 (historical plan)
 
 **Problem:**
 Only 5 frontend test files exist compared to 102 API test files. Critical UI components (connections page, subscription modal, search page, settings) have zero test coverage.
