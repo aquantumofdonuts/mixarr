@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mixarr — Music Discovery & Catalog for Lidarr</title>
-  <meta name="description" content="Self-hosted music discovery for Lidarr. Browse a compact artist catalog, trace discovery sources, review scheduled subscription results, and explore credited collaborators.">
+  <title>Mixarr v3.0.0 — Music Discovery & Catalog for Lidarr</title>
+  <meta name="description" content="Mixarr v3.0.0 is available: a compact music catalog, artist inspector, and Collaboration Constellation for Lidarr. Unified and slim Docker images for AMD64 and ARM64.">
   <meta name="keywords" content="mixarr, lidarr, self-hosted, music discovery, music automation, arr stack, docker, spotify to lidarr, lidarr companion, lidarr recommendations, open source, tidal, deezer, lastfm, plex, musicbrainz, listenbrainz, ai recommendations, docker music app">
   <meta name="author" content="Mixarr">
   <meta name="theme-color" content="#bf7a56">
@@ -15,8 +15,8 @@
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://aquantumofdonuts.github.io/mixarr/">
-  <meta property="og:title" content="Mixarr — Music Discovery & Catalog for Lidarr">
-  <meta property="og:description" content="A self-hosted music catalog for Lidarr. Discover artists through subscriptions, inspect sources and releases, and review additions with clear outcomes.">
+  <meta property="og:title" content="Mixarr v3.0.0 — Music Discovery & Catalog for Lidarr">
+  <meta property="og:description" content="Discover music with context. Explore a compact catalog, inspect artists, and follow recording credits with Collaboration Constellation. v3.0.0 is available for AMD64 and ARM64.">
   <meta property="og:image" content="https://aquantumofdonuts.github.io/mixarr/img/mixarr-discover.png">
   <meta property="og:image:width" content="1440">
   <meta property="og:image:height" content="1000">
@@ -24,8 +24,8 @@
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Mixarr — Self-Hosted Music Discovery for Lidarr">
-  <meta name="twitter:description" content="Discover artists, trace their sources, review subscription results, and explore credited collaborators. Free, open source, and self-hosted.">
+  <meta name="twitter:title" content="Mixarr v3.0.0 — Discover Music with Context">
+  <meta name="twitter:description" content="A compact music catalog, artist inspector, and Collaboration Constellation. v3.0.0 unified and slim Docker images are available for AMD64 and ARM64.">
   <meta name="twitter:image" content="https://aquantumofdonuts.github.io/mixarr/img/mixarr-discover.png">
 
   <!-- Favicons -->
@@ -74,6 +74,7 @@
       </button>
       <ul class="nav-links">
         <li><a href="#home">Home</a></li>
+        <li><a href="#release">v3.0.0</a></li>
         <li><a href="#features">Features</a></li>
         <li><a href="#install">Install</a></li>
         <li><a href="#support">Support</a></li>
@@ -111,12 +112,26 @@
           <button class="dot" aria-label="Slide 4"></button>
         </div>
       </div>
-      <p class="hero-subtitle">Mixarr 3.0.0 · music discovery and catalog companion</p>
+      <p class="hero-subtitle">Mixarr v3.0.0 is available · AMD64 &amp; ARM64</p>
       <h1>Find your next artist. Know where they came from.</h1>
       <p class="hero-subtitle">Bring playlists, charts, listening history, and recommendations into one music catalog. Inspect artists and their sources, review discoveries, then send your choices to Lidarr.</p>
       <div class="hero-cta">
-        <a href="#features" class="btn btn-primary">See How It Works</a>
-        <a href="https://github.com/aquantumofdonuts/mixarr" class="btn btn-secondary" target="_blank" rel="noopener">View on GitHub</a>
+        <a href="#install" class="btn btn-primary">Get v3.0.0</a>
+        <a href="https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0" class="btn btn-secondary" target="_blank" rel="noopener">Read the Release Notes</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Current release -->
+  <section id="release" class="why">
+    <div class="container">
+      <h2>v3.0.0: discover music with context</h2>
+      <p>Released October 29, 2026. Browse a compact catalog, open the shared artist inspector, and follow the people credited on your favorite records with Collaboration Constellation.</p>
+      <p>Review discoveries with clearer outcomes and Undo, or send an artist or individual album to Lidarr. This release also fixes saved slskd connection tests, manual search timeouts, and the slim image’s default frontend connection.</p>
+      <p>Upgrading from v2? Back up first, keep your volumes and session secret, and use the versioned image. Released v2 schemas upgrade directly through checked migrations. Allow for a brief application restart.</p>
+      <div class="hero-cta">
+        <a href="https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0" class="btn btn-primary">What’s New in v3.0.0</a>
+        <a href="https://github.com/aquantumofdonuts/mixarr/blob/prod/README.md#upgrading" class="btn btn-secondary">Upgrade Guide &amp; API Changes</a>
       </div>
     </div>
   </section>
@@ -151,7 +166,7 @@
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
         </div>
       </div>
-      <p class="services-ai">Integrations depend on each provider’s current API and authorization. <a href="https://github.com/aquantumofdonuts/mixarr/blob/dev/docs/ISSUES.md">See known issues</a>, including TIDAL subscription compatibility.</p>
+      <p class="services-ai">Integrations depend on each provider’s current API and authorization. <a href="https://github.com/aquantumofdonuts/mixarr/blob/prod/docs/ISSUES.md">See known issues</a>, including TIDAL and Jellyfin compatibility. Live provider verification remains separate from release testing.</p>
       <p class="services-ai">Also includes Jellyfin, Discogs, Bandcamp, and optional AI recommendations via OpenAI, Anthropic, or compatible endpoints such as Ollama.</p>
     </div>
   </section>
@@ -202,7 +217,7 @@
           <div class="feature-img">
             <img src="img/mixarr-constellation.png" alt="Follow credited collaborators" loading="lazy" width="1440" height="1000">
           </div>
-          <h3>Follow credited collaborators</h3>
+          <h3>Collaboration Constellation</h3>
           <p>Explore people who share recording credits, inspect roles and releases, and find collaboration paths. The graph stays bounded to 300 visible people.</p>
         </div>
         <div class="feature-card">
@@ -263,27 +278,38 @@
         <button class="tab-btn" data-tab="unraid">Unraid</button>
       </div>
       <div class="tab-content active" id="tab-compose">
-        <pre><code>git clone --branch prod https://github.com/aquantumofdonuts/mixarr.git
-cd mixarr
-cp .env.example .env
-# Edit .env: set a strong SESSION_SECRET and your public URLs
-docker compose up -d --build
+        <p class="install-requirements">For a new installation, save this as <code>docker-compose.yml</code>. Create a <code>.env</code> file with <code>SESSION_SECRET</code> (generate once with <code>openssl rand -hex 32</code>) and <code>BASE_URL=https://YOUR-IP:3443</code>. Keep that file for upgrades.</p>
+        <pre><code>services:
+  mixarr:
+    image: ghcr.io/aquantumofdonuts/mixarr:v3.0.0
+    container_name: mixarr
+    ports:
+      - "3443:443"
+      - "3010:3000"
+    volumes:
+      - ./mixarr-data:/data
+    environment:
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      BASE_URL: ${BASE_URL:?Set BASE_URL in .env}
+      FRONTEND_URL: ${BASE_URL}
+    restart: unless-stopped
 
-# Access at https://your-ip:3443</code></pre>
+# Start with: docker compose up -d
+# Open https://YOUR-IP:3443</code></pre>
         <button class="copy-btn" data-target="tab-compose">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
           <span>Copy</span>
         </button>
       </div>
       <div class="tab-content" id="tab-run">
+        <p class="install-requirements">For a new installation, save <code>SESSION_SECRET</code>, <code>BASE_URL</code>, and <code>FRONTEND_URL</code> in <code>.env</code> as shown in the <a href="https://github.com/aquantumofdonuts/mixarr/blob/prod/README.md#quick-start">quick start</a>. Reuse the same file when recreating the container.</p>
         <pre><code>docker run -d \
   --name mixarr \
   -p 3443:443 \
+  -p 3010:3000 \
   -v ~/mixarr-data:/data \
-  -e SESSION_SECRET="$(openssl rand -hex 32)" \
-  -e FRONTEND_URL="https://YOUR-IP:3443" \
-  -e BASE_URL="https://YOUR-IP:3443" \
-  ghcr.io/aquantumofdonuts/mixarr:latest</code></pre>
+  --env-file .env \
+  ghcr.io/aquantumofdonuts/mixarr:v3.0.0</code></pre>
         <button class="copy-btn" data-target="tab-run">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
           <span>Copy</span>
@@ -291,11 +317,12 @@ docker compose up -d --build
       </div>
       <div class="tab-content" id="tab-unraid">
         <div class="unraid-content">
-          <p>Use the Docker Run settings in Unraid’s Docker UI: image <code>ghcr.io/aquantumofdonuts/mixarr:latest</code>, HTTPS port <code>3443:443</code>, a persistent <code>/data</code> mapping, and the same environment variables. See the <a href="https://github.com/aquantumofdonuts/mixarr/blob/prod/README.md">deployment guide</a> for image variants.</p>
+          <p>Use the <a href="https://github.com/aquantumofdonuts/mixarr/blob/prod/deploy/unraid.xml">v3.0.0 Unraid template</a>, or enter the Docker Run settings in Unraid’s Docker UI: image <code>ghcr.io/aquantumofdonuts/mixarr:v3.0.0</code>, HTTPS port <code>3443:443</code>, a persistent <code>/data</code> mapping, and the same environment variables. Keep existing data mappings and the session secret when updating an installed container.</p>
         </div>
       </div>
-      <p class="install-requirements">Requirements: Docker; Docker Compose for the Compose option; a Lidarr instance for library additions. After installation, create an admin account and configure your connections.</p>
-      <p class="install-requirements">Docker Compose builds from <code>prod</code>. Docker images are published separately when the release tag is pushed; check the release page before upgrading an image.</p>
+      <p class="install-requirements">Requirements: Docker on AMD64 or ARM64; Docker Compose for the Compose option; a Lidarr instance for library additions. After installation, create an admin account and configure your connections.</p>
+      <p class="install-requirements">Unified <code>v3.0.0</code> includes MariaDB, Redis, and Caddy. For an external database and Redis, use <code>v3.0.0-slim</code> and the <a href="https://github.com/aquantumofdonuts/mixarr/blob/prod/README.md#deployment-options">slim deployment guide</a>. Both variants are published; <code>latest</code> and <code>slim</code> are moving stable aliases.</p>
+      <p class="install-requirements">Already running Mixarr? Follow the <a href="https://github.com/aquantumofdonuts/mixarr/blob/prod/README.md#upgrading">upgrade guide</a> with your existing configuration. Back up first, retain volumes and <code>SESSION_SECRET</code>, and read the v3 API changes before updating custom clients.</p>
       <a href="https://github.com/aquantumofdonuts/mixarr#readme" class="btn btn-secondary" target="_blank" rel="noopener">View Full Documentation</a>
     </div>
   </section>
@@ -326,7 +353,7 @@ docker compose up -d --build
       <div class="footer-links">
         <a href="https://github.com/aquantumofdonuts/mixarr" target="_blank" rel="noopener">GitHub</a>
         <span>·</span>
-        <a href="https://github.com/aquantumofdonuts/mixarr/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0" target="_blank" rel="noopener">v3.0.0 Release Notes</a>
         <span>·</span>
         <a href="https://github.com/aquantumofdonuts/mixarr/issues" target="_blank" rel="noopener">Issues</a>
       </div>
