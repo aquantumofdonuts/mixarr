@@ -35,11 +35,8 @@ import { createRedisConnection } from '../lib/redis.js';
 const log = createLogger('SlskdRoutes');
 
 /**
- * slskd reports remote filenames/directories as the peer's full path using
- * whatever separator the peer's OS uses — almost always Windows `\`, since
- * most Soulseek peers are Windows clients (confirmed live 2026-07-21).
- * Extracts just the final path segment regardless of separator, so the
- * result can be validated as a plain path component below.
+ * Extract the final path segment from peer paths using Windows or POSIX
+ * separators. Linux path.basename alone does not strip backslashes.
  */
 export function slskdBasename(remotePath: string): string {
   const segments = remotePath.split(/[\\/]+/).filter(Boolean);
@@ -93,9 +90,13 @@ router.use(apiLimiter);
  * Helper to get slskd connection and service
  * Returns null if no enabled slskd connection exists
  */
-async function getSlskdService(): Promise<{ service: SlskdService; connectionId: number } | null> {
+function connectionScope(req: Request): Prisma.ConnectionWhereInput {
+  return req.user!.role === 'admin' ? {} : { userId: req.user!.id };
+}
+
+async function getSlskdService(req: Request, connectionId?: number): Promise<{ service: SlskdService; connectionId: number } | null> {
   const connection = await prisma.connection.findFirst({
-    where: { type: 'slskd', isActive: true },
+    where: { type: 'slskd', isActive: true, ...connectionScope(req), ...(connectionId === undefined ? {} : { id: connectionId }) },
   });
 
   if (!connection) {
@@ -126,13 +127,17 @@ router.post('/search', validateBody(slskdSearchSchema), async (req: Request, res
   try {
     const { query, options } = req.body;
 
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
     }
 
-    const result = await slskd.service.search(query, options);
+    const result = await slskd.service.search(query, options && {
+      ...options,
+      // Mixarr's public API uses seconds; slskd's search engine uses milliseconds.
+      ...(options.searchTimeout === undefined ? {} : { searchTimeout: options.searchTimeout * 1000 }),
+    });
     res.json(result);
   } catch (error) {
     log.error('slskd search failed', { error: error instanceof Error ? error.message : error });
@@ -152,7 +157,7 @@ router.get('/search/:id', validateParams(slskdSearchIdParamsSchema), async (req:
   try {
     const { id } = req.params;
 
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
@@ -178,7 +183,7 @@ router.delete('/search/:id', validateParams(slskdSearchIdParamsSchema), async (r
   try {
     const { id } = req.params;
 
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
@@ -212,7 +217,7 @@ router.post('/download', validateBody(slskdDownloadSchema), async (req: Request,
   try {
     const { username, files, artistName, albumName, albumYear } = req.body;
 
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
@@ -234,7 +239,7 @@ router.post('/download', validateBody(slskdDownloadSchema), async (req: Request,
           await job.waitUntilFinished(queueEvents, 10000);
         }
       } else {
-        // Legacy path: direct slskd call
+        // Call slskd directly when no operation queue is configured
         await slskd.service.queueDownload(username, files);
       }
     } catch (error) {
@@ -285,7 +290,10 @@ router.get('/downloads', validateQuery(slskdDownloadsQuerySchema), async (req: R
     const { status, limit } = req.query as { status?: string; limit?: number };
     
     // Build where clause with proper Prisma types
-    const where: Prisma.SlskdDownloadWhereInput = {};
+    const connections = await prisma.connection.findMany({
+      where: { type: 'slskd', ...connectionScope(req) }, select: { id: true },
+    });
+    const where: Prisma.SlskdDownloadWhereInput = { connectionId: { in: connections.map(connection => connection.id) } };
     
     if (status && typeof status === 'string') {
       const statuses = status.split(',').map(s => s.trim());
@@ -322,7 +330,10 @@ router.post('/downloads/:id/retry', validateParams(slskdDownloadIdParamsSchema),
     
     const download = await prisma.slskdDownload.findUnique({ where: { id } });
     
-    if (!download) {
+    const connection = download && await prisma.connection.findFirst({
+      where: { id: download.connectionId, type: 'slskd', ...connectionScope(req) },
+    });
+    if (!download || !connection) {
       res.status(404).json({ error: 'Download not found' });
       return;
     }
@@ -332,7 +343,7 @@ router.post('/downloads/:id/retry', validateParams(slskdDownloadIdParamsSchema),
       return;
     }
     
-    const slskd = await getSlskdService();
+    const slskd = await getSlskdService(req, download.connectionId);
     if (!slskd) {
       res.status(400).json({ error: 'No Soulseek connection configured. Add one in Settings → Connections.' });
       return;
@@ -352,7 +363,7 @@ router.post('/downloads/:id/retry', validateParams(slskdDownloadIdParamsSchema),
         });
         await job.waitUntilFinished(queueEvents, 10000);
       } else {
-        // Legacy path: direct slskd call
+        // Call slskd directly when no operation queue is configured
         await slskd.service.queueDownload(download.username, [{
           filename: download.filename,
           size: Number(download.fileSize),
@@ -398,7 +409,10 @@ router.delete('/downloads/:id', validateParams(slskdDownloadIdParamsSchema), val
     
     const download = await prisma.slskdDownload.findUnique({ where: { id } });
     
-    if (!download) {
+    const connection = download && await prisma.connection.findFirst({
+      where: { id: download.connectionId, type: 'slskd', ...connectionScope(req) },
+    });
+    if (!download || !connection) {
       res.status(404).json({ error: 'Download not found' });
       return;
     }
@@ -521,10 +535,7 @@ router.post('/webhook', webhookLimiter, validateBody(slskdWebhookSchema), async 
     const downloadDir = config.downloadDir || '/data/slskd/downloads';
     const musicLibraryDir = config.musicLibraryDir || '/data/plex/music';
 
-    // Build download path with validated components. slskd never
-    // namespaces completed downloads by username and flattens the
-    // remote directory to just its leaf name — confirmed live 2026-07-21
-    // against real files on disk (see slskd-poll.ts for the same fix).
+    // Normalize the peer's remote directory to its leaf before matching local files.
     const downloadPath = `${downloadDir}/${safeDirectory}/${safeFilename}`;
 
     // Atomic status update - only update if still in expected state
@@ -542,7 +553,7 @@ router.post('/webhook', webhookLimiter, validateBody(slskdWebhookSchema), async 
       },
     });
 
-    // Check if we won the race
+    // Check whether this caller claimed the pending download
     if (updated.count === 0) {
       // Another process already started organizing this download
       log.debug('Download already being organized by another process', { downloadId: download.id });
@@ -550,7 +561,7 @@ router.post('/webhook', webhookLimiter, validateBody(slskdWebhookSchema), async 
       return;
     }
 
-    // We won the race - proceed with organization
+    // Organize files only after a successful claim
     const organizer = new SlskdOrganizerService({ downloadDir, musicLibraryDir });
 
     try {

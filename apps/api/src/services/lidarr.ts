@@ -4,6 +4,7 @@
  * Handles all interactions with the Lidarr API.
  */
 
+import { setTimeout as delay } from 'node:timers/promises';
 import { rateLimit } from './rate-limiter.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
 import { createLogger } from '../lib/logger.js';
@@ -114,8 +115,8 @@ export class LidarrService {
     this.apiKey = config.apiKey;
   }
 
-  private async sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  private async sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    await delay(ms, undefined, { signal });
   }
 
   private isRetryableError(status: number): boolean {
@@ -124,7 +125,8 @@ export class LidarrService {
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    await rateLimit('lidarr');
+    options.signal?.throwIfAborted();
+    await rateLimit('lidarr', options.signal ?? undefined);
     
     const url = `${this.baseUrl}/api/v1${endpoint}`;
     let lastError: Error | null = null;
@@ -135,13 +137,15 @@ export class LidarrService {
         if (attempt > 0) {
           const delay = this.baseDelay * Math.pow(2, attempt - 1) + Math.random() * 500;
           log.debug(`Retry ${attempt}/${this.maxRetries} after ${Math.round(delay)}ms for ${endpoint}`);
-          await this.sleep(delay);
-          await rateLimit('lidarr'); // Re-acquire rate limit for retry
+          await this.sleep(delay, options.signal ?? undefined);
+          await rateLimit('lidarr', options.signal ?? undefined); // Re-acquire rate limit for retry
         }
 
+        options.signal?.throwIfAborted();
         // lgtm[js/request-forgery] - URL is admin-configured via settings, not user input
         const response = await fetchWithTimeout(url, {
           ...options,
+          timeout: 30_000,
           headers: {
             'X-Api-Key': this.apiKey,
             'Content-Type': 'application/json',
@@ -164,40 +168,37 @@ export class LidarrService {
               }
             }
           } catch {
+            options.signal?.throwIfAborted();
             // Ignore body read errors
           }
           
           // Check if we should retry
           if (this.isRetryableError(response.status) && attempt < this.maxRetries) {
-            lastError = new Error(`Lidarr API error: ${response.status} - ${errorDetail}`);
+            lastError = Object.assign(new Error(`Lidarr API error: ${response.status} - ${errorDetail}`), { status: response.status });
             continue; // Try again
           }
           
-          throw new Error(`Lidarr API error: ${response.status} - ${errorDetail}`);
+          throw Object.assign(new Error(`Lidarr API error: ${response.status} - ${errorDetail}`), { status: response.status });
         }
 
-        return response.json() as Promise<T>;
+        const data = await response.json() as T;
+        options.signal?.throwIfAborted();
+        return data;
       } catch (error) {
+        options.signal?.throwIfAborted();
         lastError = error instanceof Error ? error : new Error(String(error));
         
         // Check if it's a network error (fetch failed) - these are retryable
-        const isNetworkError = lastError.message.includes('fetch failed') || 
+        const isNetworkError = !('status' in lastError) && (lastError.message.includes('fetch failed') ||
                                lastError.message.includes('ECONNREFUSED') ||
-                               lastError.message.includes('ETIMEDOUT');
+                               lastError.message.includes('ETIMEDOUT'));
         
         if (isNetworkError && attempt < this.maxRetries) {
           continue; // Try again
         }
         
-        // If it's a non-retryable error or we've exhausted retries, throw
-        if (attempt >= this.maxRetries) {
-          throw lastError;
-        }
-        
-        // For non-retryable errors in the middle of attempts, throw immediately
-        if (!isNetworkError && !lastError.message.includes('503') && !lastError.message.includes('429')) {
-          throw lastError;
-        }
+        // HTTP retries are decided from the response status above.
+        throw lastError;
       }
     }
     
@@ -216,16 +217,16 @@ export class LidarrService {
     }
   }
 
-  async getArtists(): Promise<LidarrArtist[]> {
-    return this.request<LidarrArtist[]>('/artist');
+  async getArtists(signal?: AbortSignal): Promise<LidarrArtist[]> {
+    return this.request<LidarrArtist[]>('/artist', { signal });
   }
 
   async getArtist(id: number): Promise<LidarrArtist> {
     return this.request<LidarrArtist>(`/artist/${id}`);
   }
 
-  async searchArtist(term: string): Promise<LidarrSearchResult[]> {
-    return this.request<LidarrSearchResult[]>(`/artist/lookup?term=${encodeURIComponent(term)}`);
+  async searchArtist(term: string, signal?: AbortSignal): Promise<LidarrSearchResult[]> {
+    return this.request<LidarrSearchResult[]>(`/artist/lookup?term=${encodeURIComponent(term)}`, { signal });
   }
 
   async searchAlbum(term: string): Promise<LidarrAlbumSearchResult[]> {
@@ -240,19 +241,21 @@ export class LidarrService {
     monitored: boolean = true,
     searchForMissingAlbums: boolean = true,
     monitorOption: string = 'all',
-    monitorNewItems: string = 'all'
+    monitorNewItems: string = 'all',
+    signal?: AbortSignal
   ): Promise<LidarrArtist> {
     // Use slower rate limit for add operations to avoid overwhelming Lidarr
-    await rateLimit('lidarr_add');
+    signal?.throwIfAborted();
+    await rateLimit('lidarr_add', signal);
     
     // Search by MBID using lidarr: prefix for exact match
     const searchTerm = `lidarr:${foreignArtistId}`;
-    const searchResults = await this.searchArtist(searchTerm);
+    const searchResults = await this.searchArtist(searchTerm, signal);
     let artist = searchResults.find(a => a.foreignArtistId === foreignArtistId);
     
     // If lidarr: prefix didn't work, try searching by the raw MBID
     if (!artist) {
-      const rawResults = await this.searchArtist(foreignArtistId);
+      const rawResults = await this.searchArtist(foreignArtistId, signal);
       artist = rawResults.find(a => a.foreignArtistId === foreignArtistId);
     }
     
@@ -260,7 +263,7 @@ export class LidarrService {
       throw new Error(`Artist not found in Lidarr for MBID: ${foreignArtistId}`);
     }
 
-    // Build request body with explicit fields only (matching upstream Python implementation)
+    // Build the request body with explicit Lidarr fields
     // Don't spread ...artist as search results may contain conflicting/stale fields
     const requestBody = {
       artistName: artist.artistName,
@@ -282,22 +285,24 @@ export class LidarrService {
     return this.request<LidarrArtist>('/artist', {
       method: 'POST',
       body: JSON.stringify(requestBody),
+      signal,
     });
   }
 
-  async getArtistByMbid(mbid: string): Promise<LidarrArtist | null> {
-    const artists = await this.getArtists();
+  async getArtistByMbid(mbid: string, signal?: AbortSignal): Promise<LidarrArtist | null> {
+    const artists = await this.getArtists(signal);
     return artists.find(a => a.foreignArtistId === mbid) || null;
   }
 
-  async getAlbums(artistId: number): Promise<LidarrAlbum[]> {
-    return this.request<LidarrAlbum[]>(`/album?artistId=${artistId}`);
+  async getAlbums(artistId: number, signal?: AbortSignal): Promise<LidarrAlbum[]> {
+    return this.request<LidarrAlbum[]>(`/album?artistId=${artistId}`, { signal });
   }
 
-  async updateAlbum(album: LidarrAlbum): Promise<LidarrAlbum> {
+  async updateAlbum(album: LidarrAlbum, signal?: AbortSignal): Promise<LidarrAlbum> {
     return this.request<LidarrAlbum>(`/album/${album.id}`, {
       method: 'PUT',
       body: JSON.stringify(album),
+      signal,
     });
   }
 
@@ -342,9 +347,10 @@ export class LidarrService {
     return result;
   }
 
-  async searchAlbumCommand(albumIds: number[]): Promise<{ id: number }> {
+  async searchAlbumCommand(albumIds: number[], signal?: AbortSignal): Promise<{ id: number }> {
     return this.request<{ id: number }>('/command', {
       method: 'POST',
+      signal,
       body: JSON.stringify({
         name: 'AlbumSearch',
         albumIds,
@@ -353,10 +359,8 @@ export class LidarrService {
   }
 
   /**
-   * Fetch Lidarr's current download queue. Used by the 60-day sweep to find
-   * and remove entries for albums that are being abandoned (see
-   * removeQueueItem below) — not part of the original service, added for
-   * that purpose.
+   * Fetch the current Lidarr download queue so the diversion sweep can remove
+   * entries for albums being abandoned.
    */
   async getQueue(pageSize = 1000): Promise<Array<{ id: number; albumId?: number; artistId?: number; title: string }>> {
     const result = await this.request<{ records: Array<{ id: number; albumId?: number; artistId?: number; title: string }> }>(
@@ -438,11 +442,8 @@ export class LidarrService {
   }
 
   /**
-   * Add an artist to Lidarr.
-   * 
-   * Note: We previously triggered a metadata refresh after adding, but this
-   * caused full library scans due to Lidarr API issues. The addArtist call
-   * already fetches metadata from MusicBrainz, so extra refresh is unnecessary.
+   * Add an artist to Lidarr. The add request fetches MusicBrainz metadata;
+   * omit an extra metadata refresh to avoid triggering full-library scans.
    */
   async addArtistWithRefresh(
     foreignArtistId: string,
@@ -453,7 +454,8 @@ export class LidarrService {
     searchForMissingAlbums: boolean = true,
     _waitForRefresh: boolean = false,  // Kept for API compatibility, no longer used
     monitorOption: string = 'all',
-    monitorNewItems: string = 'all'
+    monitorNewItems: string = 'all',
+    signal?: AbortSignal
   ): Promise<{ artist: LidarrArtist; refreshCommand?: LidarrCommand }> {
     const artist = await this.addArtist(
       foreignArtistId,
@@ -463,7 +465,8 @@ export class LidarrService {
       monitored,
       searchForMissingAlbums,
       monitorOption,
-      monitorNewItems
+      monitorNewItems,
+      signal
     );
 
     // No longer triggering refresh - Lidarr's addArtist already fetches metadata
@@ -486,34 +489,37 @@ export class LidarrService {
     searchForMissingAlbums: boolean = true,
     _waitForRefresh: boolean = false,
     monitorOption: string = 'all',
-    monitorNewItems: string = 'all'
-  ): Promise<{ artist: LidarrArtist; refreshCommand?: LidarrCommand; cacheWarmed?: boolean; wasAlreadyCached?: boolean }> {
+    monitorNewItems: string = 'all',
+    signal?: AbortSignal
+  ): Promise<{ artist: LidarrArtist; refreshCommand?: LidarrCommand; cacheWarmed?: boolean; wasAlreadyCached?: boolean; alreadyInLibrary?: boolean }> {
     // Check if artist exists - only need to warm cache if adding new artist
-    const existingArtist = await this.getArtistByMbid(foreignArtistId);
+    const existingArtist = await this.getArtistByMbid(foreignArtistId, signal);
+    signal?.throwIfAborted();
+    if (existingArtist) {
+      return { artist: existingArtist, cacheWarmed: false, alreadyInLibrary: true };
+    }
     
     let cacheWarmed = false;
     let wasAlreadyCached: boolean | undefined;
     
-    if (!existingArtist) {
-      // Warm SkyHook cache before adding
-      try {
-        log.info(`Warming SkyHook cache for artist ${foreignArtistId}...`);
-        const warmResult = await skyhookWarmer.warmArtist(foreignArtistId);
-        cacheWarmed = warmResult.success;
-        wasAlreadyCached = warmResult.cached;
-        if (warmResult.success) {
-          log.info(`SkyHook cache ${warmResult.cached ? 'already warm' : 'warmed'} for artist ${foreignArtistId} (${warmResult.attempts} attempts)`);
-        } else {
-          log.warn(`Failed to warm SkyHook cache for artist ${foreignArtistId}: ${warmResult.error}`);
-        }
-      } catch (error) {
-        // Log but don't fail - cache may already be warm or issue may be transient
-        log.warn(`Failed to warm SkyHook cache for artist ${foreignArtistId}: ${error instanceof Error ? error.message : error}`);
+    // Warm SkyHook cache before adding
+    try {
+      log.info(`Warming SkyHook cache for artist ${foreignArtistId}...`);
+      const warmResult = await skyhookWarmer.warmArtist(foreignArtistId, { signal });
+      cacheWarmed = warmResult.success;
+      wasAlreadyCached = warmResult.cached;
+      if (warmResult.success) {
+        log.info(`SkyHook cache ${warmResult.cached ? 'already warm' : 'warmed'} for artist ${foreignArtistId} (${warmResult.attempts} attempts)`);
+      } else {
+        log.warn(`Failed to warm SkyHook cache for artist ${foreignArtistId}: ${warmResult.error}`);
       }
-    } else {
-      log.debug(`Artist ${foreignArtistId} already exists in Lidarr, skipping cache warm`);
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Log but don't fail - cache may already be warm or issue may be transient
+      log.warn(`Failed to warm SkyHook cache for artist ${foreignArtistId}: ${error instanceof Error ? error.message : error}`);
     }
 
+    signal?.throwIfAborted();
     // Proceed with add using existing method
     const result = await this.addArtistWithRefresh(
       foreignArtistId,
@@ -524,7 +530,8 @@ export class LidarrService {
       searchForMissingAlbums,
       _waitForRefresh,
       monitorOption,
-      monitorNewItems
+      monitorNewItems,
+      signal
     );
 
     return { ...result, cacheWarmed, wasAlreadyCached };
@@ -535,13 +542,16 @@ export class LidarrService {
     albumMbid: string,
     qualityProfileId: number,
     metadataProfileId: number,
-    rootFolderPath: string
+    rootFolderPath: string,
+    signal?: AbortSignal,
+    searchOnAdd = true
   ): Promise<{ artist: LidarrArtist; album: LidarrAlbum; isNewArtist: boolean }> {
     // Use slower rate limit for add operations
-    await rateLimit('lidarr_add');
+    signal?.throwIfAborted();
+    await rateLimit('lidarr_add', signal);
 
     // Step 1: Check if artist exists in Lidarr
-    let artist = await this.getArtistByMbid(artistMbid);
+    let artist = await this.getArtistByMbid(artistMbid, signal);
     let isNewArtist = false;
 
     if (!artist) {
@@ -550,12 +560,12 @@ export class LidarrService {
       
       // Search by MBID using lidarr: prefix for exact match
       const searchTerm = `lidarr:${artistMbid}`;
-      const searchResults = await this.searchArtist(searchTerm);
+      const searchResults = await this.searchArtist(searchTerm, signal);
       let artistData = searchResults.find(a => a.foreignArtistId === artistMbid);
       
       // If lidarr: prefix didn't work, try searching by the raw MBID
       if (!artistData) {
-        const rawResults = await this.searchArtist(artistMbid);
+        const rawResults = await this.searchArtist(artistMbid, signal);
         artistData = rawResults.find(a => a.foreignArtistId === artistMbid);
       }
       
@@ -565,6 +575,7 @@ export class LidarrService {
 
       artist = await this.request<LidarrArtist>('/artist', {
         method: 'POST',
+        signal,
         body: JSON.stringify({
           ...artistData,
           qualityProfileId,
@@ -581,7 +592,7 @@ export class LidarrService {
       // Wait for Lidarr to fetch artist metadata (albums list)
       // Lidarr queues a RefreshArtist command when an artist is added
       log.debug('Waiting for artist metadata to be fetched...');
-      await this.sleep(2000); // Give Lidarr time to start fetching
+      await this.sleep(2000, signal); // Give Lidarr time to start fetching
     }
 
     // Step 3: Get albums for the artist and find the target album
@@ -591,7 +602,7 @@ export class LidarrService {
     const retryDelay = 2000;
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const albums = await this.getAlbums(artist.id);
+      const albums = await this.getAlbums(artist.id, signal);
       targetAlbum = albums.find(a => a.foreignAlbumId === albumMbid);
       
       if (targetAlbum) {
@@ -600,7 +611,7 @@ export class LidarrService {
       
       if (attempt < maxRetries) {
         log.debug(`Album not found yet, retry ${attempt}/${maxRetries}...`);
-        await this.sleep(retryDelay);
+        await this.sleep(retryDelay, signal);
       }
     }
 
@@ -612,15 +623,17 @@ export class LidarrService {
     const updatedAlbum = await this.updateAlbum({
       ...targetAlbum,
       monitored: true,
-    });
+    }, signal);
 
     // Step 5: Trigger search for that album only (if not already downloaded)
     const percentComplete = updatedAlbum.statistics?.percentOfTracks ?? 0;
-    if (percentComplete >= 100) {
-      log.debug(`Album "${updatedAlbum.title}" already fully downloaded (${percentComplete}%), skipping search`);
+    if (!searchOnAdd || percentComplete >= 100) {
+      log.debug(searchOnAdd
+        ? `Album "${updatedAlbum.title}" already fully downloaded (${percentComplete}%), skipping search`
+        : `Album "${updatedAlbum.title}" search on add is disabled, skipping search`);
     } else {
       log.debug(`Album "${updatedAlbum.title}" at ${percentComplete}% - triggering search`);
-      await this.searchAlbumCommand([updatedAlbum.id]);
+      await this.searchAlbumCommand([updatedAlbum.id], signal);
     }
 
     return {
@@ -642,10 +655,12 @@ export class LidarrService {
     albumMbid: string,
     qualityProfileId: number,
     metadataProfileId: number,
-    rootFolderPath: string
+    rootFolderPath: string,
+    signal?: AbortSignal,
+    searchOnAdd = true
   ): Promise<{ artist: LidarrArtist; album: LidarrAlbum; isNewArtist: boolean; cacheWarmed?: boolean; wasAlreadyCached?: boolean }> {
     // Check if artist exists - only need to warm cache if adding new artist
-    const existingArtist = await this.getArtistByMbid(artistMbid);
+    const existingArtist = await this.getArtistByMbid(artistMbid, signal);
     
     let cacheWarmed = false;
     let wasAlreadyCached: boolean | undefined;
@@ -654,7 +669,7 @@ export class LidarrService {
       // Warm SkyHook cache for artist before adding
       try {
         log.info(`Warming SkyHook cache for artist ${artistMbid} (album add)...`);
-        const warmResult = await skyhookWarmer.warmArtist(artistMbid);
+        const warmResult = await skyhookWarmer.warmArtist(artistMbid, { signal });
         cacheWarmed = warmResult.success;
         wasAlreadyCached = warmResult.cached;
         if (warmResult.success) {
@@ -663,33 +678,37 @@ export class LidarrService {
           log.warn(`Failed to warm SkyHook cache for artist ${artistMbid}: ${warmResult.error}`);
         }
       } catch (error) {
+        signal?.throwIfAborted();
         // Log but don't fail - cache may already be warm or issue may be transient
         log.warn(`Failed to warm SkyHook cache for artist ${artistMbid}: ${error instanceof Error ? error.message : error}`);
       }
     }
 
+    signal?.throwIfAborted();
     // Proceed with album add using existing method
     const result = await this.addAlbum(
       artistMbid,
       albumMbid,
       qualityProfileId,
       metadataProfileId,
-      rootFolderPath
+      rootFolderPath,
+      signal,
+      searchOnAdd
     );
 
     return { ...result, cacheWarmed, wasAlreadyCached };
   }
 
-  async getQualityProfiles(): Promise<Array<{ id: number; name: string }>> {
-    return this.request<Array<{ id: number; name: string }>>('/qualityprofile');
+  async getQualityProfiles(signal?: AbortSignal): Promise<Array<{ id: number; name: string }>> {
+    return this.request<Array<{ id: number; name: string }>>('/qualityprofile', { signal });
   }
 
-  async getMetadataProfiles(): Promise<Array<{ id: number; name: string }>> {
-    return this.request<Array<{ id: number; name: string }>>('/metadataprofile');
+  async getMetadataProfiles(signal?: AbortSignal): Promise<Array<{ id: number; name: string }>> {
+    return this.request<Array<{ id: number; name: string }>>('/metadataprofile', { signal });
   }
 
-  async getRootFolders(): Promise<Array<{ id: number; path: string; freeSpace: number }>> {
-    return this.request<Array<{ id: number; path: string; freeSpace: number }>>('/rootfolder');
+  async getRootFolders(signal?: AbortSignal): Promise<Array<{ id: number; path: string; freeSpace: number }>> {
+    return this.request<Array<{ id: number; path: string; freeSpace: number }>>('/rootfolder', { signal });
   }
 
   async artistExists(mbid: string): Promise<boolean> {

@@ -31,7 +31,7 @@ const createTestSetup = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
-      mutations: { retry: false },
+      mutations: { retry: 2, retryDelay: 0 },
     },
   });
   const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -45,6 +45,89 @@ const createTestSetup = () => {
 describe('useConnectionForm', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+  });
+
+  it('retains a session Fail and invalidates the timestamp after a fulfilled failed test', async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({ data: { success: false, message: 'Invalid key' }, error: null, status: 200 });
+    const { Wrapper, invalidateSpy } = createTestSetup();
+    const { result } = renderHook(() => useConnectionForm(), { wrapper: Wrapper });
+    await act(async () => { await result.current.testConnection(4); });
+    expect(result.current.testStates[4]).toMatchObject({ verdict: 'fail', message: 'Invalid key' });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.connections });
+  });
+
+  it('uses zero mutation retries for save, test and delete under the real global retry default', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: null, error: 'Offline', status: 503 });
+    vi.mocked(api.delete).mockResolvedValue({ data: null, error: 'Offline', status: 503 });
+    const { Wrapper } = createTestSetup();
+    const { result } = renderHook(() => useConnectionForm(), { wrapper: Wrapper });
+    await act(async () => {
+      expect(await result.current.saveConnection('lastfm', 'Source', {})).toBe(false);
+      expect(await result.current.testConnection(4)).toBe(false);
+      expect(await result.current.deleteConnection(4)).toBe(false);
+    });
+    expect(api.post).toHaveBeenCalledTimes(2);
+    expect(api.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an older test after editing advances the configuration generation', async () => {
+    let resolve!: (value: any) => void;
+    vi.mocked(api.post).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const { Wrapper, invalidateSpy } = createTestSetup();
+    const { result } = renderHook(() => useConnectionForm(), { wrapper: Wrapper });
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.testConnection(4); });
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    act(() => result.current.clearTest(4));
+    await act(async () => { resolve({ data: { success: true }, error: null, status: 200 }); await pending; });
+    expect(result.current.testStates[4]).toBeUndefined();
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    expect(mockAddToast).not.toHaveBeenCalled();
+  });
+
+  it('prevents an older same-ID test from overwriting the latest failure', async () => {
+    let resolveOld!: (value: any) => void;
+    vi.mocked(api.post).mockReturnValueOnce(new Promise(done => { resolveOld = done; }));
+    const { Wrapper } = createTestSetup();
+    const { result } = renderHook(() => useConnectionForm(), { wrapper: Wrapper });
+    let old!: Promise<boolean>;
+    act(() => { old = result.current.testConnection(4); });
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    vi.mocked(api.post).mockResolvedValueOnce({ data: { success: false, message: 'Newest failed' }, error: null, status: 200 });
+    await act(async () => { await result.current.testConnection(4); });
+    await act(async () => { resolveOld({ data: { success: true }, error: null, status: 200 }); await old; });
+    expect(result.current.testStates[4]).toMatchObject({ verdict: 'fail', message: 'Newest failed' });
+  });
+
+  it('aborts requests and suppresses late toasts/cache writes on retirement', async () => {
+    let resolve!: (value: any) => void;
+    vi.mocked(api.post).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const { Wrapper, invalidateSpy } = createTestSetup();
+    const { result, unmount } = renderHook(() => useConnectionForm(), { wrapper: Wrapper });
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.saveConnection('lastfm', 'Source', {}); });
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    const signal = vi.mocked(api.post).mock.calls[0][2]?.signal;
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { resolve({ data: {}, error: null, status: 201 }); await pending; });
+    expect(mockAddToast).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it('suppresses late operations after the actor or role changes', async () => {
+    let resolve!: (value: any) => void;
+    vi.mocked(api.delete).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const { Wrapper, queryClient, invalidateSpy } = createTestSetup();
+    queryClient.setQueryData(queryKeys.auth, { user: { id: 1, role: 'admin' } });
+    const { result } = renderHook(() => useConnectionForm(), { wrapper: Wrapper });
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.deleteConnection(4); });
+    await waitFor(() => expect(api.delete).toHaveBeenCalledTimes(1));
+    queryClient.setQueryData(queryKeys.auth, { user: { id: 1, role: 'user' } });
+    await act(async () => { resolve({ data: null, error: null, status: 204 }); await pending; });
+    expect(mockAddToast).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
   describe('saveConnection', () => {
@@ -68,7 +151,7 @@ describe('useConnectionForm', () => {
         type: 'lidarr',
         name: 'My Lidarr',
         config: { url: 'http://localhost:8686' },
-      });
+      }, { signal: expect.any(AbortSignal) });
       expect(api.put).not.toHaveBeenCalled();
     });
 
@@ -92,7 +175,7 @@ describe('useConnectionForm', () => {
         type: 'spotify',
         name: 'My Spotify',
         config: { clientId: 'abc' },
-      });
+      }, { signal: expect.any(AbortSignal) });
       expect(api.post).not.toHaveBeenCalled();
     });
 
@@ -115,7 +198,7 @@ describe('useConnectionForm', () => {
         name: 'Global Lidarr',
         config: { url: 'http://lidarr' },
         isGlobal: true,
-      });
+      }, { signal: expect.any(AbortSignal) });
     });
 
     it('invalidates connections cache on success', async () => {
@@ -265,7 +348,7 @@ describe('useConnectionForm', () => {
       });
 
       await waitFor(() => {
-        expect(api.post).toHaveBeenCalledWith('/api/connections/42/test');
+        expect(api.post).toHaveBeenCalledWith('/api/connections/42/test', undefined, { signal: expect.any(AbortSignal) });
       });
     });
 
@@ -440,7 +523,7 @@ describe('useConnectionForm', () => {
       });
 
       await waitFor(() => {
-        expect(api.delete).toHaveBeenCalledWith('/api/connections/10');
+        expect(api.delete).toHaveBeenCalledWith('/api/connections/10', { signal: expect.any(AbortSignal) });
       });
     });
 

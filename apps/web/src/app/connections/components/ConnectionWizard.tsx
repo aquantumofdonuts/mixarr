@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
@@ -8,9 +9,11 @@ import { connectionTypes } from '../connectionTypes';
 import { WizardStepType } from './WizardStepType';
 import { WizardStepConfigure } from './WizardStepConfigure';
 import { WizardStepTest } from './WizardStepTest';
+import type { ConnectionTestState } from '../hooks/useConnectionForm';
 import type { Connection } from './ConnectionCard';
 
 interface ConnectionWizardProps {
+  onTestResult?: (id: number, result: ConnectionTestState) => void;
   isOpen: boolean;
   onClose: () => void;
   editingConnection?: Connection | null;
@@ -22,6 +25,7 @@ export function ConnectionWizard({
   onClose,
   editingConnection = null,
   preselectedType,
+  onTestResult,
 }: ConnectionWizardProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -35,11 +39,19 @@ export function ConnectionWizard({
   const [configValid, setConfigValid] = useState(false);
   const [initialConfig, setInitialConfig] = useState<Record<string, unknown> | undefined>(undefined);
 
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configRetry, setConfigRetry] = useState(0);
+  const [loadingConfig, setLoadingConfig] = useState(false);
+
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
   // Reset state when the modal opens / the editing target changes
   useEffect(() => {
     if (!isOpen) return;
+    const controller = new AbortController();
+    let active = true;
+    setConfigError(null);
+    setLoadingConfig(false);
 
     if (editingConnection) {
       // Edit mode → skip step 1
@@ -51,17 +63,17 @@ export function ConnectionWizard({
       setConfigValid(false);
       setInitialConfig(undefined);
 
-      // Fetch config for the connection being edited
-      api
-        .get<{ connection: { config: Record<string, unknown> } }>(
-          `/api/connections/${editingConnection.id}`,
-        )
-        .then(({ data }) => {
-          setInitialConfig(data?.connection?.config ?? {});
+      setLoadingConfig(true);
+      api.get<{ connection: { config: Record<string, unknown> } }>(`/api/connections/${editingConnection.id}`, { signal: controller.signal })
+        .then(({ data, error }) => {
+          if (!active) return;
+          const loaded = data?.connection?.config;
+          if (error || !loaded || typeof loaded !== 'object' || Array.isArray(loaded)) {
+            setConfigError(error || 'Invalid connection configuration response');
+          } else setInitialConfig(loaded);
         })
-        .catch(() => {
-          setInitialConfig({});
-        });
+        .catch(cause => { if (active) setConfigError(cause instanceof Error ? cause.message : 'Unable to load configuration'); })
+        .finally(() => { if (active) setLoadingConfig(false); });
     } else if (preselectedType) {
       // Create mode with preselected type → skip step 1
       setStep(2);
@@ -82,7 +94,10 @@ export function ConnectionWizard({
       setConfigValid(false);
       setInitialConfig(undefined);
     }
-  }, [isOpen, editingConnection, preselectedType]);
+    return () => { active = false; controller.abort(); };
+    // Retain the draft when a connection-list refetch replaces the same target object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, editingConnection?.id, preselectedType, configRetry]);
 
   // --- handlers ---
 
@@ -148,7 +163,9 @@ export function ConnectionWizard({
     >
       {step === 1 && <WizardStepType onSelectType={handleSelectType} />}
 
-      {step === 2 && selectedType && (
+      {step === 2 && loadingConfig && <p role="status" className="text-sm">Loading configuration…</p>}
+      {step === 2 && configError && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{configError}</p><Button variant="outline" onClick={() => setConfigRetry(value => value + 1)}>Retry</Button></div>}
+      {step === 2 && selectedType && !loadingConfig && !configError && (!editingConnection || initialConfig) && (
         <WizardStepConfigure
           key={`${editingConnection?.id ?? 'new'}-${initialConfig ? 'config-loaded' : 'config-loading'}`}
           type={selectedType}
@@ -171,6 +188,7 @@ export function ConnectionWizard({
 
       {step === 3 && selectedType && config && (
         <WizardStepTest
+          onTestResult={onTestResult}
           type={selectedType}
           connectionName={connectionName}
           config={config}

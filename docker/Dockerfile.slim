@@ -19,6 +19,8 @@ RUN apk add --no-cache openssl openssl-dev
 # DEPENDENCIES STAGE
 # =============================================================================
 FROM base AS deps
+# Compile the native SQLite dependency on Alpine; keep build tools out of runtime.
+RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 COPY turbo.json ./
 COPY tsconfig.base.json ./
@@ -27,7 +29,7 @@ COPY apps/web/package*.json ./apps/web/
 COPY packages/shared-types/package*.json ./packages/shared-types/
 COPY packages/config/package*.json ./packages/config/
 RUN --mount=type=cache,target=/root/.npm \
-    npm install
+    npm ci
 
 # =============================================================================
 # BUILD STAGE - API
@@ -37,7 +39,7 @@ COPY . .
 WORKDIR /app/apps/api
 RUN npx prisma generate
 WORKDIR /app
-RUN npm run build --workspace=@mixarr/api
+RUN npm run build --workspace=@mixarr/shared-types && npm run build --workspace=@mixarr/api
 
 # =============================================================================
 # PRODUCTION DEPENDENCIES STAGE - Prune to production deps only

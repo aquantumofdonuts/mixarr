@@ -480,7 +480,6 @@ export class MetadataFixService {
 
   /**
    * Sleep for a given number of milliseconds.
-   * Extracted to allow mocking in tests.
    */
   protected async sleep(ms: number): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, ms));

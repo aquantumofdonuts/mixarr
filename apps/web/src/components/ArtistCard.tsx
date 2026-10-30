@@ -2,13 +2,11 @@
 
 import Image from 'next/image';
 import Check from 'lucide-react/dist/esm/icons/check';
-import CheckSquare from 'lucide-react/dist/esm/icons/check-square';
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
 import Music from 'lucide-react/dist/esm/icons/music';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import Search from 'lucide-react/dist/esm/icons/search';
-import Square from 'lucide-react/dist/esm/icons/square';
-import { Card } from '@/components/ui/card';
+import { ArtistLink } from '@/components/artists/ArtistLink';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { GenrePills } from '@/components/GenrePills';
@@ -36,6 +34,9 @@ export interface ArtistCardProps {
   isSelected?: boolean;
   isAdding?: boolean;
   showCheckbox?: boolean;
+  disabled?: boolean;
+  acquisitionError?: string;
+  onOpen?: (trigger: HTMLElement) => void;
 }
 
 export function ArtistCard({
@@ -57,77 +58,71 @@ export function ArtistCard({
   isSelected = false,
   isAdding = false,
   showCheckbox = true,
+  disabled = false,
+  acquisitionError,
+  onOpen,
 }: ArtistCardProps) {
   const hasMbid = foreignArtistId || mbid;
-  
+
   // Build external links
   const externalLinks = [];
-  
+
   if (spotifyId) {
     externalLinks.push({
       name: 'Spotify',
       url: `https://open.spotify.com/artist/${spotifyId}`,
       icon: SpotifyIcon,
-      color: 'text-green-500 hover:text-green-400',
+      color: 'text-muted-foreground hover:text-link',
     });
   }
-  
+
   if (hasMbid) {
     externalLinks.push({
       name: 'Last.fm',
       url: `https://www.last.fm/music/${encodeURIComponent(artistName)}`,
       icon: LastfmIcon,
-      color: 'text-red-500 hover:text-red-400',
+      color: 'text-muted-foreground hover:text-link',
     });
     externalLinks.push({
       name: 'MusicBrainz',
       url: `https://musicbrainz.org/artist/${hasMbid}`,
       icon: MusicBrainzIcon,
-      color: 'text-orange-500 hover:text-orange-400',
+      color: 'text-muted-foreground hover:text-link',
     });
   }
 
   return (
-    <Card className="overflow-hidden group">
+    <article className="py-3">
       <div className="flex">
         {/* Checkbox column */}
         {showCheckbox && !inLibrary && hasMbid && onSelect && (
-          <button 
-            onClick={onSelect} 
-            className="p-2 flex items-center justify-center hover:bg-muted transition-colors"
-          >
-            {isSelected ? (
-              <CheckSquare className="h-5 w-5 text-primary" />
-            ) : (
-              <Square className="h-5 w-5 text-muted-foreground" />
-            )}
-          </button>
+          <div className="flex items-center px-2"><input type="checkbox" aria-label={`Select ${artistName}`} checked={isSelected} onChange={onSelect} disabled={disabled || isAdding} className="h-4 w-4 accent-foreground" /></div>
         )}
-        
+
         {/* Thumbnail - standardized size matching Discover page */}
-        <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 rounded-md overflow-hidden bg-muted">
+        <ArtistLink mbid={hasMbid} aria-label={`Inspect artist ${artistName}`} onOpen={onOpen} className="relative w-12 h-12 flex-shrink-0 overflow-hidden bg-muted">
           {imageUrl ? (
-            <Image 
-              src={imageUrl} 
-              alt={artistName} 
+            <Image
+              src={imageUrl}
+              alt={artistName}
               fill
-              sizes="(max-width: 640px) 64px, 80px"
-              className="object-cover" 
+              sizes="48px"
+              className="object-cover"
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
               <Music className="h-8 w-8 text-muted-foreground" />
             </div>
           )}
-        </div>
-        
+        </ArtistLink>
+
         {/* Content */}
         <div className="flex-1 p-3 min-w-0 flex flex-col">
           {/* Header row */}
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 flex-1">
-              <h3 className="font-semibold truncate text-sm sm:text-base">{artistName}</h3>
-              
+              <h3 className="font-semibold text-sm break-words"><ArtistLink mbid={hasMbid} onOpen={onOpen}>{artistName}</ArtistLink></h3>
+
               {/* Source badges */}
               {sources.length > 0 && (
                 <div className="flex gap-1 mt-1 flex-wrap">
@@ -138,13 +133,13 @@ export function ArtistCard({
                   ))}
                 </div>
               )}
-              
+
               {/* Genre pills */}
               {genres.length > 0 && (
                 <GenrePills genres={genres} maxDisplay={3} size="sm" />
               )}
             </div>
-            
+
             {/* Add button / In Library badge / Search slskd button */}
             <div className="flex gap-1 flex-shrink-0">
               {inLibrary === true ? (
@@ -152,27 +147,29 @@ export function ArtistCard({
                   <Check className="h-3 w-3 mr-1" /> In Lidarr
                 </Badge>
               ) : onAdd ? (
-                <Button 
-                  size="sm" 
-                  onClick={onAdd} 
-                  disabled={isAdding} 
+                <Button
+                  size="sm"
+                  onClick={onAdd}
+                  disabled={isAdding || disabled}
                   className="text-xs h-7"
-                  title="Add to Lidarr"
+                  aria-label={`Add artist ${artistName}`}
+                  title="Add artist to Lidarr"
                 >
                   {isAdding ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
                   ) : (
-                    <Plus className="h-4 w-4" />
+                    <><Plus className="h-4 w-4" /> Add artist</>
                   )}
                 </Button>
               ) : null}
-              
+
               {onSearchSlskd && (
-                <Button 
-                  size="sm" 
+                <Button
+                  size="sm"
                   variant="outline"
-                  onClick={onSearchSlskd} 
+                  onClick={onSearchSlskd}
                   className="text-xs h-7"
+                  aria-label={`Search Soulseek for ${artistName}`}
                   title="Search on Soulseek"
                 >
                   <Search className="h-4 w-4" />
@@ -180,10 +177,11 @@ export function ArtistCard({
               )}
             </div>
           </div>
-          
+
+          {acquisitionError && <p role="alert" className="mt-1 text-sm break-words">{acquisitionError}</p>}
           {/* Stats row */}
           {(popularity || followers || fans || listeners) && (
-            <div className="flex gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
+            <div className="flex gap-2 mt-1 font-mono text-xs text-muted-foreground flex-wrap">
               {popularity !== undefined && popularity > 0 && (
                 <span>Pop: {popularity}</span>
               )}
@@ -198,7 +196,7 @@ export function ArtistCard({
               )}
             </div>
           )}
-          
+
           {/* External links row */}
           {externalLinks.length > 0 && (
             <div className="flex gap-1 mt-auto pt-2">
@@ -209,6 +207,7 @@ export function ArtistCard({
                   target="_blank"
                   rel="noopener noreferrer"
                   title={`Open on ${link.name}`}
+                  aria-label={`Open ${artistName} on ${link.name}`}
                   className={cn(
                     "p-1.5 rounded hover:bg-muted transition-colors",
                     link.color
@@ -222,6 +221,6 @@ export function ArtistCard({
           )}
         </div>
       </div>
-    </Card>
+    </article>
   );
 }

@@ -7,6 +7,7 @@ interface RequestOptions {
   headers?: Record<string, string>;
   /** Request timeout in milliseconds. Defaults to 30s. */
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -15,13 +16,16 @@ interface ApiResponse<T> {
   data: T | null;
   error: string | null;
   status: number;
+  code?: string;
+  details?: unknown;
 }
 
 async function request<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<ApiResponse<T>> {
-  const { method = 'GET', body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const { method = 'GET', body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, signal } = options;
+  const timeout = AbortSignal.timeout(timeoutMs);
 
   const config: RequestInit = {
     method,
@@ -31,7 +35,7 @@ async function request<T>(
     },
     credentials: 'include',
     // Abort hung requests so the UI never spins forever
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   };
 
   if (body) {
@@ -47,15 +51,19 @@ async function request<T>(
 
     if (!res.ok) {
       let message = `HTTP ${res.status}`;
+      let code: string | undefined;
+      let details: unknown;
       if (isJson) {
-        const parsed = (await res.json()) as { error?: string };
+        const parsed = (await res.json()) as { error?: string; code?: string; details?: unknown };
+        code = parsed.code;
+        details = parsed.details;
         message = parsed.error || message;
       } else {
         // Non-JSON response (likely HTML error page from Caddy/proxy)
         const text = await res.text();
         message = `Server error (${res.status}): ${text.substring(0, 100)}`;
       }
-      return { data: null, error: message, status: res.status };
+      return { data: null, error: message, status: res.status, ...(code ? { code } : {}), ...(details !== undefined ? { details } : {}) };
     }
 
     // Successful response without a JSON body (e.g. 204 No Content)
@@ -65,7 +73,9 @@ async function request<T>(
 
     return { data: (await res.json()) as T, error: null, status: res.status };
   } catch (err) {
-    const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+    // Cancellation belongs to the query lifecycle, not an inline provider error.
+    if (signal?.aborted) throw signal.reason;
+    const isTimeout = timeout.aborted;
     return {
       data: null,
       error: isTimeout
@@ -77,11 +87,11 @@ async function request<T>(
 }
 
 export const api = {
-  get: <T>(endpoint: string) => request<T>(endpoint, { method: 'GET' }),
-  post: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, { method: 'POST', body }),
-  put: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, { method: 'PUT', body }),
-  delete: <T>(endpoint: string) => request<T>(endpoint, { method: 'DELETE' }),
-  patch: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, { method: 'PATCH', body }),
+  get: <T>(endpoint: string, options?: Pick<RequestOptions, 'signal' | 'timeoutMs'>) => request<T>(endpoint, { ...options, method: 'GET' }),
+  post: <T>(endpoint: string, body?: unknown, options?: Pick<RequestOptions, 'signal' | 'timeoutMs'>) => request<T>(endpoint, { ...options, method: 'POST', body }),
+  put: <T>(endpoint: string, body?: unknown, options?: Pick<RequestOptions, 'signal' | 'timeoutMs'>) => request<T>(endpoint, { ...options, method: 'PUT', body }),
+  delete: <T>(endpoint: string, options?: Pick<RequestOptions, 'signal' | 'timeoutMs'>) => request<T>(endpoint, { ...options, method: 'DELETE' }),
+  patch: <T>(endpoint: string, body?: unknown, options?: Pick<RequestOptions, 'signal' | 'timeoutMs'>) => request<T>(endpoint, { ...options, method: 'PATCH', body }),
 };
 
 // Type-safe API endpoints
@@ -103,6 +113,8 @@ export const endpoints = {
   // Search
   search: {
     artist: '/api/search/artist',
+    artistDetail: (mbid: string) => `/api/search/artist/${encodeURIComponent(mbid)}/detail`,
+    artistReleases: (mbid: string) => `/api/search/artist/${encodeURIComponent(mbid)}/releases`,
     lidarr: '/api/search/lidarr',
     add: '/api/search/add',
   },

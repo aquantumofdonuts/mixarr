@@ -7,12 +7,8 @@ import { createLogger } from '../lib/logger.js';
 const log = createLogger('SlskdPoll');
 
 /**
- * slskd reports remote filenames/directories as the peer's full path using
- * whatever separator the peer's OS uses — almost always Windows `\`, since
- * most Soulseek peers are Windows clients (confirmed live 2026-07-21, e.g.
- * "MyMusic\Tyler Childers\Can I Take My Hounds to Heaven_\1-05 ....flac").
- * path.basename() only recognizes `/` on this Linux container, so it never
- * strips those — this extracts just the final path segment either way.
+ * Extract the final path segment from peer paths using Windows or POSIX
+ * separators. Linux path.basename alone does not strip backslashes.
  */
 function slskdBasename(remotePath: string): string {
   const segments = remotePath.split(/[\\/]+/).filter(Boolean);
@@ -91,14 +87,8 @@ export async function pollSlskdDownloads(): Promise<void> {
         continue;
       }
 
-      // slskd's real transfer states are compound strings, not the bare
-      // words this used to check for — confirmed live 2026-07-21:
-      // "Completed, Succeeded", "Completed, Errored", "Completed, TimedOut",
-      // "Completed, Aborted", "Completed, Rejected", "InProgress",
-      // "Queued, Remotely". A strict `state === 'Completed'` check never
-      // matched anything: 2,439 real successful downloads sat undetected,
-      // never organized into the library, because none of them were
-      // literally the string "Completed" on its own.
+      // slskd transfer states are compound strings, e.g. "Completed, Succeeded"
+      // and "Completed, Errored"; match the full terminal state.
       const isSuccess = slskdStatus.state === 'Completed, Succeeded';
       const isFailed = [
         'Completed, Errored',
@@ -110,10 +100,8 @@ export async function pollSlskdDownloads(): Promise<void> {
       ].includes(slskdStatus.state);
 
       if (isSuccess) {
-        // slskd stores completed downloads flat on disk as
-        // {leaf-of-remote-directory}/{leaf-of-remote-filename} — it never
-        // namespaces by username and never preserves the peer's full nested
-        // path — confirmed live 2026-07-21 against real files on disk.
+        // Completed files use {directory-leaf}/{filename-leaf}, without a username
+        // namespace or the peer's full directory hierarchy.
         const directoryLeaf = slskdBasename(slskdStatus.directory);
 
         // Validate the constructed path stays within downloadDir (path traversal protection)
@@ -145,14 +133,14 @@ export async function pollSlskdDownloads(): Promise<void> {
           },
         });
 
-        // Check if we won the race
+        // Check whether this caller claimed the pending download
         if (updated.count === 0) {
           // Another process already started organizing this download
           log.debug('Download already being organized by another process', { downloadId: download.id });
           continue;
         }
 
-        // We won the race - proceed with organization
+        // Organize files only after a successful claim
         try {
           await organizer.organizeFile(download.id);
           log.info('Organized completed slskd download', { downloadId: download.id });

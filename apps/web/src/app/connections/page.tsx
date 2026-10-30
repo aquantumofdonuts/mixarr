@@ -1,19 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { ConfirmDialog, Skeleton } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { useAuth } from '@/lib/auth';
 import { useConnections } from '@/lib/hooks';
-import Check from 'lucide-react/dist/esm/icons/check';
-import Plus from 'lucide-react/dist/esm/icons/plus';
-import X from 'lucide-react/dist/esm/icons/x';
-import { ConnectionCard } from './components/ConnectionCard';
-import type { Connection } from './components/ConnectionCard';
+import { ConnectionCard, type Connection } from './components/ConnectionCard';
 import { ConnectionWizard } from './components/ConnectionWizard';
 import { useConnectionForm } from './hooks/useConnectionForm';
 import { connectionTypes } from './connectionTypes';
@@ -22,208 +18,138 @@ export default function ConnectionsPage() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { addToast } = useToast();
-
-  // React Query for connections — cached across navigations
-  const { data: connections = [], isLoading } = useConnections();
-
-  // Connection form hook for test / delete operations
-  const { testConnection, deleteConnection, testingId } = useConnectionForm();
-  // Modal / wizard state
+  const { data: connections = [], isLoading, error: loadError, refetch } = useConnections();
+  const {
+    testConnection, deleteConnection, testingId, testStates, clearTest,
+    recordTest, isDeleting, error,
+  } = useConnectionForm();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [preselectedType, setPreselectedType] = useState<string | undefined>(undefined);
-
-  // Confirm dialog state
   const [confirmTarget, setConfirmTarget] = useState<number | null>(null);
-
-  // Welcome banner
-  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
+  const callbackHandled = useRef<string | null>(null);
 
   useEffect(() => {
-    const dismissed = localStorage.getItem('mixarr_welcome_dismissed');
-    if (dismissed === 'true') {
-      setWelcomeDismissed(true);
+    const signature = searchParams.toString();
+    if (callbackHandled.current === signature) return;
+    const params = new URLSearchParams(signature);
+    let hasCallback = false;
+    for (const type of ['spotify', 'deezer', 'tidal']) {
+      const value = params.get(`${type}_authorized`);
+      if (value === null) continue;
+      hasCallback = true;
+      // The callback ID only requests fresh provider evidence; it is not a verdict.
+      if (/^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value))) {
+        void queryClient.invalidateQueries({ queryKey: ['connections', Number(value), type, 'oauth-status'] });
+      }
+      params.delete(`${type}_authorized`);
     }
-  }, []);
-
-  const handleDismissWelcome = () => {
-    setWelcomeDismissed(true);
-    localStorage.setItem('mixarr_welcome_dismissed', 'true');
-  };
-
-  const handlePreview = (connectionId: number, type: string) => {
-    router.push(`/preview?connectionId=${connectionId}&type=${type}`);
-  };
-
-  // Handle OAuth callback results from URL search params
-  useEffect(() => {
-    const error = searchParams.get('error');
-    const spotifyAuthorized = searchParams.get('spotify_authorized');
-    const deezerAuthorized = searchParams.get('deezer_authorized');
-    const tidalAuthorized = searchParams.get('tidal_authorized');
-
-    if (error) {
-      const errorMessages: Record<string, string> = {
-        'access_denied': 'Authorization was denied',
-        'missing_code_or_state': 'Authorization failed: missing data',
-        'invalid_state': 'Authorization failed: invalid state',
-        'state_expired': 'Authorization session expired, please try again',
-        'connection_mismatch': 'Authorization failed: connection mismatch',
-        'connection_not_found': 'Connection not found',
-        'missing_credentials': 'Credentials not configured',
-        'token_exchange_failed': 'Failed to complete authorization',
-      };
+    if (params.has('error')) {
+      hasCallback = true;
       addToast({
-        type: 'error',
-        title: 'Authorization Failed',
-        message: errorMessages[error] || error,
+        type: 'error', title: 'Authorization failed',
+        message: params.get('error') || 'Authorization could not complete',
       });
-      window.history.replaceState({}, '', '/connections');
+      params.delete('error');
     }
+    if (hasCallback) {
+      callbackHandled.current = signature;
+      router.replace(`/connections${params.size ? `?${params}` : ''}`, { scroll: false });
+    }
+  }, [searchParams, router, queryClient, addToast]);
 
-    if (spotifyAuthorized) {
-      addToast({ type: 'success', title: 'Spotify account authorized successfully!' });
-      window.history.replaceState({}, '', '/connections');
-    }
-
-    if (deezerAuthorized) {
-      addToast({ type: 'success', title: 'Deezer account authorized successfully!' });
-      window.history.replaceState({}, '', '/connections');
-    }
-
-    if (tidalAuthorized) {
-      addToast({ type: 'success', title: 'TIDAL account authorized successfully!' });
-      window.history.replaceState({}, '', '/connections');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
-  // --- Modal handlers ---
-  const openModal = (connection?: Connection, defaultType?: string) => {
-    if (connection) {
-      setEditingId(connection.id);
-      setPreselectedType(undefined);
-    } else {
-      setEditingId(null);
-      setPreselectedType(defaultType);
-    }
+  const canModify = (connection: Connection) => user?.role === 'admin'
+    || (connection.userId !== null && connection.userId === user?.id);
+  const openModal = (connection?: Connection) => {
+    if (connection && !canModify(connection)) return;
+    if (connection) clearTest(connection.id);
+    setEditingId(connection?.id ?? null);
     setShowModal(true);
   };
-
   const closeModal = () => {
+    if (editingId && testStates[editingId]?.verdict === 'testing') clearTest(editingId);
     setShowModal(false);
     setEditingId(null);
-    setPreselectedType(undefined);
   };
-
-  const handleDeleteClick = (id: number) => setConfirmTarget(id);
-  const confirmDelete = () => {
-    if (confirmTarget !== null) deleteConnection(confirmTarget);
-    setConfirmTarget(null);
+  const editConnection = (id: number) => {
+    const connection = connections.find(item => item.id === id);
+    if (connection) openModal(connection);
   };
-
-  // Derived state
-  const showWelcomeBanner = connections.length === 0 && !welcomeDismissed;
+  const requestDelete = (id: number) => {
+    const connection = connections.find(item => item.id === id);
+    if (connection && canModify(connection)) {
+      setDeleteFailed(false);
+      setConfirmTarget(id);
+    }
+  };
+  const target = connections.find(connection => connection.id === confirmTarget);
+  const confirmDelete = async () => {
+    if (!target || !canModify(target) || isDeleting) return;
+    setDeleteFailed(false);
+    const success = await deleteConnection(target.id);
+    if (success) setConfirmTarget(null);
+    else setDeleteFailed(true);
+  };
 
   return (
     <>
-      <PageHeader
-        title="Connections"
-        description="Configure your service connections"
-      >
-        <Button onClick={() => openModal()}>
-          <Plus className="h-4 w-4 mr-2" /> Add Connection
-        </Button>
+      <PageHeader title="Connections" description="Configured services">
+        <Button onClick={() => openModal()}>Add connection</Button>
       </PageHeader>
-
-      {/* First-time setup welcome banner */}
-      {showWelcomeBanner && (
-        <Card className="mb-6 border-primary/20 bg-primary/5">
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                <Check className="h-6 w-6 text-primary" />
-              </div>
-              <div className="flex-1 space-y-2">
-                <h3 className="font-semibold text-lg">Welcome to Mixarr!</h3>
-                <p className="text-muted-foreground">
-                  Your account is ready. To get started, you'll need to connect at least:
-                </p>
-                <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
-                  <li><strong>Lidarr</strong> – Required to manage and download music to your library</li>
-                  <li><strong>Last.fm, Spotify, or another source</strong> – To discover and import music</li>
-                </ul>
-                <p className="text-sm text-muted-foreground pt-2">
-                  Click &quot;Configure&quot; on any service below to add your first connection.
-                </p>
-              </div>
-              <button
-                onClick={handleDismissWelcome}
-                className="shrink-0 rounded-md p-1 hover:bg-primary/10 text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Dismiss welcome message"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-          </CardContent>
-        </Card>
+      {loadError && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-destructive">
+          <span>{loadError.message}</span>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>Retry</Button>
+        </div>
       )}
-
-      {/* Connection Cards */}
       {isLoading ? (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="rounded-container border bg-card p-6 space-y-4">
-              <div className="flex items-center gap-3">
-                <Skeleton className="w-10 h-10 rounded-container" />
-                <div className="space-y-2 flex-1">
-                  <Skeleton className="h-4 w-1/3" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
-              </div>
-              <Skeleton className="h-8 w-full rounded-md" />
-            </div>
+        <div aria-label="Loading connections" className="space-y-3">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+        </div>
+      ) : connections.length ? (
+        <div className="border" aria-label="Configured connections">
+          {connections.map(connection => (
+            <ConnectionCard
+              key={connection.id}
+              typeConfig={connectionTypes.find(type => type.value === connection.type)
+                ?? { value: connection.type, label: connection.type, color: '', description: '' }}
+              connections={[connection]}
+              isAdmin={user?.role === 'admin'}
+              currentUserId={user?.id}
+              onAdd={() => openModal()}
+              onEdit={editConnection}
+              onTest={id => void testConnection(id)}
+              onDelete={requestDelete}
+              testingId={testingId}
+              testStates={testStates}
+              onPreview={(id, type) => router.push(`/preview?connectionId=${id}&type=${type}`)}
+            />
           ))}
         </div>
-      ) : (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {connectionTypes.map((type) => (
-          <ConnectionCard
-            key={type.value}
-            typeConfig={type}
-            connections={connections.filter((c) => c.type === type.value)}
-            isAdmin={user?.role === 'admin'}
-            onAdd={(t) => openModal(undefined, t)}
-            onEdit={(id) => {
-              const conn = connections.find((c) => c.id === id);
-              if (conn) openModal(conn);
-            }}
-            onTest={(id) => testConnection(id)}
-            onDelete={(id) => handleDeleteClick(id)}
-            testingId={testingId}
-            onPreview={(id, t) => handlePreview(id, t)}
-          />
-        ))}
-      </div>
+      ) : !loadError && (
+        <div className="border p-4 text-sm">
+          <p className="font-medium">No configured connections</p>
+          <p className="mt-1 text-muted-foreground">Add Lidarr to manage your library, then add a music source for discovery.</p>
+        </div>
       )}
-
       <ConfirmDialog
         open={confirmTarget !== null}
-        onClose={() => setConfirmTarget(null)}
-        onConfirm={confirmDelete}
-        title="Delete connection?"
-        description="This action cannot be undone."
-        confirmLabel="Delete"
+        onClose={() => { if (!isDeleting) setConfirmTarget(null); }}
+        onConfirm={() => void confirmDelete()}
+        title={`Delete ${target?.name ?? 'connection'}?`}
+        description={`This removes the connection and its credentials. Linked subscriptions are retained but lose this connection and need reconfiguration. This cannot be undone.${deleteFailed ? `\nDelete failed: ${error?.message ?? 'Please retry.'}` : ''}`}
+        confirmLabel={deleteFailed ? 'Retry' : 'Delete'}
+        loading={isDeleting}
         variant="destructive"
       />
-
-      {/* Connection Wizard */}
       <ConnectionWizard
+        onTestResult={recordTest}
         isOpen={showModal}
         onClose={closeModal}
-        editingConnection={editingId ? connections.find((c) => c.id === editingId) ?? null : null}
-        preselectedType={preselectedType}
+        editingConnection={editingId ? connections.find(connection => connection.id === editingId) ?? null : null}
       />
     </>
   );

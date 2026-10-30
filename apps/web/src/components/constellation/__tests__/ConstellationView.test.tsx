@@ -1,0 +1,538 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, act, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { Mock } from 'vitest';
+import type { UseConstellationResult } from '@/hooks/useConstellation';
+
+// ---------------------------------------------------------------------------
+// Mock the client-only graph lib + next/dynamic so no real canvas is rendered.
+// The mocked ForceGraph captures the props it receives so the test can inspect
+// graphData and drive its callbacks (onNodeClick).
+// ---------------------------------------------------------------------------
+const graphState = vi.hoisted(() => {
+  let props: Record<string, unknown> | null = null;
+  return {
+    set: (p: Record<string, unknown>) => {
+      props = p;
+    },
+    get: () => props,
+    reset: () => {
+      props = null;
+    },
+  };
+});
+
+vi.mock('react-force-graph-2d', () => ({
+  default: (props: Record<string, unknown>) => {
+    graphState.set(props);
+    return null;
+  },
+}));
+
+// next/dynamic just returns the (mocked) component synchronously — never invokes
+// the real dynamic loader, so the canvas lib is never actually imported.
+vi.mock('next/dynamic', () => ({
+  default: () => (props: Record<string, unknown>) => {
+    graphState.set(props);
+    return null;
+  },
+}));
+
+// Mock the frontier stream to a no-op — its wiring is exercised elsewhere.
+vi.mock('@/hooks/useFrontierStream', () => ({
+  useFrontierStream: vi.fn(() => ({ connected: true, error: null })),
+}));
+
+// PersonPanel (a child) fetches the discography on open — stub the api so node
+// selection doesn't trigger a real request.
+vi.mock('@/lib/api', () => ({
+  api: {
+    get: vi.fn().mockResolvedValue({ data: { personId: 0, releases: [] }, error: null, status: 200 }),
+    post: vi.fn(),
+  },
+}));
+
+// Keep the real merge helpers, mock only the data hook.
+vi.mock('@/hooks/useConstellation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useConstellation')>();
+  return { ...actual, useConstellation: vi.fn() };
+});
+
+import { useConstellation } from '@/hooks/useConstellation';
+import { useFrontierStream } from '@/hooks/useFrontierStream';
+import { ConstellationView } from '../ConstellationView';
+import { FOCUS_NODE_COLOR, NODE_RADIUS_UNIFORM, GENRE_DIMMED_ALPHA } from '../encoding';
+import type { GraphNode, GraphEdge, StreamPayload } from '@/types/constellation';
+
+const mockUseConstellation = useConstellation as unknown as Mock;
+
+/** Grab the `onFrame` callback the component handed to useFrontierStream. */
+function latestOnFrame(): (payload: StreamPayload) => void {
+  const calls = (useFrontierStream as unknown as Mock).mock.calls;
+  return calls[calls.length - 1][1] as (payload: StreamPayload) => void;
+}
+
+/** Minimal recording 2D context stub for exercising nodeCanvasObject. */
+function makeCtx() {
+  const strokeStyles: string[] = [];
+  const ctx = {
+    _stroke: '',
+    globalAlpha: 1,
+    fillStyle: '',
+    lineWidth: 0,
+    font: '',
+    textAlign: '',
+    textBaseline: '',
+    save: vi.fn(),
+    restore: vi.fn(),
+    beginPath: vi.fn(),
+    arc: vi.fn(),
+    fill: vi.fn(),
+    stroke: vi.fn(),
+    fillText: vi.fn(),
+    get strokeStyle() {
+      return this._stroke;
+    },
+    set strokeStyle(v: string) {
+      this._stroke = v;
+      strokeStyles.push(v);
+    },
+  };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, strokeStyles };
+}
+
+const node = (personId: number, over: Partial<GraphNode> = {}): GraphNode => ({
+  personId,
+  displayName: `Person ${personId}`,
+  genre: 'rock',
+  size: 10,
+  owned: false,
+  ...over,
+});
+
+const edge = (source: number, target: number, over: Partial<GraphEdge> = {}): GraphEdge => ({
+  source,
+  target,
+  weight: 3,
+  bridge: null,
+  bridgeConfident: false,
+  roleBitmask: 0,
+  ...over,
+});
+
+function mockResult(over: Partial<UseConstellationResult> = {}): UseConstellationResult {
+  return {
+    creditSource: null, availability: null, onFrame: vi.fn(), onStatus: vi.fn(),
+    nodes: [node(1), node(2)],
+    edges: [edge(1, 2)],
+    focusId: 1,
+    streamToken: { id: 'tok', generation: 0 },
+    loading: false,
+    error: null,
+    recenter: vi.fn().mockResolvedValue(undefined),
+    expandMore: vi.fn().mockResolvedValue(undefined),
+    ...over,
+  };
+}
+
+const graphProps = () => graphState.get() as Record<string, unknown>;
+type ClickHandler = (node: { id: number; name: string }, event?: unknown) => void;
+
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+
+describe('ConstellationView', () => {
+  beforeEach(() => {
+    graphState.reset();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('mounts and renders the (dynamically imported) force graph', () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+    expect(graphState.get()).not.toBeNull();
+  });
+
+  it('passes graphData derived from the hook (nodes + links mapped)', () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const data = graphProps().graphData as {
+      nodes: Array<{ id: number; name: string; isFocus: boolean }>;
+      links: Array<{ source: number; target: number; isFocusLink: boolean }>;
+    };
+    expect(data.nodes.map((n) => n.id)).toEqual([1, 2]);
+    expect(data.nodes[0].name).toBe('Person 1');
+    // focusId=1 -> node 1 is the focus, and the 1->2 edge is a focus link
+    expect(data.nodes[0].isFocus).toBe(true);
+    expect(data.nodes[1].isFocus).toBe(false);
+    expect(data.links).toHaveLength(1);
+    expect(data.links[0].isFocusLink).toBe(true);
+  });
+
+  it('expands in place (not re-center) and pushes a breadcrumb when a node is clicked', () => {
+    const recenter = vi.fn().mockResolvedValue(undefined);
+    const expandMore = vi.fn().mockResolvedValue(undefined);
+    mockUseConstellation.mockReturnValue(mockResult({ recenter, expandMore }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => {
+      onNodeClick({ id: 2, name: 'Person 2' });
+    });
+
+    // The wander model: the clicked node's collaborators are MERGED into the
+    // current field; the view is never replaced via a re-seed.
+    expect(expandMore).toHaveBeenCalledWith(2);
+    expect(recenter).not.toHaveBeenCalled();
+    const trail = screen.getByTestId('constellation-breadcrumbs');
+    expect(trail).toHaveTextContent('Person 2');
+  });
+
+  it('opens the PersonPanel for the selected node (acquisition grain)', async () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    // No panel until a node is selected.
+    expect(screen.queryByTestId('person-panel')).not.toBeInTheDocument();
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 2, name: 'Person 2' }));
+
+    // Selecting a node opens its panel (where the user picks artist-vs-album).
+    const panel = await screen.findByTestId('person-panel');
+    expect(panel).toHaveTextContent('Person 2');
+  });
+
+  it('opens the PersonPanel even when clicking the current focus node', async () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 1, name: 'Person 1' }));
+
+    const panel = await screen.findByTestId('person-panel');
+    expect(panel).toHaveTextContent('Person 1');
+  });
+
+  it('accumulates multiple hops in the breadcrumb trail', () => {
+    const expandMore = vi.fn().mockResolvedValue(undefined);
+    mockUseConstellation.mockReturnValue(mockResult({ expandMore }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 2, name: 'Person 2' }));
+    act(() => onNodeClick({ id: 3, name: 'Person 3' }));
+
+    const trail = screen.getByTestId('constellation-breadcrumbs');
+    expect(trail).toHaveTextContent('Person 2');
+    expect(trail).toHaveTextContent('Person 3');
+    expect(expandMore).toHaveBeenCalledTimes(2);
+  });
+
+  it('expands the focus node in place too and starts the trail from it', () => {
+    const expandMore = vi.fn().mockResolvedValue(undefined);
+    // focusId=1 -> clicking the focus is a regular hop in the wander model: its
+    // neighbourhood is (re)merged and it becomes the first breadcrumb.
+    mockUseConstellation.mockReturnValue(mockResult({ expandMore }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 1, name: 'Person 1' }));
+
+    expect(expandMore).toHaveBeenCalledWith(1);
+    expect(screen.getByTestId('constellation-breadcrumbs')).toHaveTextContent('Person 1');
+  });
+
+  it('re-expands a breadcrumb hop in place when it is clicked', async () => {
+    const expandMore = vi.fn().mockResolvedValue(undefined);
+    mockUseConstellation.mockReturnValue(mockResult({ expandMore }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 2, name: 'Person 2' }));
+    expandMore.mockClear();
+
+    await userEvent.click(within(screen.getByTestId('constellation-breadcrumbs')).getByRole('button', { name: 'Person 2' }));
+    expect(expandMore).toHaveBeenCalledWith(2);
+  });
+
+  it('keeps the same canvas node object per person across renders (force layout stability)', () => {
+    mockUseConstellation.mockReturnValue(mockResult({ nodes: [node(1), node(2)] }));
+    const { rerender } = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+    const before = (graphProps().graphData as { nodes: Array<{ id: number }> }).nodes;
+
+    // The hook hands back NEW node arrays (as it does after an expandMore merge);
+    // the view must reuse the existing canvas objects so the simulation keeps
+    // their x/y instead of resetting the layout.
+    mockUseConstellation.mockReturnValue(
+      mockResult({ nodes: [node(1, { size: 99 }), node(2), node(3)] }),
+    );
+    rerender(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+    const after = (graphProps().graphData as { nodes: Array<{ id: number; size: number }> }).nodes;
+
+    expect(after[0]).toBe(before[0]);
+    expect(after[1]).toBe(before[1]);
+    expect(after[0].size).toBe(99); // mutable fields are updated in place
+    expect(after.map((n) => n.id)).toEqual([1, 2, 3]);
+  });
+
+  it('collapses consecutive clicks on the same node to one breadcrumb', () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const onNodeClick = graphProps().onNodeClick as ClickHandler;
+    act(() => onNodeClick({ id: 2, name: 'Person 2' }));
+    act(() => onNodeClick({ id: 2, name: 'Person 2' }));
+
+    const crumbs = within(screen.getByTestId('constellation-breadcrumbs')).getAllByRole('button', { name: 'Person 2' });
+    expect(crumbs).toHaveLength(1);
+  });
+
+  it('routes stream frames into the hook rather than maintaining another graph', () => {
+    const onFrame = vi.fn(); const onStatus = vi.fn();
+    mockUseConstellation.mockReturnValue(mockResult({ onFrame, onStatus }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+    const payload = { generation: 0, nodes: [node(3)], edges: [] };
+    act(() => latestOnFrame()(payload));
+    expect(onFrame).toHaveBeenCalledWith(payload);
+    expect(vi.mocked(useFrontierStream)).toHaveBeenLastCalledWith(expect.anything(), onFrame, onStatus);
+  });
+
+  it('draws the red focus highlight only for the focus node', () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const paint = graphProps().nodeCanvasObject as (
+      node: Record<string, unknown>,
+      ctx: CanvasRenderingContext2D,
+      scale: number,
+    ) => void;
+
+    const focus = makeCtx();
+    paint({ id: 1, name: 'Person 1', genre: 'rock', size: 10, owned: false, isFocus: true, x: 0, y: 0 }, focus.ctx, 1);
+    expect(focus.strokeStyles).toContain(FOCUS_NODE_COLOR);
+
+    const plain = makeCtx();
+    paint({ id: 2, name: 'Person 2', genre: 'rock', size: 10, owned: false, isFocus: false, x: 0, y: 0 }, plain.ctx, 1);
+    expect(plain.strokeStyles).not.toContain(FOCUS_NODE_COLOR);
+  });
+
+  it('renders the loading state', () => {
+    mockUseConstellation.mockReturnValue(mockResult({ loading: true }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+    expect(screen.getByTestId('constellation-loading')).toBeInTheDocument();
+  });
+
+  it('renders the error state', () => {
+    mockUseConstellation.mockReturnValue(mockResult({ error: 'Failed to load constellation' }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+    expect(screen.getByTestId('constellation-error')).toHaveTextContent(
+      'Failed to load constellation',
+    );
+  });
+
+  it('provides linkWidth / linkColor accessors to the graph', () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+    expect(typeof graphProps().linkWidth).toBe('function');
+    expect(typeof graphProps().linkColor).toBe('function');
+    expect(typeof graphProps().nodeCanvasObject).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Controls-bar wiring
+// ---------------------------------------------------------------------------
+
+/** Paint-recording ctx that captures arc radii and the alpha at each fill. */
+function makePaintCtx() {
+  const arcs: number[] = [];
+  const fillAlphas: number[] = [];
+  const ctx = {
+    globalAlpha: 1,
+    fillStyle: '',
+    lineWidth: 0,
+    strokeStyle: '',
+    font: '',
+    textAlign: '',
+    textBaseline: '',
+    save: vi.fn(),
+    restore: vi.fn(),
+    beginPath: vi.fn(),
+    arc: (_x: number, _y: number, r: number) => arcs.push(r),
+    fill() {
+      fillAlphas.push(this.globalAlpha);
+    },
+    stroke: vi.fn(),
+    fillText: vi.fn(),
+  };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, arcs, fillAlphas };
+}
+
+type PaintFn = (
+  node: Record<string, unknown>,
+  ctx: CanvasRenderingContext2D,
+  scale: number,
+) => void;
+
+describe('ConstellationView — controls wiring', () => {
+  beforeEach(() => {
+    graphState.reset();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('threads the selected roleMask into the useConstellation seed request', async () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    // Initially seeded with no role filter.
+    expect(mockUseConstellation).toHaveBeenCalledWith(
+      { type: 'artist', id: 'a1' },
+      expect.objectContaining({ roleMask: undefined }),
+    );
+
+    // Uncheck "Producer" -> subset {performer,composer,engineer,artwork} = 1|4|8|16 = 29.
+    await userEvent.click(screen.getByRole('checkbox', { name: /producer/i }));
+
+    const lastCall = mockUseConstellation.mock.calls[mockUseConstellation.mock.calls.length - 1];
+    expect(lastCall[1]).toEqual(expect.objectContaining({ roleMask: 29 }));
+  });
+
+  it('collapses node radius to the uniform size when hide-hotness is on', async () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    const bigNode = { id: 1, name: 'P1', genre: 'rock', size: 100, owned: false, isFocus: false, x: 0, y: 0 };
+
+    // Before: prominence drives the radius (size 100 -> the max, well above uniform).
+    const before = makePaintCtx();
+    (graphProps().nodeCanvasObject as PaintFn)(bigNode, before.ctx, 1);
+    expect(before.arcs[0]).toBeGreaterThan(NODE_RADIUS_UNIFORM);
+
+    // Toggle hide-hotness.
+    await userEvent.click(screen.getByRole('checkbox', { name: /hide hotness/i }));
+
+    const after = makePaintCtx();
+    (graphProps().nodeCanvasObject as PaintFn)(bigNode, after.ctx, 1);
+    expect(after.arcs[0]).toBe(NODE_RADIUS_UNIFORM);
+  });
+
+  it('dims non-matching nodes when a genre is highlighted', async () => {
+    mockUseConstellation.mockReturnValue(mockResult());
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    // Highlight "rock".
+    await userEvent.selectOptions(screen.getByLabelText(/highlight genre/i), 'rock');
+
+    const paint = graphProps().nodeCanvasObject as PaintFn;
+
+    const match = makePaintCtx();
+    paint({ id: 1, name: 'P1', genre: 'rock', size: 10, owned: false, isFocus: false, x: 0, y: 0 }, match.ctx, 1);
+    // The matching genre paints at full opacity.
+    expect(match.fillAlphas[0]).toBe(1);
+
+    const other = makePaintCtx();
+    paint({ id: 2, name: 'P2', genre: 'jazz', size: 10, owned: false, isFocus: false, x: 0, y: 0 }, other.ctx, 1);
+    // A non-matching genre is dimmed.
+    expect(other.fillAlphas[0]).toBe(GENRE_DIMMED_ALPHA);
+  });
+
+  it('renders the PathFinder (its hop selection expands in place like a click)', async () => {
+    mockUseConstellation.mockReturnValue(mockResult({ focusId: 1 }));
+    render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+
+    // The PathFinder is rendered inside the view.
+    expect(screen.getByTestId('path-finder')).toBeInTheDocument();
+  });
+});
+
+it('renders actual credit roles and the recorded Discogs master release in the person panel', async () => {
+  mockUseConstellation.mockReturnValue(mockResult({ nodes: [node(1), node(2)], edges: [edge(1, 2, { roleBitmask: 6, sampleMasterId: 987, sharedMasterCount: 4, bridge: 0.75 })] }));
+  render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  act(() => (graphProps().onNodeClick as ClickHandler)({ id: 2, name: 'Person 2' }));
+  const panel = screen.getByTestId('person-panel'); expect(within(panel).getByText('Producer · Composer')).toBeInTheDocument();
+  expect(within(panel).getByText('4 shared releases')).toBeInTheDocument();
+  expect(within(panel).getByRole('link', { name: 'Shared release on Discogs' })).toHaveAttribute('href', 'https://www.discogs.com/master/987');
+});
+
+it('reads the shared foreground token on theme changes for canvas labels', async () => {
+  mockUseConstellation.mockReturnValue(mockResult());
+  const previous = document.documentElement.style.getPropertyValue('--foreground');
+  document.documentElement.style.setProperty('--foreground', '210 10% 11%');
+  const view = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  const { ctx } = makeCtx();
+  act(() => (graphProps().nodeCanvasObject as PaintFn)({ id: 1, size: 1, genre: null, owned: false, isFocus: true, name: 'Name' }, ctx as unknown as CanvasRenderingContext2D, 2));
+  expect(ctx.fillStyle).toBe('hsl(210 10% 11%)');
+  document.documentElement.style.setProperty('--foreground', '204 15% 94%'); document.documentElement.setAttribute('data-theme', 'dark');
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  act(() => (graphProps().nodeCanvasObject as PaintFn)({ id: 1, size: 1, genre: null, owned: false, isFocus: true, name: 'Name' }, ctx as unknown as CanvasRenderingContext2D, 2));
+  expect(ctx.fillStyle).toBe('hsl(204 15% 94%)');
+  view.unmount(); document.documentElement.style.setProperty('--foreground', previous); document.documentElement.removeAttribute('data-theme');
+});
+
+it('sizes the canvas from the content box and disconnects its observer on unmount', () => {
+  const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(294);
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(589);
+  const disconnect = vi.fn();
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect = disconnect; });
+  mockUseConstellation.mockReturnValue(mockResult());
+  const view = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  expect(graphProps()).toMatchObject({ width: 294, height: 589 }); view.unmount(); expect(disconnect).toHaveBeenCalledTimes(1);
+  width.mockRestore(); height.mockRestore();
+});
+
+it('evicts pruned canvas objects while preserving survivor identity and positions', () => {
+  mockUseConstellation.mockReturnValue(mockResult({ nodes: [node(1), node(8), node(3)] }));
+  const { rerender } = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  const first = (graphProps().graphData as any).nodes;
+  first[0].x = 111; first[0].y = 222; first[1].x = 888;
+  mockUseConstellation.mockReturnValue(mockResult({ nodes: [node(1), node(3)] }));
+  rerender(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  const survived = (graphProps().graphData as any).nodes[0];
+  expect(survived).toBe(first[0]); expect(survived).toMatchObject({ x: 111, y: 222 });
+  mockUseConstellation.mockReturnValue(mockResult({ nodes: [node(1), node(3), node(8)] }));
+  rerender(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  const restored = (graphProps().graphData as any).nodes.find((n: any) => n.id === 8);
+  expect(restored).not.toBe(first[1]); expect(restored.x).toBeUndefined();
+});
+it('shows cached budget state without Retry, and source Retry uses the failed person', async () => {
+  const expandMore = vi.fn();
+  mockUseConstellation.mockReturnValue(mockResult({ expandMore, availability: { generation: 0, focusId: 42, status: 'budget-exhausted' } }));
+  const { rerender } = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  expect(screen.getByText('Daily Discogs budget used; showing cached collaborators only. Resets 00:00 UTC')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  expect((graphProps().graphData as any).nodes).toHaveLength(2);
+  mockUseConstellation.mockReturnValue(mockResult({ expandMore, availability: { generation: 0, focusId: 42, status: 'source-unavailable', detail: 'Collaborator source is unavailable. Please retry.' } }));
+  rerender(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  await userEvent.click(screen.getByRole('button', { name: 'Retry' })); expect(expandMore).toHaveBeenLastCalledWith(42);
+});
+it('quiet streams show no availability notice and live source clears old genre dimming', async () => {
+  mockUseConstellation.mockReturnValue(mockResult({ creditSource: 'index' }));
+  const { rerender } = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  expect(screen.queryByRole('status', { name: 'Some results are unavailable' })).not.toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByLabelText('Highlight genre'), 'rock');
+  mockUseConstellation.mockReturnValue(mockResult({ creditSource: 'live' }));
+  rerender(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  expect(screen.getByLabelText('Highlight genre')).toBeDisabled();
+  expect(screen.getByText('Genre colour unavailable on the live Discogs source')).toBeVisible();
+  const { ctx } = makeCtx(); const n = (graphProps().graphData as any).nodes[1];
+  (graphProps().nodeCanvasObject as any)(n, ctx, 2); expect(ctx.globalAlpha).toBe(1);
+});
+
+it('keeps the complete breadcrumb trail and reexpands a person pruned from the field', async () => {
+  const expandMore = vi.fn(); mockUseConstellation.mockReturnValue(mockResult({ expandMore }));
+  const { rerender } = render(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  act(() => { const n = (graphProps().graphData as any).nodes.find((person: any) => person.id === 2); (graphProps().onNodeClick as any)(n); });
+  mockUseConstellation.mockReturnValue(mockResult({ expandMore, nodes: [node(1), node(3)] }));
+  rerender(<ConstellationView seed={{ type: 'artist', id: 'a1' }} />);
+  const trail = screen.getByRole('navigation', { name: 'Constellation trail' });
+  expect(within(trail).getByRole('button', { name: 'Person 2' })).toBeInTheDocument();
+  expandMore.mockClear(); await userEvent.click(within(trail).getByRole('button', { name: 'Person 2' }));
+  expect(expandMore).toHaveBeenCalledWith(2);
+});

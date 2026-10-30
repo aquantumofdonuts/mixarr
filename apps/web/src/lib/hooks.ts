@@ -1,7 +1,11 @@
+import type { ArtistAddOptions } from '@/components/artists/AddArtistOptions';
 'use client';
 
+import type { AcquisitionOutcome, AcquisitionState, UndoDecisionResponse, ArtistSourceRecord, ArtistDetail } from '@mixarr/shared-types';
+
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
-import { api } from './api';
+import { api, endpoints } from './api';
+import { useAuth } from './auth';
 
 // Query Keys - Centralized for cache invalidation
 
@@ -31,7 +35,7 @@ export const queryKeys = {
   hasLidarr: ['connections', 'hasLidarr'] as const,
   
   // Queue / Review
-  reviewQueue: (status: string, itemType?: string) => ['review', 'queue', status, itemType] as const,
+  reviewQueue: (status: string, itemType?: string, params: { q?: string; cursor?: string | null; limit?: number } = {}, actorId?: number, role?: string) => ['review', 'queue', actorId, role, status, itemType, params.q ?? '', params.cursor ?? null, params.limit ?? 50] as const,
   
   // Jobs
   jobs: ['jobs'] as const,
@@ -49,6 +53,8 @@ export const queryKeys = {
   
   // Search
   searchArtists: (query: string) => ['search', 'artists', query] as const,
+  artistDetail: (actorId: number | null, mbid: string | null, limit: number) => ['artists', actorId, mbid, 'detail', limit] as const,
+  artistReleases: (actorId: number | null, mbid: string | null, limit: number) => ['artists', actorId, mbid, 'releases', limit] as const,
   
   // Settings
   settings: ['settings'] as const,
@@ -58,6 +64,57 @@ export const queryKeys = {
   feed: ['feed'] as const,
   feedItems: (limit: number, offset: number) => ['feed', 'items', limit, offset] as const,
 };
+
+export interface ArtistReleaseGroup {
+  id: string;
+  title: string;
+  'primary-type'?: string;
+  'secondary-types'?: string[];
+  'first-release-date'?: string;
+}
+export interface ArtistReleasePage { releaseGroups: ArtistReleaseGroup[]; count: number; }
+
+const artistMbidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function useArtistDetail(mbid: string | null, sourceLimit = 50) {
+  const identity = mbid && artistMbidPattern.test(mbid) ? mbid.toLowerCase() : null;
+  const { user } = useAuth();
+  return useInfiniteQuery({
+    queryKey: queryKeys.artistDetail(user?.id ?? null, identity, sourceLimit),
+    enabled: !!user && !!identity,
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam, signal }) => {
+      const params = new URLSearchParams({ sourceLimit: String(sourceLimit) });
+      if (pageParam) params.set('sourceCursor', pageParam);
+      const { data, error } = await api.get<ArtistDetail>(`${endpoints.search.artistDetail(identity!)}?${params}`, { signal });
+      if (error || !data) throw new Error(error || 'Artist detail unavailable');
+      return data;
+    },
+    getNextPageParam: lastPage => lastPage.sourcesNextCursor ?? undefined,
+    staleTime: 30_000,
+  });
+}
+
+export function useArtistReleases(mbid: string | null, limit = 25) {
+  const identity = mbid && artistMbidPattern.test(mbid) ? mbid.toLowerCase() : null;
+  const { user } = useAuth();
+  return useInfiniteQuery({
+    queryKey: queryKeys.artistReleases(user?.id ?? null, identity, limit),
+    enabled: !!user && !!identity,
+    initialPageParam: 0,
+    queryFn: async ({ pageParam, signal }) => {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(pageParam) });
+      const { data, error } = await api.get<ArtistReleasePage>(`${endpoints.search.artistReleases(identity!)}?${params}`, { signal });
+      if (error || !data) throw new Error(error || 'Artist releases unavailable');
+      return data;
+    },
+    getNextPageParam: (lastPage, pages) => {
+      const fetched = pages.reduce((count, page) => count + page.releaseGroups.length, 0);
+      return lastPage.releaseGroups.length && fetched < lastPage.count && fetched <= 1_000_000 ? fetched : undefined;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
 
 // Feed Types
 
@@ -71,7 +128,11 @@ export interface FeedItem {
   sourceCount: number;
   sources: string[];
   createdAt: string;
-  status?: 'pending' | 'added' | 'dismissed';
+  status?: 'pending' | 'adding' | 'failed' | 'added' | 'dismissed';
+  acquisitionState?: AcquisitionState;
+  acquisitionMessage?: string;
+  sourceRecords?: ArtistSourceRecord[];
+  sourceRecordCount?: number;
   // Metadata for display
   tags: string[] | null;
   listeners: number | null;
@@ -87,6 +148,7 @@ export interface FeedResponse {
   items: FeedItem[];
   stats: FeedStats;
   total: number;
+  truncation?: { totalBeforeAggregationCap: number; aggregationTruncated: boolean };
 }
 
 // Feed Hooks
@@ -94,71 +156,74 @@ export interface FeedResponse {
 export function useFeed(limit = 50) {
   return useInfiniteQuery({
     queryKey: [...queryKeys.feed, limit],
-    queryFn: async ({ pageParam = 0 }) => {
-      const { data, error } = await api.get<FeedResponse>(
-        `/api/feed?limit=${limit}&offset=${pageParam}`
-      );
+    queryFn: async ({ pageParam = 0, signal }) => {
+      const { data, error } = await api.get<FeedResponse>(`/api/feed?limit=${limit}&offset=${pageParam}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.items.length === 0) return undefined;
       const totalFetched = allPages.reduce((sum, page) => sum + page.items.length, 0);
       return totalFetched < lastPage.total ? totalFetched : undefined;
     },
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
+    refetchInterval: query => query.state.data?.pages.some(page => page.items.some(item => item.acquisitionState === 'adding')) ? 5_000 : false,
   });
 }
 
 export function useApproveFeedItem() {
   const queryClient = useQueryClient();
-
+  const updateItem = (id: string, changes: Partial<FeedItem>) => {
+    queryClient.setQueriesData<import('@tanstack/react-query').InfiniteData<FeedResponse>>(
+      { queryKey: queryKeys.feed }, old => old ? { ...old, pages: old.pages.map(page => ({
+        ...page, items: page.items.map(item => item.id === id ? { ...item, ...changes } : item),
+      })) } : old);
+  };
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { data, error } = await api.post<{ artistName: string }>(
-        `/api/feed/${id}/approve`
-      );
-      if (error) throw new Error(error);
-      return data!;
+    retry: false,
+    mutationFn: async (input: string | { id: string; options: ArtistAddOptions }) => {
+      const id = typeof input === 'string' ? input : input.id;
+      const { data, error, code } = await api.post<{ artistName: string; outcome: AcquisitionOutcome }>(
+        `/api/feed/${id}/approve`, typeof input === 'string' ? undefined : input.options, { timeoutMs: 70_000 });
+      if (error) throw Object.assign(new Error(error), { code });
+      if (!data?.outcome) throw new Error('Artist confirmation is unavailable. Refresh before retrying.');
+      return data;
     },
-    onMutate: async (id) => {
-      // Cancel any outgoing refetches to prevent race condition
+    onMutate: async input => {
+      const actorId = currentActor(queryClient);
+      const id = typeof input === 'string' ? input : input.id;
       await queryClient.cancelQueries({ queryKey: queryKeys.feed });
-
-      // Snapshot every feed query for rollback. Feed queries are keyed
-      // ['feed', limit], so prefix-matching setQueriesData/getQueriesData
-      // must be used here — exact-key setQueryData(['feed']) would miss them.
-      const previousData = queryClient.getQueriesData({ queryKey: queryKeys.feed });
-
-      // Optimistic update - mark item as 'added'
-      queryClient.setQueriesData({ queryKey: queryKeys.feed }, (old: any) => {
-        if (!old?.pages) return old;
-        return {
-          ...old,
-          pages: old.pages.map((page: FeedResponse) => ({
-            ...page,
-            items: page.items.map((item: FeedItem) =>
-              item.id === id ? { ...item, status: 'added' as const } : item
-            ),
-            stats: {
-              pending: Math.max(0, page.stats.pending - 1),
-              addedToday: page.stats.addedToday + 1,
-            },
-          })),
-        };
-      });
-
-      return { previousData };
+      if (actorId === currentActor(queryClient)) updateItem(id, { status: 'adding', acquisitionState: 'adding', acquisitionMessage: undefined });
+      return { actorId };
     },
-    onError: (_err, _id, context) => {
-      // Rollback each snapshotted query on error
-      for (const [key, data] of context?.previousData ?? []) {
-        queryClient.setQueryData(key, data);
+    onSuccess: (data, input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
+      const id = typeof input === 'string' ? input : input.id;
+      const confirmed = data.outcome.state === 'added' || data.outcome.state === 'already-in-library';
+      if (confirmed) {
+        queryClient.setQueriesData<import('@tanstack/react-query').InfiniteData<FeedResponse>>(
+          { queryKey: queryKeys.feed }, old => {
+            if (!old?.pages.some(page => page.items.some(item => item.id === id))) return old;
+            // Recent outcome rows belong to the page UI; raw query rows must match the server's shifted offset.
+            return { ...old, pages: old.pages.map(page => ({ ...page, total: Math.max(0, page.total - 1), items: page.items.filter(item => item.id !== id) })) };
+          });
+        queryClient.invalidateQueries({ queryKey: ['discover', 'library'] });
+        queryClient.invalidateQueries({ queryKey: ['review'] });
+        queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
+      } else {
+        updateItem(id, { status: 'failed', acquisitionState: data.outcome.state, acquisitionMessage: data.outcome.message });
       }
     },
+    onError: (error, input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
+      const id = typeof input === 'string' ? input : input.id;
+      const code = (error as Error & { code?: string }).code;
+      updateItem(id, { status: code === 'IN_PROGRESS' ? 'adding' : 'failed', acquisitionState: code === 'IDENTITY_REQUIRED' ? 'identity-required'
+        : code === 'CONNECTION_REQUIRED' ? 'connection-required' : code === 'IN_PROGRESS' ? 'adding' : 'uncertain', acquisitionMessage: error.message });
+    },
     onSettled: () => {
-      // Always refetch to ensure consistency
       queryClient.invalidateQueries({ queryKey: queryKeys.feed });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
     },
@@ -167,46 +232,46 @@ export function useApproveFeedItem() {
 
 export function useDismissFeedItem() {
   const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await api.post<{ artistName: string }>(
-        `/api/feed/${id}/dismiss`
-      );
+      const { data, error } = await api.post<{ artistName: string } & UndoDecisionResponse>(`/api/feed/${id}/dismiss`);
       if (error) throw new Error(error);
       return data!;
     },
-    onMutate: async (id) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.feed });
-      // Prefix-match all ['feed', limit] queries — see useApproveFeedItem
-      const previousData = queryClient.getQueriesData({ queryKey: queryKeys.feed });
-
-      queryClient.setQueriesData({ queryKey: queryKeys.feed }, (old: any) => {
-        if (!old?.pages) return old;
-        return {
-          ...old,
-          pages: old.pages.map((page: FeedResponse) => ({
-            ...page,
-            items: page.items.map((item: FeedItem) =>
-              item.id === id ? { ...item, status: 'dismissed' as const } : item
-            ),
-            stats: {
-              ...page.stats,
-              pending: Math.max(0, page.stats.pending - 1),
-            },
-          })),
-        };
-      });
-
-      return { previousData };
-    },
-    onError: (_err, _id, context) => {
-      for (const [key, data] of context?.previousData ?? []) {
-        queryClient.setQueryData(key, data);
-      }
+    onSuccess: (_data, id) => {
+      queryClient.setQueriesData<import('@tanstack/react-query').InfiniteData<FeedResponse>>(
+        { queryKey: queryKeys.feed }, old => {
+          if (!old?.pages.some(page => page.items.some(item => item.id === id))) return old;
+          // This confirmed deletion also shifts the server's next raw artist offset by one.
+          return { ...old, pages: old.pages.map(page => ({ ...page, total: Math.max(0, page.total - 1), items: page.items.filter(item => item.id !== id) })) };
+        });
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.feed });
+      queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
+    },
+  });
+}
+
+/**
+ * Restore decisions through a server mutation.
+ */
+export function useRestoreDecision(kind: 'feed' | 'review') {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
+    mutationFn: async (undoToken: string) => {
+      const endpoint = kind === 'feed' ? '/api/feed/restore' : '/api/imports/review/restore';
+      const { data, error } = await api.post<{ restoredIds: number[] }>(endpoint, { undoToken });
+      if (error) throw new Error(error);
+      return data!;
+    },
+    onSuccess: (_data, _input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
+      queryClient.invalidateQueries({ queryKey: kind === 'feed' ? queryKeys.feed : ['review'] });
+      if (kind === 'feed') queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
     },
   });
@@ -216,7 +281,8 @@ export function useDismissFeedItem() {
 
 interface DashboardStats {
   activeSubscriptions: number;
-  artistsAdded: number;
+  subscriptionRecordsMarkedAdded: number;
+  pendingDiscoveryRecords: number;
   pendingReviews: number;
   runningJobs: number;
   activeConnections: number;
@@ -243,10 +309,12 @@ interface ConnectionSummary {
 }
 
 export function useDashboardStats() {
+  const { user } = useAuth();
   return useQuery({
-    queryKey: queryKeys.dashboardStats,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ stats: DashboardStats }>('/api/dashboard/stats');
+    queryKey: [...queryKeys.dashboardStats, user?.id ?? null],
+    enabled: !!user,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ stats: DashboardStats }>('/api/dashboard/stats', { signal });
       if (error) throw new Error(error);
       return data!.stats;
     },
@@ -257,8 +325,8 @@ export function useDashboardStats() {
 export function useDashboardActivity() {
   return useQuery({
     queryKey: queryKeys.dashboardActivity,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ activities: Activity[] }>('/api/dashboard/activity');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ activities: Activity[] }>('/api/dashboard/activity', { signal });
       if (error) throw new Error(error);
       return data!.activities;
     },
@@ -269,8 +337,8 @@ export function useDashboardActivity() {
 export function useDashboardConnections() {
   return useQuery({
     queryKey: queryKeys.dashboardConnections,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ summary: ConnectionSummary }>('/api/dashboard/connections/summary');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ summary: ConnectionSummary }>('/api/dashboard/connections/summary', { signal });
       if (error) throw new Error(error);
       return data!.summary;
     },
@@ -308,8 +376,8 @@ interface Preset {
 export function useSubscriptions() {
   return useQuery({
     queryKey: queryKeys.subscriptions,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ subscriptions: Subscription[] }>('/api/subscriptions');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ subscriptions: Subscription[] }>('/api/subscriptions', { signal });
       if (error) throw new Error(error);
       return data!.subscriptions;
     },
@@ -320,8 +388,8 @@ export function useSubscriptions() {
 export function usePresets() {
   return useQuery({
     queryKey: queryKeys.presets,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ presets: Preset[] }>('/api/subscriptions/presets/list');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ presets: Preset[] }>('/api/subscriptions/presets/list', { signal });
       if (error) throw new Error(error);
       return data!.presets;
     },
@@ -367,7 +435,7 @@ export function useToggleSubscription() {
   
   return useMutation({
     mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
-      const { error } = await api.patch(`/api/subscriptions/${id}`, { isActive });
+      const { error } = await api.put(`/api/subscriptions/${id}`, { isActive });
       if (error) throw new Error(error);
     },
     onSuccess: () => {
@@ -424,11 +492,12 @@ export function useUpdateSubscription() {
 
 // Review Queue Hooks
 
-interface ReviewItem {
+export interface ReviewItem {
   id: number;
   userId: number;
   artistName: string;
   albumName: string | null;
+  albumMbid?: string | null;
   releaseYear: number | null;
   spotifyId: string | null;
   mbid: string | null;
@@ -440,18 +509,31 @@ interface ReviewItem {
   user?: { username: string; displayName: string };
 }
 
-export function useReviewQueue(status: 'pending' | 'approved' | 'rejected', itemType?: 'artist' | 'album') {
+export interface ReviewAcquisitionOutcome { id: number; state: 'added' | 'already-in-library' | 'failed' | 'uncertain' | 'identity-required'; message: string }
+export interface ReviewAcquisitionResponse extends Partial<UndoDecisionResponse> {
+  success?: boolean; outcomes?: ReviewAcquisitionOutcome[]; added?: number; alreadyInLibrary?: number; failed?: number;
+  addedIds?: number[]; failedIds?: number[];
+}
+export class ReviewAcquisitionError extends Error {
+  constructor(message: string, public outcomes: ReviewAcquisitionOutcome[] = []) { super(message); }
+}
+
+export function useReviewQueue(status: 'pending' | 'approved' | 'rejected', itemType?: 'artist' | 'album',
+  scope: { q?: string; cursor?: string | null; limit?: number } = {}) {
+  const { user } = useAuth();
+  const q = scope.q?.trim() ?? '';
+  const limit = scope.limit ?? 50;
   return useQuery({
-    queryKey: queryKeys.reviewQueue(status, itemType),
-    queryFn: async () => {
-      // 500 is the API's max page size; total lets the UI show truncation
-      const params = new URLSearchParams({ status, limit: '500' });
-      if (itemType) params.append('itemType', itemType);
-      const { data, error } = await api.get<{ items: ReviewItem[]; total: number }>(
-        `/api/imports/review/queue?${params.toString()}`
-      );
-      if (error) throw new Error(error);
-      return { items: data!.items, total: data!.total ?? data!.items.length };
+    queryKey: queryKeys.reviewQueue(status, itemType, { ...scope, q, limit }, user?.id, user?.role),
+    enabled: !!user,
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ status, limit: String(limit) });
+      if (itemType) params.set('itemType', itemType);
+      if (q) params.set('q', q);
+      if (scope.cursor) params.set('cursor', scope.cursor);
+      const { data, error } = await api.get<{ items: ReviewItem[]; total: number; nextCursor: string | null }>(`/api/imports/review/queue?${params}`, { signal });
+      if (error || !data) throw new Error(error || 'Review queue unavailable');
+      return data;
     },
     staleTime: 30 * 1000,
   });
@@ -461,11 +543,16 @@ export function useUpdateReviewItem() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ id, status }: { id: number; status: 'approved' | 'rejected' }) => {
-      const { error } = await api.put(`/api/imports/review/${id}`, { status });
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
+    mutationFn: async ({ id, status, options }: { id: number; status: 'approved' | 'rejected'; options?: ArtistAddOptions }) => {
+      const { data, error, details } = await api.put<ReviewAcquisitionResponse>(`/api/imports/review/${id}`, { status, ...options });
+      if (status === 'approved' && (error || data?.success !== true)) throw new ReviewAcquisitionError(error || data?.outcomes?.[0]?.message || 'Review acquisition was not confirmed', data?.outcomes ?? (details as ReviewAcquisitionResponse | undefined)?.outcomes);
       if (error) throw new Error(error);
+      return data;
     },
-    onSuccess: () => {
+    onSettled: (_data, _error, _input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
       queryClient.invalidateQueries({ queryKey: ['review'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
     },
@@ -476,11 +563,16 @@ export function useBulkUpdateReview() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ ids, status }: { ids: number[]; status: 'approved' | 'rejected' }) => {
-      const { error } = await api.post('/api/imports/review/bulk', { ids, status });
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
+    mutationFn: async ({ ids, status, options }: { ids: number[]; status: 'approved' | 'rejected'; options?: ArtistAddOptions }) => {
+      const { data, error, details } = await api.post<ReviewAcquisitionResponse>('/api/imports/review/bulk', { ids, status, ...options });
+      if (error && status === 'approved') throw new ReviewAcquisitionError(error, (details as ReviewAcquisitionResponse | undefined)?.outcomes);
       if (error) throw new Error(error);
+      return data;
     },
-    onSuccess: () => {
+    onSettled: (_data, _error, _input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
       queryClient.invalidateQueries({ queryKey: ['review'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
     },
@@ -492,7 +584,7 @@ export function useBulkUpdateReview() {
 interface Connection {
   id: number;
   userId: number | null;
-  type: 'lidarr' | 'spotify' | 'lastfm' | 'tautulli' | 'deezer' | 'tidal' | 'listenbrainz' | 'discogs';
+  type: 'lidarr' | 'spotify' | 'lastfm' | 'tautulli' | 'jellyfin' | 'deezer' | 'tidal' | 'listenbrainz' | 'discogs' | 'slskd';
   name: string;
   isActive: boolean;
   lastTest: string | null;
@@ -503,10 +595,17 @@ interface Connection {
 export function useConnections() {
   return useQuery({
     queryKey: queryKeys.connections,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ connections: Connection[] }>('/api/connections');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ connections: Connection[] }>('/api/connections', { signal });
       if (error) throw new Error(error);
-      return data!.connections;
+      if (!Array.isArray(data?.connections) || data.connections.some(connection =>
+        !connection || !Number.isSafeInteger(connection.id) || connection.id <= 0 ||
+        typeof connection.type !== 'string' || typeof connection.name !== 'string' ||
+        typeof connection.isActive !== 'boolean' ||
+        !(connection.userId === null || Number.isSafeInteger(connection.userId)) ||
+        !(connection.lastTest === null || (typeof connection.lastTest === 'string' && !Number.isNaN(Date.parse(connection.lastTest))))
+      )) throw new Error('Invalid connections response');
+      return data.connections;
     },
     staleTime: 60 * 1000,
   });
@@ -514,6 +613,7 @@ export function useConnections() {
 
 export function useTestConnection() {
   return useMutation({
+    retry: false,
     mutationFn: async (id: number) => {
       const { data, error } = await api.post<{ success: boolean; message?: string }>(
         `/api/connections/${id}/test`
@@ -528,6 +628,7 @@ export function useDeleteConnection() {
   const queryClient = useQueryClient();
   
   return useMutation({
+    retry: false,
     mutationFn: async (id: number) => {
       const { error } = await api.delete(`/api/connections/${id}`);
       if (error) throw new Error(error);
@@ -542,8 +643,8 @@ export function useDeleteConnection() {
 export function useHasLidarr() {
   return useQuery({
     queryKey: queryKeys.hasLidarr,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ hasLidarr: boolean }>('/api/connections/has-lidarr');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ hasLidarr: boolean }>('/api/connections/has-lidarr', { signal });
       if (error) throw new Error(error);
       return data!.hasLidarr;
     },
@@ -568,8 +669,8 @@ interface Job {
 export function useJobs() {
   return useQuery({
     queryKey: queryKeys.jobs,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ jobs: Job[] }>('/api/jobs');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ jobs: Job[] }>('/api/jobs', { signal });
       if (error) throw new Error(error);
       return data!.jobs;
     },
@@ -607,14 +708,14 @@ export function useLogs(params: LogsParams) {
   
   return useQuery({
     queryKey: queryKeys.logs(Object.fromEntries(queryParams)),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const { data, error } = await api.get<{ 
         logs: LogEntry[]; 
         total: number; 
         hasMore: boolean;
         limit: number;
         offset: number;
-      }>(`/api/logs?${queryParams.toString()}`);
+      }>(`/api/logs?${queryParams.toString()}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
@@ -636,8 +737,8 @@ interface User {
 export function useUsers() {
   return useQuery({
     queryKey: queryKeys.users,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ users: User[] }>('/api/auth/users');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ users: User[] }>('/api/auth/users', { signal });
       if (error) throw new Error(error);
       return data!.users;
     },
@@ -677,6 +778,7 @@ export interface Profiles {
     metadataProfileId?: number;
     rootFolderPath?: string;
     monitorOption?: string;
+    monitorNewItems?: string;
     searchOnAdd?: boolean;
   };
 }
@@ -690,11 +792,11 @@ export function useLibrary(params: { page: number; limit: number; search?: strin
   
   return useQuery({
     queryKey: queryKeys.library({ ...params }),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const { data, error } = await api.get<{
         artists: LibraryArtist[];
         pagination: { page: number; limit: number; total: number; totalPages: number };
-      }>(`/api/discover/library?${queryParams}`);
+      }>(`/api/discover/library?${queryParams}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
@@ -705,8 +807,8 @@ export function useLibrary(params: { page: number; limit: number; search?: strin
 export function useProfiles() {
   return useQuery({
     queryKey: queryKeys.profiles,
-    queryFn: async () => {
-      const { data, error } = await api.get<Profiles>('/api/discover/profiles');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<Profiles>('/api/discover/profiles', { signal });
       if (error) throw new Error(error);
       return data!;
     },
@@ -719,8 +821,8 @@ export function useProfiles() {
 export function useSettings() {
   return useQuery({
     queryKey: queryKeys.settings,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ settings: Record<string, unknown> }>('/api/settings');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ settings: Record<string, unknown> }>('/api/settings', { signal });
       if (error) throw new Error(error);
       return data!.settings;
     },
@@ -728,11 +830,86 @@ export function useSettings() {
   });
 }
 
+export interface ConstellationSettings {
+  constellationIndexEnabled: boolean;
+  constellationIndexPath: string;
+  orbitEdgeBudget: number;
+  dailyApiBudget: number;
+  fanoutN: number;
+  pathMaxDegrees: number;
+  indexRefresh: 'monthly' | 'off';
+}
+
+const constellationNumbers = ['orbitEdgeBudget', 'dailyApiBudget', 'fanoutN', 'pathMaxDegrees'] as const;
+function isConstellationSettings(value: unknown): value is ConstellationSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const settings = value as Record<string, unknown>;
+  return typeof settings.constellationIndexEnabled === 'boolean'
+    && typeof settings.constellationIndexPath === 'string' && settings.constellationIndexPath.length > 0
+    && constellationNumbers.every(key => typeof settings[key] === 'number' && Number.isInteger(settings[key]) && (settings[key] as number) > 0)
+    && (settings.indexRefresh === 'monthly' || settings.indexRefresh === 'off');
+}
+
+export function useConstellationSettings() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ['settings', 'constellation', user?.id, user?.role],
+    enabled: user?.role === 'admin',
+    retry: false,
+    queryFn: async ({ signal }) => {
+      if (user?.role !== 'admin') throw new Error('Admin access required');
+      const { data, error } = await api.get<{ settings: ConstellationSettings }>('/api/settings/constellation', { signal });
+      if (error || !isConstellationSettings(data?.settings)) throw new Error(error || 'Failed to load constellation settings: invalid response.');
+      return data.settings;
+    },
+  });
+}
+
+export function useUpdateConstellationSettings() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: async ({ changes, signal }: { changes: Partial<ConstellationSettings>; signal: AbortSignal }) => {
+      if (user?.role !== 'admin' || signal.aborted) throw new Error('Admin access required');
+      const { data, error } = await api.put<{ success: boolean; settings: ConstellationSettings }>('/api/settings/constellation', changes, { signal });
+      if (error || data?.success !== true || !isConstellationSettings(data.settings)) throw new Error(error || 'Invalid save response; retry or reload to confirm constellation settings.');
+      return data.settings;
+    },
+    onSuccess: (settings, { signal }) => {
+      const actor = queryClient.getQueryData<{ user?: { id: number; role: string } }>(['auth'])?.user;
+      if (user && !signal.aborted && actor?.id === user.id && actor?.role === 'admin') {
+        queryClient.setQueryData(['settings', 'constellation', user.id, user.role], settings);
+        void queryClient.invalidateQueries({ queryKey: ['settings', 'constellation-usage', user.id, user.role] });
+      }
+    },
+  });
+}
+
+export interface ConstellationUsage { day: string; used: number; limit: number; }
+export function useConstellationUsage() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ['settings', 'constellation-usage', user?.id, user?.role],
+    enabled: user?.role === 'admin',
+    retry: false,
+    queryFn: async ({ signal }) => {
+      if (user?.role !== 'admin') throw new Error('Admin access required');
+      const { data, error } = await api.get<ConstellationUsage>('/api/settings/constellation/usage', { signal });
+      const dayTime = data ? Date.parse(`${data.day}T00:00:00Z`) : NaN;
+      if (error || !data || !Number.isFinite(dayTime) || new Date(dayTime).toISOString().slice(0, 10) !== data.day || !/^\d{4}-\d{2}-\d{2}$/.test(data.day) || !Number.isSafeInteger(data.used) || data.used < 0 || !Number.isInteger(data.limit) || data.limit <= 0) {
+        throw new Error(error || 'Failed to load constellation usage: invalid response.');
+      }
+      return data;
+    },
+  });
+}
+
 export function useAISettings() {
   return useQuery({
     queryKey: queryKeys.aiSettings,
-    queryFn: async () => {
-      const { data, error } = await api.get<{ settings: Record<string, unknown> }>('/api/ai/settings');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ settings: Record<string, unknown> }>('/api/ai/settings', { signal });
       if (error) throw new Error(error);
       return data!.settings;
     },
@@ -746,42 +923,49 @@ export interface SlskdDownload {
   connectionId: number;
   username: string;
   artistName: string;
-  albumName?: string;
-  albumYear?: number;
+  albumName?: string | null;
+  albumYear?: number | null;
   filename: string;
-  fileSize: number;
-  downloadPath?: string;
-  organizedPath?: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled';
-  error?: string;
+  fileSize: number | string;
+  downloadPath?: string | null;
+  finalPath?: string | null;
+  status: 'queued_locally' | 'pending' | 'downloading' | 'organizing' | 'completed' | 'failed' | 'cancelled';
+  error?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export function useSlskdDownloads(status?: string) {
-  const queryParams = status ? `?status=${status}` : '';
+  const { user } = useAuth();
+  const queryParams = new URLSearchParams({ limit: '100' });
+  if (status) queryParams.set('status', status);
   return useQuery({
-    queryKey: ['slskd', 'downloads', status],
-    queryFn: async () => {
-      const { data, error } = await api.get<SlskdDownload[]>(`/api/slskd/downloads${queryParams}`);
-      if (error) throw new Error(error);
-      return data!;
+    queryKey: ['slskd', 'downloads', user?.id, user?.role, status],
+    enabled: !!user,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<SlskdDownload[]>(`/api/slskd/downloads?${queryParams}`, { signal });
+      if (error || !Array.isArray(data)) throw new Error(error || 'Downloads unavailable');
+      return data;
     },
-    staleTime: 10 * 1000, // Refresh every 10s for active downloads
-    refetchInterval: status === 'downloading' || status === 'pending' ? 5000 : false,
+    staleTime: 10_000,
+    refetchInterval: query => status === 'queued_locally' || status === 'pending' || status === 'downloading' || status === 'organizing'
+      || query.state.data?.some(download => ['queued_locally', 'pending', 'downloading', 'organizing'].includes(download.status)) ? 5000 : false,
   });
 }
 
 export function useRetrySlskdDownload() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient), role: queryClient.getQueryData<{ user?: { role?: string } }>(queryKeys.auth)?.user?.role }),
     mutationFn: async (id: number) => {
       const { data, error } = await api.post<{ success: boolean }>(`/api/slskd/downloads/${id}/retry`);
-      if (error) throw new Error(error);
-      return data!;
+      if (error || data?.success !== true) throw new Error(error || 'Download retry was not confirmed');
+      return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['slskd', 'downloads'] });
+    onSuccess: (_data, _variables, context) => {
+      if (context.actorId !== currentActor(queryClient) || context.role !== queryClient.getQueryData<{ user?: { role?: string } }>(queryKeys.auth)?.user?.role) return;
+      return queryClient.invalidateQueries({ queryKey: ['slskd', 'downloads'] });
     },
   });
 }
@@ -789,14 +973,17 @@ export function useRetrySlskdDownload() {
 export function useCancelSlskdDownload() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient), role: queryClient.getQueryData<{ user?: { role?: string } }>(queryKeys.auth)?.user?.role }),
     mutationFn: async ({ id, remove = false }: { id: number; remove?: boolean }) => {
       const queryParams = remove ? '?remove=true' : '';
       const { data, error } = await api.delete<{ success: boolean }>(`/api/slskd/downloads/${id}${queryParams}`);
-      if (error) throw new Error(error);
-      return data!;
+      if (error || data?.success !== true) throw new Error(error || 'Tracking change was not confirmed');
+      return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['slskd', 'downloads'] });
+    onSuccess: (_data, _variables, context) => {
+      if (context.actorId !== currentActor(queryClient) || context.role !== queryClient.getQueryData<{ user?: { role?: string } }>(queryKeys.auth)?.user?.role) return;
+      return queryClient.invalidateQueries({ queryKey: ['slskd', 'downloads'] });
     },
   });
 }
@@ -839,6 +1026,9 @@ export interface SubscriptionResult {
   createdAt: string;
   imageUrl?: string | null;
   inLibrary?: boolean;
+  albumMbid?: string | null;
+  errorMessage?: string | null;
+  runId?: number | null;
 }
 
 export interface SubscriptionResultsPage {
@@ -854,62 +1044,58 @@ export interface SubscriptionResultsPage {
 export function useSubscriptionDetail(id: number) {
   return useQuery({
     queryKey: queryKeys.subscription(id),
-    queryFn: async () => {
-      const { data, error } = await api.get<{ subscription: SubscriptionDetail }>(`/api/subscriptions/${id}`);
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ subscription: SubscriptionDetail }>(`/api/subscriptions/${id}`, { signal });
       if (error) throw new Error(error);
       return data!.subscription;
     },
     staleTime: 30 * 1000,
-    enabled: Number.isFinite(id),
+    enabled: Number.isSafeInteger(id) && id > 0,
   });
 }
 
 export function useSubscriptionRuns(id: number) {
   return useQuery({
     queryKey: queryKeys.subscriptionRuns(id),
-    queryFn: async () => {
-      const { data, error } = await api.get<{ runs: SubscriptionRun[] }>(`/api/subscriptions/${id}/runs`);
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ runs: SubscriptionRun[] }>(`/api/subscriptions/${id}/runs`, { signal });
       if (error) throw new Error(error);
       return data!.runs;
     },
     staleTime: 30 * 1000,
-    enabled: Number.isFinite(id),
+    enabled: Number.isSafeInteger(id) && id > 0,
   });
 }
 
 export function useSubscriptionResults(id: number, status: string, page: number) {
   return useQuery({
     queryKey: queryKeys.subscriptionResults(id, status, page),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const params = new URLSearchParams({
         limit: String(RESULTS_PAGE_SIZE),
         offset: String(page * RESULTS_PAGE_SIZE),
       });
       if (status) params.set('status', status);
-      const { data, error } = await api.get<SubscriptionResultsPage>(
-        `/api/subscriptions/${id}/results?${params.toString()}`
-      );
+      const { data, error } = await api.get<SubscriptionResultsPage>(`/api/subscriptions/${id}/results?${params.toString()}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
     staleTime: 30 * 1000,
-    placeholderData: (prev) => prev,
-    enabled: Number.isFinite(id),
+    placeholderData: (prev, query) => query?.queryKey[1] === id && query.queryKey[3] === status ? prev : undefined,
+    enabled: Number.isSafeInteger(id) && id > 0,
   });
 }
 
 export function useSubscriptionRunDetails(id: number, runId: number | null) {
   return useQuery({
     queryKey: queryKeys.subscriptionRunDetails(id, runId ?? -1),
-    queryFn: async () => {
-      const { data, error } = await api.get<{ run: SubscriptionRun; results: SubscriptionResult[] }>(
-        `/api/subscriptions/${id}/runs/${runId}`
-      );
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ run: SubscriptionRun; results: SubscriptionResult[] }>(`/api/subscriptions/${id}/runs/${runId}`, { signal });
       if (error) throw new Error(error);
       return data!;
     },
     staleTime: 30 * 1000,
-    enabled: Number.isFinite(id) && runId !== null,
+    enabled: Number.isSafeInteger(id) && id > 0 && runId !== null && Number.isSafeInteger(runId) && runId > 0,
   });
 }
 
@@ -920,13 +1106,16 @@ function updateResultStatus(
   resultId: number,
   newStatus: string
 ) {
-  queryClient.setQueriesData<SubscriptionResultsPage>(
-    { queryKey: ['subscriptions', subscriptionId, 'results'] },
-    (old) =>
-      old
-        ? { ...old, results: old.results.map((r) => (r.id === resultId ? { ...r, status: newStatus } : r)) }
-        : old
-  );
+  for (const [key, old] of queryClient.getQueriesData<SubscriptionResultsPage>({ queryKey: ['subscriptions', subscriptionId, 'results'] })) {
+    const row = old?.results.find(result => result.id === resultId);
+    if (!old || !row || row.status === newStatus) continue;
+    const filter = key[3];
+    const results = old.results.flatMap(result => result.id !== resultId ? [result] : !filter || filter === newStatus ? [{ ...result, status: newStatus }] : []);
+    queryClient.setQueryData(key, { ...old, results,
+      total: filter && filter !== newStatus ? Math.max(0, old.total - 1) : old.total,
+      statusCounts: { ...old.statusCounts, [row.status]: Math.max(0, (old.statusCounts[row.status] || 0) - 1), [newStatus]: (old.statusCounts[newStatus] || 0) + 1 },
+    });
+  }
   // For run-details views (shape: { run, results }) — skip plain runs-list (SubscriptionRun[])
   queryClient.setQueriesData<{ run: SubscriptionRun; results: SubscriptionResult[] }>(
     { queryKey: ['subscriptions', subscriptionId, 'runs'] },
@@ -937,17 +1126,38 @@ function updateResultStatus(
   );
 }
 
+function currentActor(queryClient: ReturnType<typeof useQueryClient>) {
+  return queryClient.getQueryData<{ user: { id: number } | null }>(queryKeys.auth)?.user?.id;
+}
+
 export function useApproveResult(subscriptionId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (resultId: number) => {
-      const { error } = await api.post(`/api/subscriptions/${subscriptionId}/results/${resultId}/approve`);
-      if (error) throw new Error(error);
+    mutationKey: ['subscriptions', subscriptionId, 'approve'],
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
+    mutationFn: async (input: number | { resultId: number; mbid?: string; options?: ArtistAddOptions }) => {
+      const { resultId, mbid, options } = typeof input === 'number' ? { resultId: input, mbid: undefined, options: undefined } : input;
+      const { data, error, code, status } = await api.post<{ success: boolean; outcome: string; message: string }>(
+        `/api/subscriptions/${subscriptionId}/results/${resultId}/approve`, options ? { ...options, ...(mbid ? { mbid } : {}) } : mbid ? { mbid } : undefined, { timeoutMs: 65000 });
+      if (error) throw Object.assign(new Error(error), { code, status });
+      if (!data?.success || !['added', 'already-in-library'].includes(data.outcome)) {
+        throw Object.assign(new Error('Provider outcome could not be confirmed; retry to check membership'), { code: 'ACQUISITION_UNCERTAIN' });
+      }
+      return data;
     },
-    onSuccess: (_data, resultId) => {
-      updateResultStatus(queryClient, subscriptionId, resultId, 'added');
-      // Mark stale without triggering an immediate refetch — the cache is already updated surgically above
-      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'], refetchType: 'none' });
+    onSuccess: (_data, input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
+      updateResultStatus(queryClient, subscriptionId, typeof input === 'number' ? input : input.resultId, 'added');
+      queryClient.invalidateQueries({ queryKey: ['discover', 'library'] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+    },
+    onSettled: (_data, _error, _input, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'] });
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'runs'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.feed });
     },
   });
 }
@@ -955,14 +1165,20 @@ export function useApproveResult(subscriptionId: number) {
 export function useRejectResult(subscriptionId: number) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: ['subscriptions', subscriptionId, 'reject'],
+    retry: false,
+    onMutate: () => ({ actorId: currentActor(queryClient) }),
     mutationFn: async (resultId: number) => {
       const { error } = await api.post(`/api/subscriptions/${subscriptionId}/results/${resultId}/reject`);
       if (error) throw new Error(error);
     },
-    onSuccess: (_data, resultId) => {
+    onSuccess: (_data, resultId, context) => {
+      if (context?.actorId !== currentActor(queryClient)) return;
       updateResultStatus(queryClient, subscriptionId, resultId, 'rejected');
-      // Mark stale without triggering an immediate refetch — the cache is already updated surgically above
-      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'], refetchType: 'none' });
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'results'] });
+      queryClient.invalidateQueries({ queryKey: ['subscriptions', subscriptionId, 'runs'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.feed });
     },
   });
 }

@@ -1,608 +1,134 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
-
-// Hoist mock so it's available inside vi.mock factory
-const { mockAddToast } = vi.hoisted(() => ({
-  mockAddToast: vi.fn(),
-}));
-
-// Mock api module
-vi.mock('@/lib/api', () => ({
-  api: {
-    get: vi.fn(),
-    post: vi.fn(),
-  },
-}));
-
-// Mock toast module
-vi.mock('@/components/ui/toast', () => ({
-  useToast: () => ({ addToast: mockAddToast, toasts: [], removeToast: vi.fn() }),
-}));
-
-import { api } from '@/lib/api';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSearch } from '../hooks/useSearch';
-
-/** Helper: default mock that handles the AI-status call made on mount. */
-function mockAiStatusAvailable() {
-  vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-    if (endpoint === '/api/search/ai/status') {
-      return { data: { available: true }, error: null, status: 200 };
-    }
-    return { data: null, error: null, status: 200 };
-  });
-}
-
-describe('useSearch', () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    mockAiStatusAvailable();
-  });
-
-  // ─── Initialisation ───────────────────────────────────────────────
-
-  it('checks AI availability on mount', async () => {
-    renderHook(() => useSearch());
-
-    await waitFor(() => {
-      expect(api.get).toHaveBeenCalledWith('/api/search/ai/status');
-    });
-  });
-
-  it('sets aiAvailable to true when the endpoint reports available', async () => {
+const navigation = vi.hoisted(() => ({ query: '', push: vi.fn(), replace: vi.fn() }));
+vi.mock('next/navigation', () => ({ usePathname: () => '/search', useSearchParams: () => new URLSearchParams(navigation.query), useRouter: () => navigation }));
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
+const request = vi.fn<typeof fetch>();
+const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+beforeEach(() => {
+  navigation.query = ''; navigation.push.mockReset(); navigation.replace.mockReset(); request.mockReset();
+  request.mockImplementation(async url => String(url) === '/api/search/ai/status' ? json({ available: true }) : json({ results: [{ mbid: 'a', name: 'First' }] }));
+  vi.stubGlobal('fetch', request);
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+describe('committed search lifecycle', () => {
+  it('keeps draft typing local and commits query without discarding other URL parameters', async () => {
+    navigation.query = 'tab=album&sources=spotify&artist=11111111-1111-4111-8111-111111111111';
     const { result } = renderHook(() => useSearch());
-
-    await waitFor(() => {
-      expect(result.current.aiAvailable).toBe(true);
-    });
+    act(() => result.current.setQuery('  record  '));
+    expect(request.mock.calls.filter(([url]) => String(url).includes('/album'))).toHaveLength(0);
+    act(() => { void result.current.performSearch(); });
+    const destination = new URL(navigation.push.mock.calls[0][0], 'https://mixarr.invalid');
+    expect(destination.searchParams.get('q')).toBe('record');
+    expect(destination.searchParams.get('tab')).toBe('album');
+    expect(destination.searchParams.get('sources')).toBe('spotify');
   });
-
-  it('sets aiAvailable to false when the endpoint reports unavailable', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: false }, error: null, status: 200 };
-      }
-      return { data: null, error: null, status: 200 };
+  it('loads a deep link and restores its committed draft after Back', async () => {
+    navigation.query = 'q=record&tab=album&page=2';
+    request.mockImplementation(async url => String(url).includes('/album') ? json({ releases: [{ id: 'r', title: 'Record' }], count: 40 }) : json({ available: true }));
+    const { result, rerender } = renderHook(() => useSearch());
+    await waitFor(() => expect(result.current.results).toHaveLength(1));
+    expect(request.mock.calls.some(([url]) => String(url).includes('offset=25'))).toBe(true);
+    expect(result.current.query).toBe('record');
+    act(() => result.current.setQuery('unfinished'));
+    navigation.query = 'q=earlier&tab=artist&sources=deezer'; rerender();
+    await waitFor(() => expect(result.current.query).toBe('earlier'));
+    expect(result.current.searchType).toBe('artist');
+    expect([...result.current.enabledSources]).toEqual(['deezer']);
+  });
+  it('retains successful rows during replacement and failure, and ignores canceled late responses', async () => {
+    navigation.query = 'q=first';
+    let finish!: (value: Response) => void;
+    request.mockImplementation(async url => {
+      const path = String(url);
+      if (path.includes('q=slow')) return new Promise(resolve => { finish = resolve; });
+      if (path.includes('q=broken')) return json({ error: 'Provider offline' }, 503);
+      return path.includes('/discover') ? json({ results: [{ mbid: 'a', name: 'First' }] }) : json({ available: true });
     });
-
+    const { result, rerender } = renderHook(() => useSearch());
+    await waitFor(() => expect(result.current.results[0]?.artistName).toBe('First'));
+    navigation.query = 'q=slow'; rerender();
+    await waitFor(() => expect(result.current.isSearching).toBe(true));
+    expect(result.current.results[0].artistName).toBe('First');
+    const slowSignal = request.mock.calls.find(([url]) => String(url).includes('q=slow'))![1]!.signal!;
+    navigation.query = 'q=broken'; rerender();
+    await waitFor(() => expect(result.current.error).toBe('Provider offline'));
+    expect(slowSignal.aborted).toBe(true);
+    await act(async () => { finish(json({ results: [{ mbid: 'late', name: 'Late' }] })); });
+    expect(result.current.results[0].artistName).toBe('First');
+    expect(result.current.error).toBe('Provider offline');
+  });
+  it('cancels a search on unmount', async () => {
+    navigation.query = 'q=first';
+    request.mockImplementation(async url => String(url).includes('/discover') ? new Promise(() => {}) : json({ available: true }));
+    const { unmount } = renderHook(() => useSearch());
+    await waitFor(() => expect(request.mock.calls.some(([url]) => String(url).includes('/discover'))).toBe(true));
+    const signal = request.mock.calls.find(([url]) => String(url).includes('/discover'))![1]!.signal!;
+    unmount(); expect(signal.aborted).toBe(true);
+  });
+  it('reports partial AI results independently of a successful empty search', async () => {
+    navigation.query = 'q=quiet&tab=ai';
+    request.mockImplementation(async (url) => String(url) === '/api/search/ai' ? json({ prompt: 'quiet', results: [{ foreignArtistId: 'a', artistName: 'First' }], aiProviders: ['one'], errors: ['Second provider offline'] }) : json({ available: true }));
     const { result } = renderHook(() => useSearch());
-
-    await waitFor(() => {
-      expect(result.current.aiAvailable).toBe(false);
-    });
+    await waitFor(() => expect(result.current.results).toHaveLength(1));
+    expect(result.current.partialErrors).toEqual(['Second provider offline']);
+    expect(result.current.hasSearched).toBe(true);
+  });
+  it('gives name-only results separate request identities and does not reuse them on the next search', async () => {
+    navigation.query = 'q=same';
+    request.mockImplementation(async url => String(url).includes('/discover') ? json({ results: [{ name: 'Same' }, { name: 'Same' }] }) : json({ available: true }));
+    const { result, rerender } = renderHook(() => useSearch());
+    await waitFor(() => expect(result.current.results).toHaveLength(2));
+    const keys = result.current.results.map(row => row.resultKey);
+    expect(new Set(keys).size).toBe(2);
+    navigation.query = 'q=next'; rerender();
+    await waitFor(() => expect(result.current.resultQuery).toBe('next'));
+    expect(result.current.results.map(row => row.resultKey).some(key => keys.includes(key))).toBe(false);
   });
 
-  // ─── performSearch: empty query guard ─────────────────────────────
-
-  it('does nothing when query is empty', async () => {
+  it.each([
+    ['label', 'labels', 'label?q=warp&limit=25&offset=25'],
+    ['year', 'releaseGroups', 'year?year=warp&limit=25&offset=25'],
+  ])('maps %s results and page totals from the actual endpoint', async (tab, field, suffix) => {
+    navigation.query = `q=warp&tab=${tab}&page=2`;
+    request.mockImplementation(async url => String(url).includes('/ai/status') ? json({ available: false }) : json({ [field]: [{ id: 'record', name: 'Warp', title: 'Record' }], count: 75 }));
     const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    // Only the AI status call should have been made
-    expect(api.get).toHaveBeenCalledTimes(1);
-    expect(api.post).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.results).toHaveLength(1));
+    expect(request.mock.calls.some(([url]) => String(url) === `/api/search/${suffix}`)).toBe(true);
+    expect(result.current.totalPages).toBe(3);
+    act(() => result.current.goToPage(3));
+    expect(new URL(navigation.push.mock.calls[0][0], 'https://mixarr.invalid').searchParams.get('page')).toBe('3');
   });
-
-  // ─── Artist search ────────────────────────────────────────────────
-
-  it('performs artist search with correct endpoint and source params', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return {
-        data: {
-          results: [
-            { mbid: 'abc-123', name: 'Radiohead', imageUrl: '/img.jpg', sources: ['spotify'], inLibrary: false },
-          ],
-        },
-        error: null,
-        status: 200,
-      };
-    });
-
+  it('keeps at least one source enabled and sends the selected sources', async () => {
+    navigation.query = 'q=first&sources=spotify';
     const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setQuery('radiohead');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    // Should call the discover endpoint with all default sources
-    const searchCall = vi.mocked(api.get).mock.calls.find(
-      ([url]) => typeof url === 'string' && url.startsWith('/api/search/discover'),
-    );
-    expect(searchCall).toBeDefined();
-    expect(searchCall![0]).toContain('q=radiohead');
-    expect(searchCall![0]).toContain('sources=');
-
-    // Results should be mapped to ArtistResult shape
-    expect(result.current.results).toHaveLength(1);
-    expect(result.current.results[0].artistName).toBe('Radiohead');
-    expect(result.current.results[0].foreignArtistId).toBe('abc-123');
-    expect(result.current.isSearching).toBe(false);
+    await waitFor(() => expect(result.current.results).toHaveLength(1));
+    act(() => result.current.toggleSource('spotify'));
+    expect(navigation.push).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(request.mock.calls.some(([url]) => String(url).includes('sources=spotify'))).toBe(true);
+    act(() => result.current.toggleSource('deezer'));
+    expect(navigation.push).not.toHaveBeenCalled();
+    expect(new URL(navigation.replace.mock.calls[0][0], 'https://mixarr.invalid').searchParams.get('sources')).toBe('spotify,deezer');
   });
-
-  it('respects source toggles when searching artists', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return { data: { results: [] }, error: null, status: 200 };
-    });
-
+  it('pushes explicit tab navigation and clears pagination', () => {
+    navigation.query = 'q=first&tab=artist&page=3';
     const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    // Disable all except spotify
-    act(() => {
-      result.current.toggleSource('deezer');
-      result.current.toggleSource('tidal');
-      result.current.toggleSource('bandcamp');
-    });
-
-    act(() => {
-      result.current.setQuery('test');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    const searchCall = vi.mocked(api.get).mock.calls.find(
-      ([url]) => typeof url === 'string' && url.startsWith('/api/search/discover'),
-    );
-    expect(searchCall).toBeDefined();
-    expect(searchCall![0]).toContain('sources=spotify');
-    // Should NOT contain other sources
-    expect(searchCall![0]).not.toContain('deezer');
+    act(() => result.current.setSearchType('album'));
+    const destination = new URL(navigation.push.mock.calls[0][0], 'https://mixarr.invalid');
+    expect(destination.searchParams.get('tab')).toBe('album');
+    expect(destination.searchParams.has('page')).toBe(false);
+    expect(navigation.replace).not.toHaveBeenCalled();
   });
-
-  // ─── Album search ─────────────────────────────────────────────────
-
-  it('performs album search with correct endpoint', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return {
-        data: { releases: [{ id: 'alb-1', title: 'OK Computer' }], count: 1 },
-        error: null,
-        status: 200,
-      };
-    });
-
+  it('treats AI errors with zero results as a provider failure rather than no matches', async () => {
+    navigation.query = 'q=quiet&tab=ai';
+    request.mockImplementation(async url => String(url) === '/api/search/ai' ? json({ results: [], errors: ['Provider offline'], message: 'Providers could not search' }) : json({ available: true }));
     const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setSearchType('album');
-      result.current.setQuery('ok computer');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    const searchCall = vi.mocked(api.get).mock.calls.find(
-      ([url]) => typeof url === 'string' && url.startsWith('/api/search/album'),
-    );
-    expect(searchCall).toBeDefined();
-    expect(searchCall![0]).toContain('q=ok%20computer');
-    expect(searchCall![0]).toContain('limit=25');
-    expect(searchCall![0]).toContain('offset=0');
-
-    expect(result.current.results).toHaveLength(1);
-    expect(result.current.results[0].title).toBe('OK Computer');
-    expect(result.current.totalCount).toBe(1);
+    await waitFor(() => expect(result.current.error).toBe('Providers could not search'));
+    const call = request.mock.calls.find(([url]) => String(url) === '/api/search/ai')!;
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ prompt: 'quiet' });
+    expect(result.current.hasSearched).toBe(false);
   });
 
-  // ─── Label search ─────────────────────────────────────────────────
-
-  it('performs label search with correct endpoint', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return {
-        data: { labels: [{ id: 'lbl-1', name: 'Warp Records', country: 'GB' }], count: 1 },
-        error: null,
-        status: 200,
-      };
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setSearchType('label');
-      result.current.setQuery('warp');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    const searchCall = vi.mocked(api.get).mock.calls.find(
-      ([url]) => typeof url === 'string' && url.startsWith('/api/search/label'),
-    );
-    expect(searchCall).toBeDefined();
-    expect(searchCall![0]).toContain('q=warp');
-
-    expect(result.current.results).toHaveLength(1);
-    expect(result.current.results[0].name).toBe('Warp Records');
-    expect(result.current.totalCount).toBe(1);
-  });
-
-  // ─── Year search ──────────────────────────────────────────────────
-
-  it('performs year search with correct endpoint', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return {
-        data: {
-          releaseGroups: [{ id: 'rg-1', title: 'Album 2024', 'primary-type': 'Album' }],
-          count: 1,
-        },
-        error: null,
-        status: 200,
-      };
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setSearchType('year');
-      result.current.setQuery('2024');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    const searchCall = vi.mocked(api.get).mock.calls.find(
-      ([url]) => typeof url === 'string' && url.startsWith('/api/search/year'),
-    );
-    expect(searchCall).toBeDefined();
-    expect(searchCall![0]).toContain('year=2024');
-
-    expect(result.current.results).toHaveLength(1);
-    expect(result.current.results[0].title).toBe('Album 2024');
-    expect(result.current.totalCount).toBe(1);
-  });
-
-  // ─── AI search ────────────────────────────────────────────────────
-
-  it('performs AI search via POST to /api/search/ai', async () => {
-    vi.mocked(api.post).mockResolvedValueOnce({
-      data: {
-        prompt: 'ambient electronic',
-        results: [{ foreignArtistId: 'ai-1', artistName: 'Boards of Canada' }],
-        aiProviders: ['openai'],
-      },
-      error: null,
-      status: 200,
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setSearchType('ai');
-      result.current.setQuery('ambient electronic');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    expect(api.post).toHaveBeenCalledWith('/api/search/ai', {
-      prompt: 'ambient electronic',
-    });
-
-    expect(result.current.results).toHaveLength(1);
-    expect(result.current.results[0].artistName).toBe('Boards of Canada');
-    expect(result.current.aiPrompt).toBe('ambient electronic');
-    expect(result.current.aiProviders).toEqual(['openai']);
-  });
-
-  it('shows info toast when AI search returns no results', async () => {
-    vi.mocked(api.post).mockResolvedValueOnce({
-      data: {
-        prompt: 'noresults',
-        results: [],
-        aiProviders: ['openai'],
-        message: 'No recommendations found',
-      },
-      error: null,
-      status: 200,
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setSearchType('ai');
-      result.current.setQuery('noresults');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    expect(mockAddToast).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'info', title: 'No results found' }),
-    );
-  });
-
-  it('shows error toast when AI search returns errors', async () => {
-    vi.mocked(api.post).mockResolvedValueOnce({
-      data: {
-        prompt: 'broken',
-        results: [],
-        aiProviders: [],
-        errors: ['provider failed'],
-        message: 'Provider error',
-      },
-      error: null,
-      status: 200,
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setSearchType('ai');
-      result.current.setQuery('broken');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    expect(mockAddToast).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'error', title: 'AI Search Error' }),
-    );
-  });
-
-  // ─── Error handling ───────────────────────────────────────────────
-
-  it('shows error toast when search API returns an error', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return { data: null, error: 'Network error', status: 0 };
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setQuery('test');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    expect(mockAddToast).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'error', title: 'Search failed', message: 'Network error' }),
-    );
-    expect(result.current.isSearching).toBe(false);
-  });
-
-  it('shows error toast when AI search endpoint errors', async () => {
-    vi.mocked(api.post).mockResolvedValueOnce({
-      data: null,
-      error: 'AI service unavailable',
-      status: 503,
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setSearchType('ai');
-      result.current.setQuery('test');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    expect(mockAddToast).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'error', title: 'AI Search failed' }),
-    );
-  });
-
-  // ─── No results toast ─────────────────────────────────────────────
-
-  it('shows info toast when standard search returns zero results', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return { data: { results: [] }, error: null, status: 200 };
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setQuery('nonexistent');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    expect(mockAddToast).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'info', title: 'No results found' }),
-    );
-  });
-
-  // ─── Loading state ────────────────────────────────────────────────
-
-  it('sets isSearching to true during search and false after', async () => {
-    let resolveSearch!: (value: any) => void;
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return new Promise((resolve) => {
-        resolveSearch = resolve;
-      });
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setQuery('test');
-    });
-
-    let searchPromise: Promise<void>;
-    act(() => {
-      searchPromise = result.current.performSearch();
-    });
-
-    // isSearching should be true while the request is in-flight
-    expect(result.current.isSearching).toBe(true);
-
-    // Resolve the API call
-    await act(async () => {
-      resolveSearch({ data: { results: [] }, error: null, status: 200 });
-      await searchPromise!;
-    });
-
-    expect(result.current.isSearching).toBe(false);
-  });
-
-  // ─── setSearchType clears results ─────────────────────────────────
-
-  it('clears results when search type changes', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return {
-        data: { results: [{ mbid: 'x', name: 'X' }] },
-        error: null,
-        status: 200,
-      };
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setQuery('x');
-    });
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    expect(result.current.results.length).toBeGreaterThan(0);
-
-    act(() => {
-      result.current.setSearchType('album');
-    });
-
-    expect(result.current.results).toHaveLength(0);
-    expect(result.current.searchType).toBe('album');
-  });
-
-  // ─── Source toggle edge case ──────────────────────────────────────
-
-  it('prevents disabling all sources', async () => {
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    // Disable three of four
-    act(() => {
-      result.current.toggleSource('deezer');
-      result.current.toggleSource('tidal');
-      result.current.toggleSource('bandcamp');
-    });
-
-    expect(result.current.enabledSources.size).toBe(1);
-    expect(result.current.enabledSources.has('spotify')).toBe(true);
-
-    // Try to disable the last one — should be a no-op
-    act(() => {
-      result.current.toggleSource('spotify');
-    });
-
-    expect(result.current.enabledSources.size).toBe(1);
-    expect(result.current.enabledSources.has('spotify')).toBe(true);
-  });
-
-  // ─── Pagination ───────────────────────────────────────────────────
-
-  it('calculates totalPages correctly', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return {
-        data: { releases: Array.from({ length: 25 }, (_, i) => ({ id: `a-${i}`, title: `A${i}` })), count: 75 },
-        error: null,
-        status: 200,
-      };
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setSearchType('album');
-      result.current.setQuery('test');
-    });
-
-    await act(async () => {
-      await result.current.performSearch();
-    });
-
-    expect(result.current.totalPages).toBe(3); // 75 / 25 = 3
-    expect(result.current.page).toBe(1);
-  });
-
-  it('passes correct offset for page 2', async () => {
-    vi.mocked(api.get).mockImplementation(async (endpoint: string) => {
-      if (endpoint === '/api/search/ai/status') {
-        return { data: { available: true }, error: null, status: 200 };
-      }
-      return { data: { releases: [], count: 0 }, error: null, status: 200 };
-    });
-
-    const { result } = renderHook(() => useSearch());
-    await waitFor(() => expect(result.current.aiAvailable).toBe(true));
-
-    act(() => {
-      result.current.setSearchType('album');
-      result.current.setQuery('test');
-    });
-
-    await act(async () => {
-      await result.current.performSearch(2);
-    });
-
-    const searchCall = vi.mocked(api.get).mock.calls.find(
-      ([url]) => typeof url === 'string' && url.startsWith('/api/search/album'),
-    );
-    expect(searchCall).toBeDefined();
-    expect(searchCall![0]).toContain('offset=25');
-    expect(result.current.page).toBe(2);
-  });
 });

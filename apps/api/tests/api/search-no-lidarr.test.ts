@@ -38,14 +38,17 @@ vi.mock('../../src/middleware/auth.js', () => ({
   }),
 }));
 
+const { mockGetLabelArtists } = vi.hoisted(() => ({ mockGetLabelArtists: vi.fn() }));
+
 // Mock MusicBrainz service - returns results
 const mockMusicBrainzArtists = [
-  { id: 'mbid-1', name: 'Pink Floyd', country: 'GB', type: 'Group', disambiguation: 'English rock band' },
-  { id: 'mbid-2', name: 'Pink', country: 'US', type: 'Person', disambiguation: 'American singer' },
+  { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Pink Floyd', country: 'GB', type: 'Group', disambiguation: 'English rock band' },
+  { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', name: 'Pink', country: 'US', type: 'Person', disambiguation: 'American singer' },
 ];
 
 vi.mock('../../src/services/musicbrainz.js', () => ({
   MusicBrainzService: class MusicBrainzService {
+    getLabelArtists = mockGetLabelArtists;
     async searchArtist() {
       return mockMusicBrainzArtists;
     }
@@ -62,7 +65,7 @@ vi.mock('../../src/services/musicbrainz.js', () => ({
       return { releases: [], count: 0, offset: 0 };
     }
     async getArtist() {
-      return { id: 'mbid-1', name: 'Pink Floyd' };
+      return { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Pink Floyd' };
     }
     async getRelease() {
       return { id: 'release-1', title: 'Dark Side of the Moon' };
@@ -109,7 +112,7 @@ vi.mock('../../src/services/multi-search.js', () => ({
   multiSourceSearch: vi.fn().mockResolvedValue([
     { name: 'Test Artist', source: 'spotify' },
   ]),
-  resolveMbid: vi.fn().mockResolvedValue({ mbid: 'mbid-1' }),
+  resolveMbid: vi.fn().mockResolvedValue({ mbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
 }));
 
 // Mock metadata enrichment service
@@ -139,6 +142,10 @@ vi.mock('../../src/routes/logs.js', () => ({
 
 // Import after mocks are set up
 import { searchRouter } from '../../src/routes/search.js';
+import prisma from '../../src/lib/db.js';
+import { LidarrService } from '../../src/services/lidarr.js';
+import { multiSourceSearch, resolveMbid } from '../../src/services/multi-search.js';
+import { getArtistImages } from '../../src/services/artist-images.js';
 
 const app = express();
 app.use(express.json());
@@ -231,11 +238,43 @@ describe('Search API - No Lidarr Mode', () => {
     });
   });
 
+  it('returns successful rows with sanitized provider diagnostics from the real discover route', async () => {
+    vi.mocked(multiSourceSearch).mockImplementationOnce(async (_query, _userId, _sources, _limit, errors) => {
+      errors?.push({ source: 'spotify', message: 'Spotify search unavailable. Check the connection and retry.' });
+      return [{ name: 'Artist', imageUrl: null, sources: ['deezer'], deezerId: 7 }];
+    });
+    const response = await request(app).get('/api/search/discover').query({ q: 'Artist', sources: 'spotify,deezer' });
+    expect(response.status).toBe(200);
+    expect(response.body.results).toHaveLength(1);
+    expect(response.body.errors).toEqual(['Spotify search unavailable. Check the connection and retry.']);
+  });
+
+  it('returns structured identity-required candidates before any provider acquisition', async () => {
+    const candidates = [{ id: '11111111-1111-4111-8111-111111111111', name: 'Same name', disambiguation: 'Original band' }, { id: '22222222-2222-4222-8222-222222222222', name: 'Same name', disambiguation: 'Other artist' }];
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never).mockResolvedValueOnce(connection as never);
+    vi.mocked(resolveMbid).mockResolvedValueOnce({ mbid: null, candidates });
+    const providerAdd = vi.fn().mockResolvedValue({ artist: { foreignArtistId: candidates[1].id, artistName: 'Same name' } });
+    const createProvider = function () { return { addArtistWithCacheWarm: providerAdd } as unknown as LidarrService; };
+    vi.mocked(LidarrService).mockImplementationOnce(createProvider).mockImplementationOnce(createProvider);
+    const response = await request(app).post('/api/search/discover/add').send({ artistName: 'Same name' });
+    expect(response.status).toBe(422);
+    expect(response.body).toMatchObject({ code: 'IDENTITY_REQUIRED', details: { candidates, artistName: 'Same name' }, candidates, artistName: 'Same name' });
+    expect(providerAdd).not.toHaveBeenCalled();
+    const selected = await request(app).post('/api/search/discover/add').send({ artistName: 'Same name', mbid: candidates[1].id });
+    expect(selected.body.error).toBeUndefined();
+    expect(selected.status).toBe(200);
+    expect(selected.body.success).toBe(true);
+    expect(providerAdd).toHaveBeenCalledTimes(1);
+    expect(providerAdd.mock.calls[0][0]).toBe(candidates[1].id);
+    expect(resolveMbid).toHaveBeenCalledTimes(1);
+  });
+
   describe('POST /api/search/artists/add', () => {
     it('should require Lidarr connection for adding artists', async () => {
       const response = await request(app)
         .post('/api/search/artists/add')
-        .send({ foreignArtistId: 'mbid-1' });
+        .send({ foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
 
       // Adding artists MUST require Lidarr
       expect(response.status).toBe(400);
@@ -259,7 +298,7 @@ describe('Search API - No Lidarr Mode', () => {
     it('should require Lidarr connection for batch add', async () => {
       const response = await request(app)
         .post('/api/search/batch')
-        .send({ artistIds: ['mbid-1', 'mbid-2'] });
+        .send({ artistIds: ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'] });
 
       // Batch add MUST require Lidarr
       expect(response.status).toBe(400);
@@ -288,4 +327,167 @@ describe('Search API - No Lidarr Mode', () => {
       expect(response.body.error).toContain('Lidarr');
     });
   });
+  it('does not acquire implicitly even when a name resolution is confident', async () => {
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never);
+    vi.mocked(resolveMbid).mockResolvedValueOnce({ mbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
+    const providerAdd = vi.fn();
+    vi.mocked(LidarrService).mockImplementationOnce(function () { return { addArtistWithCacheWarm: providerAdd } as unknown as LidarrService; });
+    const response = await request(app).post('/api/search/discover/add').send({ artistName: 'Confident name' });
+    expect(response.status).toBe(422); expect(response.body.code).toBe('IDENTITY_REQUIRED');
+    expect(providerAdd).not.toHaveBeenCalled();
+  });
+  it.each(['/artists/add', '/discover/add', '/batch'])('passes selected effective options through the real %s route to the provider', async path => {
+    const mbid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music', searchOnAdd: true } };
+    vi.mocked(prisma.connection.findFirst).mockResolvedValue(connection as never);
+    const providerAdd = vi.fn().mockResolvedValue({ artist: { foreignArtistId: mbid, artistName: 'Artist' } });
+    vi.mocked(LidarrService).mockImplementation(function () { return { addArtistWithCacheWarm: providerAdd,
+      getQualityProfiles: vi.fn().mockResolvedValue([{ id: 9 }]), getMetadataProfiles: vi.fn().mockResolvedValue([{ id: 8 }]), getRootFolders: vi.fn().mockResolvedValue([{ path: '/archive' }]),
+    } as unknown as LidarrService; });
+    const identity = path === '/artists/add' ? { foreignArtistId: mbid } : path === '/batch' ? { artistIds: [mbid] } : { artistName: 'Artist', mbid };
+    const response = await request(app).post(`/api/search${path}`).send({ ...identity, qualityProfileId: 9, metadataProfileId: 8, rootFolderPath: '/archive', searchOnAdd: false, monitorOption: 'future', monitorNewItems: 'none' });
+    expect(response.status).toBe(200);
+    expect(providerAdd).toHaveBeenCalledWith(mbid, 9, 8, '/archive', true, false, false, 'future', 'none');
+    vi.mocked(prisma.connection.findFirst).mockResolvedValue(null);
+  });
+  it.each([{ qualityProfileId: -1 }, { monitorOption: 'invented' }, { searchOnAdd: 'false' }])('rejects malformed effective options before provider acquisition', async options => {
+    const response = await request(app).post('/api/search/artists/add').send({ foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', ...options });
+    expect(response.status).toBe(400);
+  });
+
+  it.each(['/artists/add', '/discover/add', '/batch'])('rejects an unavailable profile in %s without provider acquisition', async path => {
+    const mbid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    vi.mocked(prisma.connection.findFirst).mockResolvedValue(connection as never);
+    const add = vi.fn();
+    vi.mocked(LidarrService).mockImplementation(function () { return { addArtistWithCacheWarm: add, getQualityProfiles: vi.fn().mockResolvedValue([{ id: 1 }]) } as unknown as LidarrService; });
+    const identity = path === '/artists/add' ? { foreignArtistId: mbid } : path === '/batch' ? { artistIds: [mbid] } : { artistName: 'Artist', mbid };
+    const response = await request(app).post(`/api/search${path}`).send({ ...identity, qualityProfileId: 99 });
+    expect(response.status).toBe(400); expect(response.body.code).toBe('INVALID_OPTIONS'); expect(add).not.toHaveBeenCalled();
+    vi.mocked(prisma.connection.findFirst).mockResolvedValue(null);
+  });
+
+});
+
+
+describe('Label release traversal through the search route', () => {
+  const labelId = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+  const artistId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const release = { 'artist-credit': [{ artist: { id: artistId, name: 'Repeated artist', 'sort-name': 'Artist, Repeated' } }] };
+  beforeEach(() => {
+    mockGetLabelArtists.mockReset();
+    vi.mocked(getArtistImages).mockReset().mockResolvedValue(new Map());
+  });
+  it('advances by raw releases and reports the provider total, including repeated artists', async () => {
+    mockGetLabelArtists.mockResolvedValueOnce({ releases: [release, release], count: 5 });
+    const response = await request(app).get(`/api/search/label/${labelId}/artists?limit=2&offset=0`);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ artists: [{ id: artistId, name: 'Repeated artist', sortName: 'Artist, Repeated', imageUrl: null }], releasesProcessed: 2, totalReleases: 5, nextReleaseOffset: 2 });
+    expect(mockGetLabelArtists).toHaveBeenCalledWith(labelId, 2, 0);
+  });
+  it('advances pages without artist credits and ends at the last raw release', async () => {
+    mockGetLabelArtists.mockResolvedValueOnce({ releases: [{}, {}], count: 5 }).mockResolvedValueOnce({ releases: [release], count: 5 });
+    const empty = await request(app).get(`/api/search/label/${labelId}/artists?limit=2&offset=2`);
+    expect(empty.body).toEqual({ artists: [], releasesProcessed: 2, totalReleases: 5, nextReleaseOffset: 4 });
+    const final = await request(app).get(`/api/search/label/${labelId}/artists?limit=2&offset=4`);
+    expect(final.body.nextReleaseOffset).toBeNull();
+    expect(final.body.releasesProcessed).toBe(1);
+  });
+  it('treats an empty provider page before its total as recoverable, rather than finished', async () => {
+    mockGetLabelArtists.mockResolvedValueOnce({ releases: [], count: 5 });
+    const response = await request(app).get(`/api/search/label/${labelId}/artists?offset=2`);
+    expect(response.status).toBe(502);
+    expect(response.body).not.toHaveProperty('nextReleaseOffset');
+  });
+  it('preserves valid artists when optional images fail', async () => {
+    mockGetLabelArtists.mockResolvedValueOnce({ releases: [release], count: 1 });
+    vi.mocked(getArtistImages).mockRejectedValueOnce(new Error('private provider detail'));
+    const response = await request(app).get(`/api/search/label/${labelId}/artists`);
+    expect(response.status).toBe(200);
+    expect(response.body.artists[0].imageUrl).toBeNull();
+  });
+  it('sanitizes provider failures and allows a retry at the same release offset', async () => {
+    mockGetLabelArtists.mockRejectedValueOnce(new Error('secret upstream address')).mockResolvedValueOnce({ releases: [release], count: 3 });
+    const failed = await request(app).get(`/api/search/label/${labelId}/artists?offset=2`);
+    expect(failed.status).toBe(500);
+    expect(JSON.stringify(failed.body)).not.toContain('secret');
+    const retried = await request(app).get(`/api/search/label/${labelId}/artists?offset=2`);
+    expect(retried.status).toBe(200);
+    expect(mockGetLabelArtists.mock.calls.map(call => call[2])).toEqual([2, 2]);
+  });
+  it.each(['limit=101', 'limit=0', 'limit=1x', 'offset=-1', 'offset=2.5', 'offset=9007199254740992', 'limit=2&limit=3'])('rejects invalid paging %s before calling the provider', async query => {
+    const response = await request(app).get(`/api/search/label/${labelId}/artists?${query}`);
+    expect(response.status).toBe(400);
+    expect(mockGetLabelArtists).not.toHaveBeenCalled();
+  });
+  it('rejects an invalid label identity before calling the provider', async () => {
+    const response = await request(app).get('/api/search/label/not-a-uuid/artists');
+    expect(response.status).toBe(400);
+    expect(mockGetLabelArtists).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('confirmed Search additions and ancillary notifications', () => {
+  it.each(['/artists/add', '/discover/add'].flatMap(path => [false, true].map(alreadyInLibrary => ({ path, alreadyInLibrary }))))('reports helper membership honestly for $path existing=$alreadyInLibrary', async ({ path, alreadyInLibrary }) => {
+    const { notificationService } = await import('../../src/services/notifications.js');
+    const { addLogEntry } = await import('../../src/routes/logs.js');
+    vi.mocked(notificationService.send).mockReset().mockResolvedValue(undefined);
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    const artist = { foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', artistName: 'Confirmed Artist' };
+    const add = vi.fn().mockResolvedValue({ artist, alreadyInLibrary });
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never);
+    vi.mocked(LidarrService).mockImplementationOnce(function () { return { addArtistWithCacheWarm: add } as unknown as LidarrService; });
+    const body = path === '/artists/add' ? { foreignArtistId: artist.foreignArtistId } : { mbid: artist.foreignArtistId, artistName: artist.artistName };
+    const response = await request(app).post(`/api/search${path}`).send(body);
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ success: true, outcome, artist });
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(addLogEntry).toHaveBeenCalledWith('info', 'search', alreadyInLibrary ? 'Artist "Confirmed Artist" is already in Lidarr' : 'Added artist "Confirmed Artist" from search', expect.objectContaining({ outcome, mbid: artist.foreignArtistId }));
+    if (!alreadyInLibrary && path === '/artists/add') expect(notificationService.send).toHaveBeenCalledExactlyOnceWith(1, 'artist.added', { artistName: artist.artistName });
+    else expect(notificationService.send).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('returns provider confirmation with one addition when notification fails=%s', async failNotification => {
+    const { notificationService } = await import('../../src/services/notifications.js');
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    const artist = { foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', artistName: 'Confirmed Artist' };
+    const add = vi.fn().mockResolvedValue({ artist, refreshCommand: { id: 1 } });
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never);
+    vi.mocked(LidarrService).mockImplementationOnce(function () { return { addArtistWithCacheWarm: add } as unknown as LidarrService; });
+    if (failNotification) vi.mocked(notificationService.send).mockRejectedValueOnce(new Error('Notification database unavailable'));
+    else vi.mocked(notificationService.send).mockResolvedValueOnce(undefined);
+    const response = await request(app).post('/api/search/artists/add').send({ foreignArtistId: artist.foreignArtistId });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ success: true, outcome: 'added', artist, refreshTriggered: true });
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+  it('preserves an actual provider failure without sending a notification or retrying the addition', async () => {
+    const { notificationService } = await import('../../src/services/notifications.js');
+    vi.mocked(notificationService.send).mockClear();
+    const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+    const add = vi.fn().mockRejectedValue(new Error('Provider rejected addition'));
+    vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never);
+    vi.mocked(LidarrService).mockImplementationOnce(function () { return { addArtistWithCacheWarm: add } as unknown as LidarrService; });
+    const response = await request(app).post('/api/search/artists/add').send({ foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe('Provider rejected addition');
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(notificationService.send).not.toHaveBeenCalled();
+  });
+});
+
+
+it('classifies mixed batch helper confirmations as skipped or added after the cache initially misses both', async () => {
+  const existing = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', added = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  const connection = { id: 1, type: 'lidarr', config: { url: 'http://localhost', apiKey: 'test', qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } };
+  const add = vi.fn().mockResolvedValueOnce({ artist: { foreignArtistId: existing }, alreadyInLibrary: true }).mockResolvedValueOnce({ artist: { foreignArtistId: added }, alreadyInLibrary: false });
+  vi.mocked(prisma.connection.findFirst).mockResolvedValueOnce(connection as never).mockResolvedValueOnce(connection as never);
+  const provider = function () { return { addArtistWithCacheWarm: add } as unknown as LidarrService; };
+  vi.mocked(LidarrService).mockImplementationOnce(provider).mockImplementationOnce(provider);
+  const response = await request(app).post('/api/search/batch').send({ artistIds: [existing, added] });
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ added: [added], skipped: [existing], failed: [] });
+  expect(add.mock.calls.map(call => call[0])).toEqual([existing, added]);
 });

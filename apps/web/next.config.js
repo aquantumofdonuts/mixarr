@@ -22,12 +22,12 @@ const nextConfig = {
   // Fonts will still work correctly but will be fetched at runtime from Google instead of being inlined
   optimizeFonts: process.env.CI !== 'true',
   async rewrites() {
-    // API_URL is set at runtime in Docker, defaults to localhost for local dev
-    const apiUrl = process.env.API_URL || 'http://localhost:3005';
+    // Bundled images use loopback; separate-container deployments set API_URL.
+    const apiUrl = process.env.API_URL || 'http://127.0.0.1:3005';
     return [
       {
         source: '/api/:path*',
-        destination: `${apiUrl}/:path*`,
+        destination: `${apiUrl}/api/:path*`,
       },
     ];
   },

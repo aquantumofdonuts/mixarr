@@ -104,9 +104,7 @@ echo "✅ Redis connected"
 echo ""
 echo "🔄 Syncing database schema..."
 cd /app/api
-npx prisma db push --skip-generate 2>&1 | grep -v "^$" || {
-  echo "⚠️  Schema sync had issues, continuing anyway..."
-}
+node dist/scripts/deploy-schema.js
 echo "✅ Schema sync complete"
 echo ""
 

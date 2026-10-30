@@ -1,13 +1,6 @@
 /**
- * Lidarr Config Normalization Tests
- * 
- * Tests that Lidarr connection config values are properly normalized
- * when read from the database. Specifically:
- * - qualityProfileId should be a number (even if stored as string)
- * - metadataProfileId should be a number (even if stored as string)
- * 
- * This is a regression test for the bug where profile IDs were
- * stored as strings and Lidarr API received "2" instead of 2.
+ * Normalize qualityProfileId and metadataProfileId loaded from the database
+ * to numeric values before sending them to Lidarr, including string inputs.
  */
 
 import { describe, it, expect } from 'vitest';

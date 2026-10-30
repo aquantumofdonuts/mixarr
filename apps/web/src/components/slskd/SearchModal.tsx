@@ -158,7 +158,8 @@ export function SlskdSearchModal({ isOpen, onClose, artistName, artistImage }: S
           setResults(data);
           
           // Stop searching when complete
-          if (data.state === 'Completed' || data.state === 'Errored') {
+          const states = data.state.split(',').map(state => state.trim());
+          if (states.some(state => ['Completed', 'Errored', 'TimedOut', 'Cancelled'].includes(state))) {
             setIsSearching(false);
             setSearchId(null);
             return; // Stop polling
@@ -191,7 +192,7 @@ export function SlskdSearchModal({ isOpen, onClose, artistName, artistImage }: S
       const { data, error } = await api.post<SlskdSearchResult>('/api/slskd/search', {
         query: artistName,
         options: {
-          searchTimeout: 30000,
+          searchTimeout: 30,
           filterResponses: true,
           minimumPeerUploadSpeed: 0,
         },

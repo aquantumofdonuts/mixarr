@@ -67,7 +67,7 @@ describe('Notifications API', () => {
         .get('/api/notifications/events')
         .expect(200);
       
-      // SOC-006: API should return raw event strings, not formatted objects
+      // API should return raw event strings, not formatted objects
       expect(Array.isArray(response.body)).toBe(true);
       expect(response.body).toContain('subscription.completed');
       expect(response.body).toContain('subscription.failed');

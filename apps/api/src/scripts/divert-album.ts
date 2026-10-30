@@ -1,18 +1,8 @@
 /**
- * divert-album.ts — standalone entry point, invoked via `node dist/scripts/divert-album.js`
- * from outside this container (Glen's playlist_sync.py, over SSH + docker exec — Mixarr's
- * own HTTP API requires an authenticated browser session, which isn't practical for a
- * service-to-service call, so this reuses the same "run inside the trusted container"
- * approach the original move_queue_to_soulseek.js ad-hoc script used).
- *
- * Reads one JSON object from stdin: {artistName, albumTitle, lidarrArtistId, lidarrAlbumId}.
- * See divert-lib.ts for what actually happens — this file is just the stdin/stdout wrapper.
- * Deliberately never touches Lidarr's monitored flag itself — that decision belongs
- * entirely to the existing 30-day sweep job, per the standing "don't push to Lidarr
- * until Soulseek has had 30 days" policy (see project_goj_soulseek_first_policy in
- * Jack's memory).
- *
- * Prints exactly one JSON line to stdout: {status, searchResultCount?, error?}.
+ * One-shot CLI: node dist/scripts/divert-album.js.
+ * Read { artistName, albumTitle, lidarrArtistId, lidarrAlbumId } from stdin
+ * and try Soulseek through divert-lib. Leave monitoring changes to the sweep.
+ * Print one JSON line: { status, searchResultCount?, error? }.
  */
 import { PrismaClient } from "@prisma/client";
 import { divertAlbumToSoulseek, getActiveSlskdConnection } from "./divert-lib.js";
@@ -71,12 +61,6 @@ async function main() {
 }
 
 main().finally(() => {
-  // Confirmed live 2026-07-22: the process doesn't exit on its own after
-  // this — something in the BullMQ/Redis chain (used by the rate-limited
-  // search queue path) keeps a handle open even after queueEvents.close()
-  // and prisma.$disconnect(). This is a one-off CLI invocation (called
-  // over SSH by Glen, which reads stdout until the stream closes), not a
-  // long-running server, so forcing an exit here is the right call rather
-  // than chasing down every possible lingering connection.
+  // Exit after cleanup so lingering BullMQ/Redis handles cannot keep CLI stdout open.
   process.exit(process.exitCode ?? 0);
 });

@@ -27,6 +27,7 @@ sessionRedis.on('connect', () => {
 });
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Passport uses Express.User declaration merging.
   namespace Express {
     interface User {
       id: number;
@@ -79,7 +80,6 @@ export { sessionRedis };
 
 /**
  * Look up a user by ID and verify they are active.
- * Extracted so both passport.deserializeUser and tests use the same logic.
  */
 export async function lookupSessionUser(
   id: number

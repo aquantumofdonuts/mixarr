@@ -600,20 +600,6 @@ describe('SSO Routes', () => {
     });
   });
 
-  describe('POST /api/sso/providers/:type/test', () => {
-    it('should return placeholder success for test endpoint', () => {
-      // Test connection endpoint is a placeholder for now
-      const type = 'google';
-      const expectedResponse = {
-        success: true,
-        message: `${type} connection test not yet implemented`,
-      };
-      
-      expect(expectedResponse.success).toBe(true);
-      expect(expectedResponse.message).toContain('not yet implemented');
-    });
-  });
-
   describe('Provider type validation', () => {
     const VALID_PROVIDER_TYPES = ['ldap', 'saml', 'google', 'plex'];
 

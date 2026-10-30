@@ -1,10 +1,5 @@
 /**
- * Subscription Types Metadata
- * 
- * Centralized configuration for subscription types.
- * This is the single source of truth - frontend consumes this via API.
- * 
- * SOC-003: Moved from frontend hardcoding to API endpoint.
+ * Subscription type metadata served to the frontend through the API.
  */
 
 /**

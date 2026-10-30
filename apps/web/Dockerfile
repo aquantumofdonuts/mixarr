@@ -22,7 +22,7 @@ COPY . .
 FROM development AS builder
 
 # Build args for API URL
-ARG API_URL=http://localhost:3010
+ARG API_URL=http://api:3005
 ENV API_URL=${API_URL}
 # CI=true disables build-time font optimization to prevent timeouts during slow ARM64 builds
 ENV CI=true
@@ -37,6 +37,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
+ARG API_URL=http://api:3005
+ENV API_URL=${API_URL}
 
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static

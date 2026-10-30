@@ -1,15 +1,6 @@
 /**
- * API Response DTOs
- * 
- * Data Transfer Objects for API responses.
- * These define the exact shape of data returned by API endpoints,
- * ensuring we don't leak Prisma model internals (SOC-007).
- * 
- * Benefits:
- * - Explicit contract between API and frontend
- * - Prevents accidental data leakage (passwords, tokens, etc.)
- * - Decouples API response shape from database schema
- * - Type-safe transformations
+ * Public API response shapes and transformations.
+ * Expose explicit fields without leaking Prisma internals, passwords, or tokens.
  */
 
 export * from './connection.dto.js';

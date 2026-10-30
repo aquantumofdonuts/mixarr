@@ -90,6 +90,67 @@ describe('Discogs Service', () => {
       expect(service).toBeDefined();
     });
 
+    it('sends both Authorization and User-Agent headers when a token is provided', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 1, name: 'X' }),
+      });
+      global.fetch = fetchMock as any;
+
+      const service = new DiscogsService('tok');
+      await service.getArtist(1);
+
+      const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+      expect(headers['Authorization']).toBe('Discogs token=tok');
+      expect(headers['User-Agent']).toBe('MixarrMusicDiscovery/1.0');
+    });
+
+    it('omits Authorization but keeps User-Agent when constructed without a token (public API)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 1, name: 'X' }),
+      });
+      global.fetch = fetchMock as any;
+
+      const service = new DiscogsService();
+      await service.getArtist(1);
+
+      const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+      expect(headers['Authorization']).toBeUndefined();
+      expect(headers['User-Agent']).toBe('MixarrMusicDiscovery/1.0');
+    });
+
+    it('invokes onRequest once per HTTP request, before the fetch', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ pagination: { pages: 2 }, releases: [] }),
+      });
+      global.fetch = fetchMock as any;
+      const onRequest = vi.fn().mockResolvedValue(undefined);
+
+      const service = new DiscogsService('tok', { onRequest });
+      await service.getArtistReleases(1, { maxPages: 2 });
+
+      // Two pages -> two requests -> two budget charges.
+      expect(onRequest).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(onRequest.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder[0]);
+    });
+
+    it('does not send the request when onRequest throws', async () => {
+      const fetchMock = vi.fn();
+      global.fetch = fetchMock as any;
+
+      const service = new DiscogsService('tok', {
+        onRequest: async () => {
+          throw new Error('budget exhausted');
+        },
+      });
+
+      await expect(service.getArtist(1)).rejects.toThrow('budget exhausted');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('gets artist by ID', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,

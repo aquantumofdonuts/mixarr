@@ -1,11 +1,8 @@
 name: Database Migrations
 
 on:
-  push:
-    branches: [prod]
-    paths:
-      - 'apps/api/prisma/schema.prisma'
-      - 'apps/api/prisma/migrations/**'
+  # Containers migrate their own databases at upgrade time. This optional job
+  # is only for an operator-managed external database with a production secret.
   workflow_dispatch:
 
 permissions:
@@ -21,6 +18,14 @@ jobs:
     environment:
       name: production
     steps:
+      - name: Require an explicitly configured external database
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "Configure the production DATABASE_URL secret before dispatching an external migration."
+            exit 1
+          fi
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -33,11 +38,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Push schema changes
-        # Note: project uses prisma db push (not migrate deploy) — no migration
-        # baseline exists. This safely syncs schema changes to production.
-        run: npx prisma db push --schema apps/api/prisma/schema.prisma --skip-generate --accept-data-loss
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Deploy checked migrations
+        run: npm run db:deploy --workspace=@mixarr/api
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
 

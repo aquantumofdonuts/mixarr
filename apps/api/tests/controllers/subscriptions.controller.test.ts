@@ -1,7 +1,7 @@
 /**
  * SubscriptionController Tests
  * 
- * TDD-driven tests for the subscription controller.
+ * Tests for the subscription controller.
  * Tests cover:
  * - HTTP status codes (200, 201, 204, 404)
  * - Delegation to SubscriptionService

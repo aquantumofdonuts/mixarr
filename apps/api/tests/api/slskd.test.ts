@@ -39,6 +39,10 @@ vi.mock('../../src/lib/redis.js', () => ({
   }),
 }));
 
+vi.mock('bullmq', () => ({
+  QueueEvents: class { close = vi.fn().mockResolvedValue(undefined); },
+}));
+
 // Mock the organizer service
 const mockOrganizeFile = vi.fn();
 vi.mock('../../src/services/slskd-organizer.js', () => {
@@ -66,6 +70,7 @@ describe('slskd API Routes', () => {
   let mockPrisma: {
     connection: {
       findFirst: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
     };
     slskdDownload: {
       findMany: ReturnType<typeof vi.fn>;
@@ -88,6 +93,7 @@ describe('slskd API Routes', () => {
     mockPrisma = {
       connection: {
         findFirst: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([{ id: 1 }]),
       },
       slskdDownload: {
         findMany: vi.fn(),
@@ -105,16 +111,15 @@ describe('slskd API Routes', () => {
       default: mockPrisma,
     }));
     
-    // Mock auth middleware to skip auth
-    vi.doMock('../../src/middleware/auth.js', () => ({
-      requireAuth: (_req: express.Request, _res: express.Response, next: express.NextFunction) => {
-        (_req as any).user = { id: 1, username: 'testuser', role: 'user' };
-        next();
-      },
-    }));
+    vi.doUnmock('../../src/middleware/auth.js');
     
     app = express();
     app.use(express.json());
+    app.use((req, _res, next) => {
+      req.user = { id: 1, username: 'testuser', role: 'user' } as Express.User;
+      req.isAuthenticated = (() => true) as typeof req.isAuthenticated;
+      next();
+    });
     
     const { default: slskdRouter } = await import('../../src/routes/slskd.js');
     app.use('/api/slskd', slskdRouter);
@@ -129,6 +134,7 @@ describe('slskd API Routes', () => {
     it('should start a search with valid connection', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         isActive: true,
         config: { url: 'http://localhost:5030', apiKey: 'test-key' },
@@ -173,6 +179,7 @@ describe('slskd API Routes', () => {
     it('should pass search options to slskd', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         isActive: true,
         config: { url: 'http://localhost:5030', apiKey: 'test-key' },
@@ -210,6 +217,7 @@ describe('slskd API Routes', () => {
     it('should return search results', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         isActive: true,
         config: { url: 'http://localhost:5030', apiKey: 'test-key' },
@@ -250,6 +258,7 @@ describe('slskd API Routes', () => {
     it('should delete a search', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         isActive: true,
         config: { url: 'http://localhost:5030', apiKey: 'test-key' },
@@ -286,6 +295,7 @@ describe('slskd API Routes', () => {
     it('should queue files for download', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         isActive: true,
         config: { url: 'http://localhost:5030', apiKey: 'test-key' },
@@ -377,7 +387,6 @@ describe('slskd API Routes', () => {
           filename: 'track.flac',
           fileSize: 50000000,
           status: 'completed',
-          progress: 100,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -391,7 +400,6 @@ describe('slskd API Routes', () => {
           filename: 'track.flac',
           fileSize: 60000000,
           status: 'downloading',
-          progress: 45,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -404,6 +412,12 @@ describe('slskd API Routes', () => {
       expect(response.body).toHaveLength(2);
       expect(response.body[0].artistName).toBe('Pink Floyd');
       expect(response.body[1].artistName).toBe('Tool');
+      expect(mockPrisma.connection.findMany).toHaveBeenCalledWith({
+        where: { type: 'slskd', userId: 1 }, select: { id: true },
+      });
+      expect(mockPrisma.slskdDownload.findMany).toHaveBeenCalledWith({
+        where: { connectionId: { in: [1] } }, orderBy: { createdAt: 'desc' }, take: 100,
+      });
     });
 
     it('should return empty array when no downloads exist', async () => {
@@ -418,21 +432,58 @@ describe('slskd API Routes', () => {
   });
 
   describe('POST /api/slskd/downloads/:id/retry', () => {
-    it('should return 400 when no slskd connection exists', async () => {
+    it('should return 400 when the owned download connection is inactive', async () => {
       mockPrisma.slskdDownload.findUnique.mockResolvedValue({
         id: 1,
+        connectionId: 7,
         username: 'soulseekuser',
         filename: 'track.flac',
         fileSize: 50000000,
         status: 'failed',
       });
-      mockPrisma.connection.findFirst.mockResolvedValue(null);
+      mockPrisma.connection.findFirst
+        .mockResolvedValueOnce({ id: 7, userId: 1, type: 'slskd', isActive: false })
+        .mockResolvedValueOnce(null);
 
-      const response = await request(app)
-        .post('/api/slskd/downloads/1/retry');
+      const response = await request(app).post('/api/slskd/downloads/1/retry');
 
       expect(response.status).toBe(400);
       expect(response.body.error).toBe('No Soulseek connection configured. Add one in Settings → Connections.');
+      expect(mockPrisma.connection.findFirst).toHaveBeenNthCalledWith(1, {
+        where: { id: 7, type: 'slskd', userId: 1 },
+      });
+      expect(mockPrisma.connection.findFirst).toHaveBeenNthCalledWith(2, {
+        where: { id: 7, type: 'slskd', userId: 1, isActive: true },
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockPrisma.slskdDownload.update).not.toHaveBeenCalled();
+    });
+
+    it('should return 404 for a missing download before looking up any connection', async () => {
+      mockPrisma.slskdDownload.findUnique.mockResolvedValue(null);
+
+      const response = await request(app).post('/api/slskd/downloads/999/retry');
+
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('Download not found');
+      expect(mockPrisma.connection.findFirst).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockPrisma.slskdDownload.update).not.toHaveBeenCalled();
+    });
+
+    it('should return 404 when the exact download connection is not owned by the actor', async () => {
+      mockPrisma.slskdDownload.findUnique.mockResolvedValue({ id: 1, connectionId: 99, status: 'failed' });
+      mockPrisma.connection.findFirst.mockResolvedValue(null);
+
+      const response = await request(app).post('/api/slskd/downloads/1/retry');
+
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('Download not found');
+      expect(mockPrisma.connection.findFirst).toHaveBeenCalledExactlyOnceWith({
+        where: { id: 99, type: 'slskd', userId: 1 },
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockPrisma.slskdDownload.update).not.toHaveBeenCalled();
     });
   });
 
@@ -440,6 +491,7 @@ describe('slskd API Routes', () => {
     it('should handle slskd API errors gracefully', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         isActive: true,
         config: { url: 'http://localhost:5030', apiKey: 'test-key' },
@@ -467,6 +519,9 @@ describe('slskd API Routes', () => {
 
       expect(response.status).toBe(500);
       expect(response.body.error).toBe('Failed to get downloads');
+      expect(mockPrisma.slskdDownload.findMany).toHaveBeenCalledWith({
+        where: { connectionId: { in: [1] } }, orderBy: { createdAt: 'desc' }, take: 100,
+      });
     });
   });
 
@@ -474,6 +529,7 @@ describe('slskd API Routes', () => {
     it('should accept download completion webhook', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         isActive: true,
         config: {
@@ -514,6 +570,7 @@ describe('slskd API Routes', () => {
     it('should prevent race condition with atomic status updates', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         isActive: true,
         config: {
@@ -572,6 +629,7 @@ describe('slskd API Routes', () => {
     it('should handle unknown downloads gracefully', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         enabled: true,
         config: { url: 'http://localhost:5030', apiKey: 'key' },
@@ -611,6 +669,7 @@ describe('slskd API Routes', () => {
     it('should handle organization errors gracefully', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         enabled: true,
         config: {
@@ -668,7 +727,7 @@ describe('slskd input validation', () => {
     global.fetch = vi.fn();
 
     mockPrisma = {
-      connection: { findFirst: vi.fn() },
+      connection: { findFirst: vi.fn(), findMany: vi.fn().mockResolvedValue([{ id: 1 }]) },
       slskdDownload: {
         findMany: vi.fn(),
         findFirst: vi.fn(),
@@ -685,15 +744,15 @@ describe('slskd input validation', () => {
       default: mockPrisma,
     }));
 
-    vi.doMock('../../src/middleware/auth.js', () => ({
-      requireAuth: (_req: express.Request, _res: express.Response, next: express.NextFunction) => {
-        (_req as any).user = { id: 1, username: 'testuser', role: 'user' };
-        next();
-      },
-    }));
+    vi.doUnmock('../../src/middleware/auth.js');
 
     app = express();
     app.use(express.json());
+    app.use((req, _res, next) => {
+      req.user = { id: 1, username: 'testuser', role: 'user' } as Express.User;
+      req.isAuthenticated = (() => true) as typeof req.isAuthenticated;
+      next();
+    });
     const { default: slskdRouter } = await import('../../src/routes/slskd.js');
     app.use('/api/slskd', slskdRouter);
   });
@@ -745,6 +804,7 @@ describe('slskd input validation', () => {
     it('should accept valid search with options', async () => {
       mockPrisma.connection.findFirst.mockResolvedValue({
         id: 1,
+        userId: 1,
         type: 'slskd',
         isActive: true,
         config: { url: 'http://localhost:5030', apiKey: 'test-key' },
@@ -762,6 +822,8 @@ describe('slskd input validation', () => {
         .send({ query: 'Tool', options: { searchTimeout: 60, filterResponses: true } });
 
       expect(response.status).toBe(200);
+      const upstreamRequest = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+      expect(upstreamRequest.searchTimeout).toBe(60000);
     });
   });
 
@@ -840,6 +902,12 @@ describe('slskd input validation', () => {
         .get('/api/slskd/downloads?status=pending&limit=50');
 
       expect(response.status).toBe(200);
+      expect(mockPrisma.connection.findMany).toHaveBeenCalledWith({
+        where: { type: 'slskd', userId: 1 }, select: { id: true },
+      });
+      expect(mockPrisma.slskdDownload.findMany).toHaveBeenCalledWith({
+        where: { connectionId: { in: [1] }, status: 'pending' }, orderBy: { createdAt: 'desc' }, take: 50,
+      });
     });
 
     it('should default limit to 100', async () => {
@@ -851,7 +919,7 @@ describe('slskd input validation', () => {
       expect(response.status).toBe(200);
       // Verify findMany was called with take: 100
       expect(mockPrisma.slskdDownload.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ take: 100 }),
+        expect.objectContaining({ where: { connectionId: { in: [1] } }, take: 100 }),
       );
     });
   });
@@ -907,8 +975,10 @@ describe('slskd input validation', () => {
     it('should accept valid delete with remove=true', async () => {
       mockPrisma.slskdDownload.findUnique.mockResolvedValue({
         id: 1,
+        connectionId: 7,
         status: 'failed',
       });
+      mockPrisma.connection.findFirst.mockResolvedValue({ id: 7, userId: 1, type: 'slskd', isActive: true });
       mockPrisma.slskdDownload.delete.mockResolvedValue({ id: 1 });
 
       const response = await request(app)
@@ -916,6 +986,10 @@ describe('slskd input validation', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
+      expect(mockPrisma.connection.findFirst).toHaveBeenCalledExactlyOnceWith({
+        where: { id: 7, type: 'slskd', userId: 1 },
+      });
+      expect(mockPrisma.slskdDownload.delete).toHaveBeenCalledWith({ where: { id: 1 } });
     });
   });
 
@@ -932,19 +1006,13 @@ describe('slskd input validation', () => {
 
 /**
  * Separate describe block to verify webhook auth requirement.
- * Uses a rejecting requireAuth mock to prove the router-level middleware
- * protects the webhook endpoint.
+ * Uses an unauthenticated request fixture with the real requireAuth middleware.
  */
 describe('slskd webhook authentication', () => {
   it('should require authentication for webhook endpoint (router-level middleware)', async () => {
     vi.resetModules();
 
-    // Mock auth middleware to REJECT - simulating unauthenticated request
-    vi.doMock('../../src/middleware/auth.js', () => ({
-      requireAuth: (_req: express.Request, res: express.Response, _next: express.NextFunction) => {
-        res.status(401).json({ error: 'Authentication required' });
-      },
-    }));
+    vi.doUnmock('../../src/middleware/auth.js');
 
     // Need all the same infrastructure mocks so the router module loads
     vi.doMock('../../src/lib/db.js', () => ({
@@ -954,6 +1022,10 @@ describe('slskd webhook authentication', () => {
 
     const testApp = express();
     testApp.use(express.json());
+    testApp.use((req, _res, next) => {
+      req.isAuthenticated = (() => false) as typeof req.isAuthenticated;
+      next();
+    });
     const { default: slskdRouter } = await import('../../src/routes/slskd.js');
     testApp.use('/api/slskd', slskdRouter);
 

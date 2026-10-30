@@ -4,6 +4,8 @@
  * Provides rate limiting for external API calls to prevent hitting rate limits.
  */
 
+import { setTimeout as delay } from 'node:timers/promises';
+
 interface RateLimitConfig {
   requestsPerSecond: number;
   burstSize?: number;
@@ -55,17 +57,19 @@ function refillTokens(service: string): void {
   state.lastRefill = now;
 }
 
-export async function rateLimit(service: string): Promise<void> {
+export async function rateLimit(service: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   refillTokens(service);
   const state = getOrCreateLimiter(service);
   
   if (state.tokens < 1) {
     const config = configs[service] || { requestsPerSecond: 5 };
     const waitTime = (1 - state.tokens) / config.requestsPerSecond * 1000;
-    await new Promise(resolve => setTimeout(resolve, waitTime));
+    await delay(waitTime, undefined, { signal });
     refillTokens(service);
   }
   
+  signal?.throwIfAborted();
   state.tokens -= 1;
 }
 

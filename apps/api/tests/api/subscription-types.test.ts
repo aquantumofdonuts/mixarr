@@ -1,7 +1,7 @@
 /**
  * Subscription Types API Tests
  * 
- * Tests for GET /api/subscriptions/types endpoint (SOC-003)
+ * Tests for GET /api/subscriptions/types endpoint
  * This endpoint returns subscription type metadata for the frontend.
  */
 

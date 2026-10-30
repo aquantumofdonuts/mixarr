@@ -226,7 +226,7 @@ export class DeezerOAuthService {
     let index = 0;
     const limit = 50;
 
-    while (true) {
+    for (;;) {
       const response = await this.request<{ data: DeezerTrack[]; next?: string }>(`/user/me/history?limit=${limit}&index=${index}`);
       tracks.push(...response.data);
       
@@ -257,7 +257,7 @@ export class DeezerOAuthService {
     let index = 0;
     const limit = 50;
 
-    while (true) {
+    for (;;) {
       const response = await this.request<{ data: DeezerTrack[]; next?: string }>(`/user/me/tracks?limit=${limit}&index=${index}`);
       tracks.push(...response.data);
       
@@ -299,7 +299,7 @@ export class DeezerOAuthService {
     let index = 0;
     const limit = 50;
 
-    while (true) {
+    for (;;) {
       const response = await this.request<{ data: DeezerPlaylist[]; next?: string }>(`/user/me/playlists?limit=${limit}&index=${index}`);
       playlists.push(...response.data);
       
@@ -325,7 +325,7 @@ export class DeezerOAuthService {
     let index = 0;
     const limit = 50;
 
-    while (true) {
+    for (;;) {
       const response = await this.request<{ data: DeezerTrack[]; next?: string }>(`/playlist/${playlistId}/tracks?limit=${limit}&index=${index}`);
       tracks.push(...response.data);
       
@@ -424,5 +424,5 @@ export class DeezerOAuthService {
   }
 }
 
-// Re-export the image helper from original deezer.ts for backward compatibility
+// Re-export the image helper for callers using this module
 export { fetchDeezerArtistImage, fetchDeezerArtistImages } from './deezer.js';

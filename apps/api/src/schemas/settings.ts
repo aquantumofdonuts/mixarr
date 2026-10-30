@@ -48,6 +48,23 @@ export const globalSettingValueSchema = z.object({
   value: z.unknown(),
 });
 
+// PUT /constellation (partial update of Collaboration Constellation settings).
+// All keys optional (partial merge). `.strict()` rejects unknown keys; budgets
+// must be positive integers and indexRefresh is a fixed enum, so a negative
+// budget or garbage enum is rejected (400) rather than persisted.
+export const updateConstellationSettingsSchema = z
+  .object({
+    constellationIndexEnabled: z.boolean(),
+    constellationIndexPath: z.string().min(1),
+    orbitEdgeBudget: z.number().int().positive(),
+    dailyApiBudget: z.number().int().positive(),
+    fanoutN: z.number().int().positive(),
+    pathMaxDegrees: z.number().int().positive(),
+    indexRefresh: z.enum(['monthly', 'off']),
+  })
+  .partial()
+  .strict();
+
 // PUT /global (bulk update global settings)
 export const bulkUpdateGlobalSettingsSchema = z.object({
   settings: z.record(z.string(), z.unknown()).refine(

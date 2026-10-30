@@ -91,7 +91,7 @@ describe('LidarrMaintenance', () => {
       expect(screen.getByText('150')).toBeInTheDocument();
     });
 
-    expect(api.get).toHaveBeenCalledWith('/api/search/lidarr/artists');
+    expect(api.get).toHaveBeenCalledWith('/api/search/lidarr/artists', { signal: expect.any(AbortSignal) });
     expect(screen.getByText('Total Artists')).toBeInTheDocument();
   });
 

@@ -33,6 +33,14 @@ type ConnectionTestResult = {
 };
 
 const connectionTestHandlers: Record<string, (config: Record<string, any>) => Promise<ConnectionTestResult>> = {
+  slskd: async (config) => {
+    const result = await new SlskdService({ url: config.url, apiKey: config.apiKey }).testConnection();
+    return {
+      success: result.success,
+      message: result.success ? `Connected to slskd v${result.version}` : result.error || 'Connection failed',
+      details: { version: result.version },
+    };
+  },
   lidarr: async (config) => {
     const service = new LidarrService({
       url: config.url,
@@ -314,7 +322,7 @@ connectionsRouter.post('/test', validateBody(testConnectionSchema), async (req, 
           res.status(400).json({ success: false, error: 'Client ID and Client Secret required' });
           return;
         }
-        // For Spotify, we just validate the credentials format for now
+        // Validate Spotify credential format without a provider request
         // Full OAuth flow happens after saving the connection
         if (clientId.length < 10 || clientSecret.length < 10) {
           res.json({ success: false, error: 'Invalid credentials format' });

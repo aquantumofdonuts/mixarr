@@ -1,0 +1,526 @@
+// Prisma schema for Mixarr v2
+// Database: MySQL 8.0
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER & AUTHENTICATION
+// ============================================================================
+
+model User {
+  id           Int       @id @default(autoincrement())
+  username     String    @unique @db.VarChar(50)
+  email        String?   @unique @db.VarChar(255)  // For SSO matching
+  passwordHash String?   @map("password_hash") @db.VarChar(255)  // Nullable for SSO-only users
+  displayName  String    @map("display_name") @db.VarChar(100)
+  role         UserRole  @default(user)
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLogin    DateTime? @map("last_login")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  sessions             Session[]
+  connections          Connection[]
+  subscriptions        Subscription[]
+  importSources        ImportSource[]
+  reviewItems          ReviewItem[]
+  settings             UserSetting[]
+  notificationChannels NotificationChannel[]
+  dismissedDuplicates  DismissedDuplicate[]
+  authIdentities       AuthIdentity[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  admin
+  user
+}
+
+model Session {
+  id        String   @id @db.VarChar(255)
+  userId    Int      @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ============================================================================
+// SSO AUTHENTICATION
+// ============================================================================
+
+enum SsoProviderType {
+  ldap
+  saml
+  google
+  plex
+}
+
+model SsoProvider {
+  id        Int             @id @default(autoincrement())
+  type      SsoProviderType @unique
+  name      String          @db.VarChar(100)
+  config    Json            // Credentials, URLs, mappings (stored as JSON)
+  isEnabled Boolean         @default(false) @map("is_enabled")
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@map("sso_providers")
+}
+
+model AuthIdentity {
+  id             Int             @id @default(autoincrement())
+  userId         Int             @map("user_id")
+  provider       SsoProviderType
+  providerUserId String          @map("provider_user_id") @db.VarChar(255)
+  email          String          @db.VarChar(255)
+  metadata       Json?           // Provider-specific data
+  createdAt      DateTime        @default(now()) @map("created_at")
+  lastUsedAt     DateTime?       @map("last_used_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@index([provider, email])
+  @@map("auth_identities")
+}
+
+// ============================================================================
+// CONNECTIONS
+// ============================================================================
+
+model Connection {
+  id        Int            @id @default(autoincrement())
+  userId    Int?           @map("user_id")  // null = global connection (e.g., Lidarr)
+  type      ConnectionType
+  name      String         @db.VarChar(100)
+  config    Json           // Sensitive data (stored as JSON)
+  isActive  Boolean        @default(true) @map("is_active")
+  lastTest  DateTime?      @map("last_test")
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  user          User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+
+  @@unique([userId, type, name])
+  @@index([userId])
+  @@map("connections")
+}
+
+enum ConnectionType {
+  lidarr
+  spotify
+  lastfm
+  tautulli
+  deezer
+  tidal
+  listenbrainz
+  discogs
+  jellyfin
+  slskd
+}
+
+// ============================================================================
+// SUBSCRIPTIONS
+// ============================================================================
+
+model Subscription {
+  id             Int                @id @default(autoincrement())
+  userId         Int                @map("user_id")
+  connectionId   Int?               @map("connection_id") // FK to Last.fm/Spotify connection
+  name           String             @db.VarChar(255)
+  type           SubscriptionType
+  config         Json
+  resultLimit    Int                @default(50) @map("result_limit")
+  resultHandling ResultHandling     @default(preview) @map("result_handling")
+  schedule       String?            @db.VarChar(100) // Cron expression: 'manual', 'daily', 'weekly', 'monthly'
+  isActive       Boolean            @default(true) @map("is_active")
+  lastRun        DateTime?          @map("last_run")
+  lastRunStatus  String?            @map("last_run_status") @db.VarChar(50)
+  lastRunCount   Int?               @map("last_run_count")
+  nextRun        DateTime?          @map("next_run")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  user       User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connection Connection?           @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  history    SubscriptionRun[]
+  results    SubscriptionResult[]
+
+  @@index([userId])
+  @@index([connectionId])
+  @@index([nextRun])
+  @@index([isActive])
+  @@map("subscriptions")
+}
+
+enum SubscriptionType {
+  lastfm_chart
+  lastfm_tag
+  lastfm_geo
+  lastfm_library
+  lastfm_similar
+  lastfm_tag_albums
+  lastfm_tag_similar
+  lastfm_user_albums
+  lastfm_weekly_artists
+  lastfm_weekly_albums
+  musicbrainz
+  musicbrainz_new
+  combined
+  spotify_playlist
+  spotify_new_releases
+  spotify_followed
+  spotify_saved_albums
+  spotify_liked_songs
+  spotify_discover_weekly
+  spotify_release_radar
+  spotify_daily_mix
+  spotify_on_repeat
+  spotify_featured
+  spotify_category
+  spotify_library
+  spotify_public_playlist
+  ai_recommendation
+  tautulli_similar
+  jellyfin_similar
+  // Deezer subscription types
+  deezer_favorites
+  deezer_playlists
+  deezer_playlist
+  deezer_flow
+  deezer_chart
+  deezer_history
+  deezer_genre
+  deezer_search
+  // Tidal subscription types
+  tidal_favorites
+  tidal_followed_artists
+  tidal_playlists
+  tidal_playlist
+  tidal_discovery
+  tidal_new_arrivals
+  tidal_mix
+  // ListenBrainz subscription types
+  listenbrainz_top
+  listenbrainz_similar
+  listenbrainz_recommendations
+  listenbrainz_fresh_releases
+  listenbrainz_weekly_jams
+  listenbrainz_weekly_exploration
+  listenbrainz_year
+  listenbrainz_playlist
+  listenbrainz_radio
+  listenbrainz_loved
+  // Discogs subscription types
+  discogs_label
+  discogs_style
+  // Bandcamp subscription types
+  bandcamp_tag
+  bandcamp_new
+}
+
+model SubscriptionRun {
+  id             Int       @id @default(autoincrement())
+  subscriptionId Int       @map("subscription_id")
+  status         RunStatus
+  resultsCount   Int       @default(0) @map("results_count")
+  addedCount     Int       @default(0) @map("added_count")
+  skippedCount   Int       @default(0) @map("skipped_count")
+  errorMessage   String?   @map("error_message") @db.Text
+  startedAt      DateTime  @default(now()) @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([startedAt])
+  @@map("subscription_runs")
+}
+
+// Discovered items from subscription runs
+model SubscriptionResult {
+  id             Int       @id @default(autoincrement())
+  subscriptionId Int       @map("subscription_id")
+  runId          Int?      @map("run_id")
+
+  // Item details
+  itemType       String    @map("item_type") @db.VarChar(20) // 'artist', 'album'
+  name           String    @db.VarChar(255)
+  artistName     String?   @map("artist_name") @db.VarChar(255) // For albums
+  mbid           String?   @db.VarChar(36) // MusicBrainz ID
+  spotifyId      String?   @map("spotify_id") @db.VarChar(100)
+
+  // Album-specific fields
+  albumMbid      String?   @map("album_mbid") @db.VarChar(36)
+  releaseDate    String?   @map("release_date") @db.VarChar(20)
+  releaseType    String?   @map("release_type") @db.VarChar(20) // album, ep, single, compilation, etc.
+
+  // Multi-source aggregation
+  sources        Json      @default("[]")
+  matchCount     Int       @default(1) @map("match_count")
+
+  // Enrichment data
+  sourceUrl      String?   @map("source_url") @db.VarChar(500)
+  listeners      Int?
+  playcount      Int?
+  tags           String?   @db.Text // Comma-separated
+  imageUrl       String?   @map("image_url") @db.VarChar(500)
+
+  // Processing status
+  status         String    @default("pending") @db.VarChar(50) // 'pending', 'added', 'skipped', 'queued', 'failed', 'rejected'
+  skipReason     String?   @map("skip_reason") @db.VarChar(100)
+  processedAt    DateTime? @map("processed_at")
+  errorMessage   String?   @map("error_message") @db.Text
+
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("subscription_results")
+}
+
+enum RunStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+// ============================================================================
+// SPOTIFY IMPORT
+// ============================================================================
+
+model ImportSource {
+  id             Int              @id @default(autoincrement())
+  userId         Int              @map("user_id")
+  type           ImportSourceType
+  name           String           @db.VarChar(255) // e.g., playlist name
+  externalId     String?          @map("external_id") @db.VarChar(255) // Spotify ID
+  isActive       Boolean          @default(true) @map("is_active")
+  schedule       String?          @db.VarChar(100)
+  resultHandling ResultHandling   @default(preview) @map("result_handling")
+  lastRun        DateTime?        @map("last_run")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, externalId])
+  @@index([userId])
+  @@map("import_sources")
+}
+
+enum ImportSourceType {
+  liked_songs
+  saved_albums
+  followed_artists
+  playlist
+}
+
+enum ResultHandling {
+  preview
+  queue
+  auto
+  slskd_preview
+  slskd_queue
+  slskd_auto
+}
+
+model ReviewItem {
+  id          Int            @id @default(autoincrement())
+  userId      Int            @map("user_id")
+  itemType    String         @default("artist") @map("item_type") @db.VarChar(20) // 'artist', 'album'
+  artistName  String         @map("artist_name") @db.VarChar(255)
+  albumName   String?        @map("album_name") @db.VarChar(255)
+  albumMbid   String?        @map("album_mbid") @db.VarChar(36)
+  releaseDate String?        @map("release_date") @db.VarChar(20)
+  releaseType String?        @map("release_type") @db.VarChar(20)
+  releaseYear Int?           @map("release_year")
+  spotifyId   String?        @map("spotify_id") @db.VarChar(255)
+  mbid        String?        @db.VarChar(36) // MusicBrainz ID (artist)
+  source      String         @db.VarChar(100)
+  status      ReviewStatus   @default(pending)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("review_items")
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+}
+
+// ============================================================================
+// DUPLICATE DETECTION
+// ============================================================================
+
+model DismissedDuplicate {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @map("user_id")
+  mbid1       String   @db.VarChar(36)
+  mbid2       String   @db.VarChar(36)
+  dismissedAt DateTime @default(now()) @map("dismissed_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, mbid1, mbid2])
+  @@map("dismissed_duplicates")
+}
+
+// ============================================================================
+// SETTINGS
+// ============================================================================
+
+model UserSetting {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  key       String   @db.VarChar(100)
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@map("user_settings")
+}
+
+model GlobalSetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique @db.VarChar(100)
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("global_settings")
+}
+
+// ============================================================================
+// LOGS
+// ============================================================================
+
+model LogEntry {
+  id        Int      @id @default(autoincrement())
+  level     LogLevel
+  category  String   @db.VarChar(50)
+  message   String   @db.Text
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([level])
+  @@index([category])
+  @@index([createdAt])
+  @@map("log_entries")
+}
+
+enum LogLevel {
+  debug
+  info
+  warn
+  error
+}
+
+// ============================================================================
+// AI SETTINGS
+// ============================================================================
+
+model AISettings {
+  id               Int        @id @default(autoincrement())
+  openaiApiKey     String?    @map("openai_api_key") @db.Text
+  openaiEnabled    Boolean    @default(false) @map("openai_enabled")
+  openaiStrategy   AIStrategy @default(similar) @map("openai_strategy")
+  openaiBaseUrl    String?    @map("openai_base_url") @db.Text
+  openaiModel      String?    @map("openai_model") @db.VarChar(100)
+  anthropicApiKey  String?    @map("anthropic_api_key") @db.Text
+  anthropicEnabled Boolean    @default(false) @map("anthropic_enabled")
+  anthropicStrategy AIStrategy @default(similar) @map("anthropic_strategy")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  @@map("ai_settings")
+}
+
+enum AIStrategy {
+  similar
+  genre_expansion
+  discovery
+}
+
+// ============================================================================
+// SLSKD DOWNLOADS
+// ============================================================================
+
+model SlskdDownload {
+  id           Int       @id @default(autoincrement())
+  connectionId Int       @map("connection_id")
+  artistName   String    @map("artist_name") @db.VarChar(255)
+  albumName    String    @map("album_name") @db.VarChar(255)
+  username     String    @db.VarChar(100)
+  filename     String    @db.VarChar(500)
+  fileSize     BigInt    @map("file_size")
+  status       String    @db.VarChar(50) // 'queued_locally', 'pending', 'downloading', 'organizing', 'completed', 'failed'
+  error        String?   @db.Text
+  downloadPath String?   @map("download_path") @db.VarChar(500)
+  albumYear    Int?      @map("album_year")
+  finalPath    String?   @map("final_path") @db.VarChar(500)
+  completedAt  DateTime? @map("completed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([connectionId])
+  @@index([status])
+  @@index([artistName, albumName])
+  @@map("slskd_downloads")
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model NotificationChannel {
+  id        Int              @id @default(autoincrement())
+  userId    Int              @map("user_id")
+  type      NotificationType
+  name      String           @db.VarChar(100)
+  config    Json             // Channel-specific config (webhook URL, etc.)
+  events    Json             // Array of event names to notify on
+  isActive  Boolean          @default(true) @map("is_active")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_channels")
+}
+
+enum NotificationType {
+  discord
+  webhook
+  telegram
+  pushover
+  email
+}

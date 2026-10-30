@@ -17,8 +17,8 @@ dashboardRouter.get('/stats', async (req, res) => {
 
     const [
       activeSubscriptions,
-      artistsAddedViaSubscriptions,
-      artistsAddedViaReviewQueue,
+      subscriptionRecordsMarkedAdded,
+      pendingDiscoveryRecords,
       pendingReviews,
       recentRuns,
       activeConnections
@@ -28,7 +28,7 @@ dashboardRouter.get('/stats', async (req, res) => {
         where: { userId, isActive: true }
       }),
       
-      // Artists added in last 30 days via subscriptions/feed (SubscriptionResult)
+      // Result records marked added; these may repeat identities and include legacy evidence.
       prisma.subscriptionResult.count({
         where: {
           subscription: { userId },
@@ -37,16 +37,15 @@ dashboardRouter.get('/stats', async (req, res) => {
         }
       }),
 
-      // Artists added in last 30 days via review queue (ReviewItem)
-      // See TD-009: these two "added" tracking paths should be unified
-      prisma.reviewItem.count({
+      // Match discovery's artist-only scope; album records are not reachable there.
+      prisma.subscriptionResult.count({
         where: {
-          userId,
-          status: 'approved',
-          updatedAt: { gte: thirtyDaysAgo }
+          subscription: { userId },
+          itemType: 'artist',
+          status: { in: ['pending', 'queued'] }
         }
       }),
-      
+
       // Pending review items
       prisma.reviewItem.count({
         where: { userId, status: 'pending' }
@@ -66,12 +65,11 @@ dashboardRouter.get('/stats', async (req, res) => {
       })
     ]);
 
-    const artistsAdded = artistsAddedViaSubscriptions + artistsAddedViaReviewQueue;
-
     res.json({
       stats: {
         activeSubscriptions,
-        artistsAdded,
+        subscriptionRecordsMarkedAdded,
+        pendingDiscoveryRecords,
         pendingReviews,
         runningJobs: recentRuns,
         activeConnections
@@ -83,7 +81,7 @@ dashboardRouter.get('/stats', async (req, res) => {
       stack: error instanceof Error ? error.stack : undefined,
     });
     res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Failed to fetch stats' 
+      error: 'Failed to fetch stats'
     });
   }
 });

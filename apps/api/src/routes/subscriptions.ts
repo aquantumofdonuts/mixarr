@@ -1,13 +1,16 @@
+import { addOptionsSchema, effectiveAddOptions } from '../lib/add-options.js';
 import { Router } from 'express';
+import { z } from 'zod';
 import prisma from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { createSubscriptionSchema, updateSubscriptionSchema } from '../schemas/subscription.js';
 import { parseIntParam } from '../utils/params.js';
+import { DecisionError, nextRevision } from '../lib/decision.js';
+import { readBeforeDeadline } from '../lib/acquisition-deadline.js';
 import { subscriptionController } from '../controllers/subscriptions.controller.js';
 import { getArtistImages } from '../services/artist-images.js';
 import { LidarrService, getSharedLidarrCache, invalidateLidarrCache } from '../services/lidarr.js';
-import { MusicBrainzService } from '../services/musicbrainz.js';
 import { notificationService } from '../services/notifications.js';
 import { SUBSCRIPTION_PRESETS } from '../data/subscription-presets.js';
 import { SUBSCRIPTION_TYPES } from '../data/subscription-types.js';
@@ -33,7 +36,7 @@ subscriptionsRouter.get('/', subscriptionController.list);
 /**
  * GET /api/subscriptions/types
  * Returns subscription type metadata for frontend consumption
- * SOC-003: Single source of truth for subscription type configuration
+ * Single source of truth for subscription type configuration
  */
 subscriptionsRouter.get('/types', (_req, res) => {
   res.json(SUBSCRIPTION_TYPES);
@@ -170,231 +173,203 @@ subscriptionsRouter.get('/:id/results', async (req, res) => {
   }
 });
 
-// Approve a pending result (add to Lidarr)
+const mbidSchema = z.string().uuid().transform(value => value.toLowerCase());
+const approvalBody = addOptionsSchema.extend({ mbid: mbidSchema.optional() }).strict();
+
+// Acquisitions and competing decisions share the feed's status/revision lease.
 subscriptionsRouter.post('/:id/results/:resultId/approve', async (req, res) => {
+  const signal = AbortSignal.timeout(60_000);
+  let hasClaim = false;
   try {
     const id = parseIntParam(req.params.id);
-    if (id === null) {
-      res.status(400).json({ error: 'Invalid subscription ID' });
-      return;
-    }
     const resultId = parseIntParam(req.params.resultId);
-    if (resultId === null) {
-      res.status(400).json({ error: 'Invalid result ID' });
+    const body = approvalBody.safeParse(req.body ?? {});
+    if (id === null || resultId === null || !body.success) {
+      res.status(400).json({ error: 'Invalid approval request', code: 'INVALID_REQUEST' });
       return;
     }
-
-    const subscription = await prisma.subscription.findUnique({
-      where: { id },
-    });
-
-    if (!subscription || !canAccessSubscription(req, subscription)) {
-      res.status(404).json({ error: 'Subscription not found' });
-      return;
+    const ownerId = req.user!.id;
+    signal.throwIfAborted();
+    const subscription = await readBeforeDeadline(prisma.subscription.findUnique({ where: { id } }), signal);
+    signal.throwIfAborted();
+    if (!subscription || subscription.userId !== ownerId) {
+      throw new DecisionError(404, 'NOT_FOUND', 'Subscription not found');
     }
-
-    const result = await prisma.subscriptionResult.findFirst({
-      where: { id: resultId, subscriptionId: id },
-    });
-
-    if (!result) {
-      res.status(404).json({ error: 'Result not found' });
-      return;
+    const result = await readBeforeDeadline(prisma.subscriptionResult.findFirst({ where: { id: resultId, subscriptionId: id } }), signal);
+    signal.throwIfAborted();
+    if (!result) throw new DecisionError(404, 'NOT_FOUND', 'Result not found');
+    const staleClaim = result.status === 'adding' &&
+      result.processedAt !== null && result.processedAt.getTime() < Date.now() - 120_000;
+    if (result.status === 'adding' && !staleClaim) {
+      throw new DecisionError(409, 'IN_PROGRESS', 'Acquisition is in progress');
     }
-
-    if (result.status !== 'pending' && result.status !== 'queued') {
-      res.status(400).json({ error: 'Result already processed' });
-      return;
+    if (!['pending', 'queued', 'failed'].includes(result.status) && !staleClaim) {
+      throw new DecisionError(409, 'DECISION_CONFLICT', 'Result already processed');
     }
-
-    // Get Lidarr connection
-    const lidarrConn = await prisma.connection.findFirst({
-      where: {
-        OR: [
-          { userId: req.user!.id, type: 'lidarr', isActive: true },
-          { userId: null, type: 'lidarr', isActive: true },
-        ],
-      },
+    if (!['artist', 'album'].includes(result.itemType) || (result.itemType === 'album' && !mbidSchema.safeParse(result.albumMbid).success)) {
+      throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a valid album identity before adding');
+    }
+    const identity = mbidSchema.safeParse(result.mbid || body.data.mbid);
+    if (!identity.success) {
+      throw new DecisionError(422, 'IDENTITY_REQUIRED', 'Choose a valid artist identity before adding');
+    }
+    const mbid = identity.data;
+    if (result.mbid && body.data.mbid && mbid !== body.data.mbid) {
+      throw new DecisionError(409, 'IDENTITY_CONFLICT', 'Result already has an artist identity');
+    }
+    const lidarrConn = await readBeforeDeadline(prisma.connection.findFirst({
+      where: { OR: [
+        { userId: ownerId, type: 'lidarr', isActive: true },
+        { userId: null, type: 'lidarr', isActive: true },
+      ] },
       orderBy: { userId: 'desc' },
-    });
-
-    if (!lidarrConn) {
-      res.status(400).json({ error: 'No active Lidarr connection' });
-      return;
-    }
-
-    const rawConfig = lidarrConn.config as unknown as LidarrConnectionConfig;
-    // Normalize config to ensure profile IDs are numbers (handles string values from DB)
-    const lidarrConfig = normalizeLidarrConfig(rawConfig);
-    const lidarr = new LidarrService(lidarrConfig);
-
-    // Get or find MBID
-    let mbid = result.mbid;
-    if (!mbid) {
-      // For albums, search by artistName; for artists, search by name
-      const searchName = result.itemType === 'album' && result.artistName 
-        ? result.artistName 
-        : result.name;
-      logger.debug(`No MBID stored, searching MusicBrainz for: "${searchName}"`);
-      const musicbrainz = new MusicBrainzService();
-      mbid = await musicbrainz.getMbidFromSpotifyArtist(searchName) || null;
-    }
-
-    if (!mbid) {
-      await prisma.subscriptionResult.update({
-        where: { id: resultId },
-        data: { status: 'skipped', skipReason: 'no_mbid_found', processedAt: new Date() },
+    }), signal);
+    signal.throwIfAborted();
+    if (!lidarrConn) throw new DecisionError(409, 'CONNECTION_REQUIRED', 'No active Lidarr connection');
+    const config = normalizeLidarrConfig(lidarrConn.config as unknown as LidarrConnectionConfig);
+    const lidarr = new LidarrService(config);
+    const isAlbum = result.itemType === 'album' && !!result.albumMbid;
+    const membership = async (): Promise<boolean> => {
+      signal.throwIfAborted();
+      const artist = await lidarr.getArtistByMbid(mbid, signal);
+      if (!artist) return false;
+      if (!isAlbum) return true;
+      const albums = await lidarr.getAlbums(artist.id, signal);
+      return albums.some(album => album.foreignAlbumId === result.albumMbid && album.monitored === true);
+    };
+    // A stale lease does not prove that its external side effect never happened.
+    let alreadyInLibrary = staleClaim ? await membership() : false;
+    signal.throwIfAborted();
+    const claimRevision = await prisma.$transaction(async tx => {
+      signal.throwIfAborted();
+      let expectedRevision = result.processedAt;
+      if (!result.mbid) {
+        const identityRevision = nextRevision([expectedRevision]);
+        const identityWrite = await tx.subscriptionResult.updateMany({
+          where: { id: resultId, subscriptionId: id, subscription: { userId: ownerId },
+            status: result.status, processedAt: expectedRevision, mbid: null },
+          data: { mbid, processedAt: identityRevision },
+        });
+        if (identityWrite.count !== 1) throw new DecisionError(409, 'DECISION_CONFLICT', 'Result changed');
+        expectedRevision = identityRevision;
+      }
+      const revision = nextRevision([expectedRevision]);
+      const claimed = await tx.subscriptionResult.updateMany({
+        where: { id: resultId, subscriptionId: id, subscription: { userId: ownerId },
+          status: result.status, processedAt: expectedRevision, mbid: result.mbid || mbid },
+        data: { mbid, status: 'adding', processedAt: revision, skipReason: null, errorMessage: null },
       });
-      res.status(400).json({ error: 'Could not find MusicBrainz ID for artist' });
-      return;
-    }
-
-    // Add to Lidarr
+      if (claimed.count !== 1) throw new DecisionError(409, 'IN_PROGRESS', 'Result changed or is being acquired');
+      signal.throwIfAborted();
+      return revision;
+    }, { timeout: 5_000 });
+    hasClaim = true;
+    let outcome: 'added' | 'already-in-library' | 'failed' | 'uncertain';
     try {
-      // Use connection config for profiles/folders, fall back to fetching first available
-      let qpId = lidarrConfig.qualityProfileId;
-      let mpId = lidarrConfig.metadataProfileId;
-      let rfPath = lidarrConfig.rootFolderPath;
-
-      if (!qpId || !mpId || !rfPath) {
-        const [qualityProfiles, metadataProfiles, rootFolders] = await Promise.all([
-          !qpId ? lidarr.getQualityProfiles() : Promise.resolve([]),
-          !mpId ? lidarr.getMetadataProfiles() : Promise.resolve([]),
-          !rfPath ? lidarr.getRootFolders() : Promise.resolve([]),
-        ]);
-        if (!qpId) qpId = qualityProfiles[0]?.id;
-        if (!mpId) mpId = metadataProfiles[0]?.id;
-        if (!rfPath) rfPath = rootFolders[0]?.path;
+      if (!alreadyInLibrary) alreadyInLibrary = await membership();
+      if (!alreadyInLibrary) {
+        const options = await effectiveAddOptions(lidarr, config, body.data, signal);
+        if (isAlbum) {
+          await lidarr.addAlbumWithCacheWarm(mbid, result.albumMbid!, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, signal, options.searchOnAdd);
+        } else {
+          const acquisition = await lidarr.addArtistWithCacheWarm(mbid, options.qualityProfileId, options.metadataProfileId, options.rootFolderPath, true, options.searchOnAdd, false,
+            options.monitorOption, options.monitorNewItems, signal);
+          alreadyInLibrary = acquisition.alreadyInLibrary === true;
+        }
       }
-
-      if (!qpId || !mpId || !rfPath) {
-        throw new Error('Missing Lidarr configuration (profiles/folders). Please configure profiles in Lidarr connection settings.');
+      outcome = alreadyInLibrary ? 'already-in-library' : 'added';
+    } catch (error) {
+      // Even a duplicate error must be confirmed against canonical provider identity.
+      let confirmed = false;
+      if (!signal.aborted) {
+        try { confirmed = await membership(); } catch { /* Reconciliation can itself be unreachable. */ }
       }
-
-      // Check if this is an album item - use addAlbumWithCacheWarm for targeted download
-      const isAlbumItem = result.itemType === 'album' && result.albumMbid;
-      
-      if (isAlbumItem) {
-        // Album approval - warm cache, add artist with monitor:none, then monitor only this album
-        await lidarr.addAlbumWithCacheWarm(
-          mbid,
-          result.albumMbid!,
-          qpId,
-          mpId,
-          rfPath
-        );
-
-        // Log success
-        await prisma.logEntry.create({
-          data: {
-            level: 'info',
-            category: 'subscription',
-            message: `Added album "${result.name}" to Lidarr from subscription "${subscription.name}"`,
-            metadata: { artistName: result.artistName, albumName: result.name, mbid, albumMbid: result.albumMbid, subscriptionId: id },
-          },
-        });
-      } else {
-        // Artist approval - warm SkyHook cache for reliable metadata lookup
-        // Use monitorOption from connection config (defaults to 'all' if not set)
-        await lidarr.addArtistWithCacheWarm(
-          mbid,
-          qpId,
-          mpId,
-          rfPath,
-          true,  // monitored
-          true,  // searchForMissingAlbums
-          false, // waitForRefresh (deprecated)
-          lidarrConfig.monitorOption || 'all',
-          lidarrConfig.monitorNewItems || 'all'
-        );
-
-        // Log success
-        await prisma.logEntry.create({
-          data: {
-            level: 'info',
-            category: 'subscription',
-            message: `Added artist "${result.name}" to Lidarr from subscription "${subscription.name}"`,
-            metadata: { artistName: result.name, mbid, subscriptionId: id },
-          },
-        });
-      }
-
-      await prisma.subscriptionResult.update({
-        where: { id: resultId },
-        data: { status: 'added', processedAt: new Date() },
-      });
-
-      // Invalidate shared Lidarr cache so inLibrary reflects the new addition immediately
-      invalidateLidarrCache((lidarrConfig as { url: string }).url);
-
-      // Send notification
-      await notificationService.send(req.user!.id, 'artist.added', {
-        artistName: result.name,
-      });
-
-      res.json({ success: true, message: `Added "${result.name}" to Lidarr` });
-    } catch (lidarrError) {
-      const errorMessage = lidarrError instanceof Error ? lidarrError.message : 'Unknown error';
-      
-      // Check if artist already exists
-      if (errorMessage.includes('already been added') || errorMessage.includes('already exists')) {
-        await prisma.subscriptionResult.update({
-          where: { id: resultId },
-          data: { status: 'skipped', skipReason: 'already_in_lidarr', processedAt: new Date() },
-        });
-        res.json({ success: true, message: `"${result.name}" already in Lidarr` });
-        return;
-      }
-
-      await prisma.subscriptionResult.update({
-        where: { id: resultId },
-        data: { status: 'failed', errorMessage, processedAt: new Date() },
-      });
-      res.status(500).json({ error: `Failed to add to Lidarr: ${errorMessage}` });
+      const status = typeof error === 'object' && error !== null && 'status' in error ? error.status : undefined;
+      outcome = confirmed ? 'already-in-library' :
+        typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429
+          ? 'failed' : 'uncertain';
     }
+    const confirmed = outcome === 'added' || outcome === 'already-in-library';
+    const finalized = await prisma.$transaction(async tx => {
+      const changed = await tx.subscriptionResult.updateMany({
+        where: { id: resultId, subscriptionId: id, subscription: { userId: ownerId },
+          status: 'adding', processedAt: claimRevision },
+        data: { status: confirmed ? 'added' : 'failed', processedAt: nextRevision([claimRevision]),
+          skipReason: null, errorMessage: confirmed ? null : outcome === 'uncertain'
+            ? 'ACQUISITION_UNCERTAIN: Provider outcome could not be confirmed'
+            : 'PROVIDER_REJECTED: Lidarr rejected the acquisition' },
+      });
+      return changed.count === 1;
+    }, { timeout: 5_000 });
+    if (confirmed) invalidateLidarrCache(config.url);
+    if (!finalized) {
+      let reconciled = confirmed;
+      if (!signal.aborted) {
+        try { reconciled = await membership(); } catch { /* Preserve the newer decision on uncertainty. */ }
+      }
+      if (reconciled && !confirmed) invalidateLidarrCache(config.url);
+      res.status(409).json({ error: 'Result changed during acquisition', code: 'DECISION_CONFLICT',
+        outcome: reconciled ? 'already-in-library' : 'uncertain' });
+      return;
+    }
+    if (!confirmed) {
+      res.status(outcome === 'uncertain' ? 503 : 502).json({ success: false, outcome,
+        code: outcome === 'uncertain' ? 'ACQUISITION_UNCERTAIN' : 'PROVIDER_REJECTED',
+        error: outcome === 'uncertain' ? 'Provider outcome could not be confirmed; retry to reconcile' : 'Lidarr rejected the acquisition' });
+      return;
+    }
+    // Respond after confirmation; channel delivery must not extend the acquisition response deadline.
+    res.json({ success: true, outcome, message: outcome === 'already-in-library' ? `"${result.name}" is already in Lidarr` : `Added "${result.name}" to Lidarr` });
+    try {
+      await prisma.logEntry.create({ data: { level: 'info', category: 'subscription',
+        message: outcome === 'already-in-library' ? `"${result.name}" is already in Lidarr from subscription "${subscription.name}"` : `Added "${result.name}" to Lidarr from subscription "${subscription.name}"`,
+        metadata: { mbid, albumMbid: result.albumMbid, subscriptionId: id, outcome } } });
+      if (outcome === 'added') await notificationService.send(ownerId, 'artist.added', { artistName: result.name });
+    } catch { logger.warn('Confirmed subscription acquisition notification or log failed', { resultId }); }
   } catch (error) {
-    logger.error('Approve error', { error });
-    res.status(500).json({ error: 'Failed to approve result' });
+    if (error instanceof DecisionError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+    } else {
+      logger.error('Subscription approval failed', { subscriptionId: req.params.id, resultId: req.params.resultId });
+      res.status(signal.aborted || hasClaim ? 503 : 500).json({ error: 'Failed to approve result',
+        code: signal.aborted || hasClaim ? 'ACQUISITION_UNCERTAIN' : 'ACQUISITION_FAILED',
+        ...(signal.aborted || hasClaim ? { outcome: 'uncertain' } : {}) });
+    }
   }
 });
 
-// Reject a pending result
 subscriptionsRouter.post('/:id/results/:resultId/reject', async (req, res) => {
   try {
     const id = parseIntParam(req.params.id);
-    if (id === null) {
-      res.status(400).json({ error: 'Invalid subscription ID' });
-      return;
-    }
     const resultId = parseIntParam(req.params.resultId);
-    if (resultId === null) {
-      res.status(400).json({ error: 'Invalid result ID' });
+    if (id === null || resultId === null) {
+      res.status(400).json({ error: 'Invalid result or subscription ID' });
       return;
     }
-
-    const subscription = await prisma.subscription.findUnique({
-      where: { id },
-    });
-
-    if (!subscription || !canAccessSubscription(req, subscription)) {
-      res.status(404).json({ error: 'Subscription not found' });
-      return;
-    }
-
-    await prisma.subscriptionResult.update({
-      where: { id: resultId },
-      data: { status: 'rejected', processedAt: new Date() },
-    });
-
+    await prisma.$transaction(async tx => {
+      const result = await tx.subscriptionResult.findFirst({
+        where: { id: resultId, subscriptionId: id, subscription: { userId: req.user!.id } },
+      });
+      if (!result) throw new DecisionError(404, 'NOT_FOUND', 'Result not found');
+      if (result.status === 'adding') throw new DecisionError(409, 'IN_PROGRESS', 'Acquisition is in progress');
+      if (!['pending', 'queued', 'failed'].includes(result.status)) {
+        throw new DecisionError(409, 'DECISION_CONFLICT', 'Result already processed');
+      }
+      const changed = await tx.subscriptionResult.updateMany({
+        where: { id: resultId, subscriptionId: id, subscription: { userId: req.user!.id },
+          status: result.status, processedAt: result.processedAt },
+        data: { status: 'rejected', processedAt: nextRevision([result.processedAt]) },
+      });
+      if (changed.count !== 1) throw new DecisionError(409, 'DECISION_CONFLICT', 'Result changed');
+    }, { timeout: 5_000 });
     res.json({ success: true });
   } catch (error) {
-    logger.error('Failed to reject subscription result', {
-      error: error instanceof Error ? error.message : String(error),
-      subscriptionId: req.params.id,
-      resultId: req.params.resultId,
-      userId: req.user?.id,
-    });
-    res.status(500).json({ error: 'Failed to reject result' });
+    if (error instanceof DecisionError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+    } else {
+      logger.error('Failed to reject subscription result', { resultId: req.params.resultId, userId: req.user?.id });
+      res.status(500).json({ error: 'Failed to reject result' });
+    }
   }
 });
 

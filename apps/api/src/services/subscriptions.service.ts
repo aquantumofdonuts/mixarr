@@ -1,8 +1,5 @@
 /**
- * Subscription Service
- * 
- * Business logic for subscription CRUD operations.
- * Extracted from routes/subscriptions.ts for better separation of concerns.
+ * Subscription CRUD operations and ownership checks.
  */
 
 import prisma from '../lib/db.js';

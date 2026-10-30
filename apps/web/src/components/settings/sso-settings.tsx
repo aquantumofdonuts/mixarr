@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import { api } from '@/lib/api';
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import Eye from 'lucide-react/dist/esm/icons/eye';
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off';
@@ -20,11 +20,11 @@ import Zap from 'lucide-react/dist/esm/icons/zap';
 type SSOProviderType = 'ldap' | 'saml' | 'google' | 'plex' | 'oidc';
 
 interface SSOProvider {
-  id: string;
+  id: number;
   type: SSOProviderType;
   name: string;
   isEnabled: boolean;
-  config: Record<string, string>;
+  config: Record<string, unknown>;
 }
 
 interface ProviderConfig {
@@ -106,10 +106,20 @@ const providerConfigs: ProviderConfig[] = [
   },
 ];
 
+function isProvider(value: unknown): value is SSOProvider {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const provider = value as Record<string, unknown>;
+  const definition = providerConfigs.find(item => item.type === provider.type);
+  if (!definition || typeof provider.id !== 'number' || !Number.isSafeInteger(provider.id) || provider.id < 1 || typeof provider.name !== 'string' || typeof provider.isEnabled !== 'boolean' || !provider.config || typeof provider.config !== 'object' || Array.isArray(provider.config)) return false;
+  const config = provider.config as Record<string, unknown>;
+  return definition.fields.every(field => config[field.key] == null || typeof config[field.key] === 'string'
+    || (definition.type === 'google' && field.key === 'allowedDomains' && Array.isArray(config[field.key]) && (config[field.key] as unknown[]).every(domain => typeof domain === 'string')));
+}
+
 export function SSOSettings() {
   const [providers, setProviders] = useState<SSOProvider[]>([]);
   const [expandedProvider, setExpandedProvider] = useState<SSOProviderType | null>(null);
-  const [formData, setFormData] = useState<Record<SSOProviderType, Record<string, string>>>({
+  const [formData, setFormData] = useState<Record<SSOProviderType, Record<string, unknown>>>({
     ldap: {},
     saml: {},
     google: {},
@@ -118,101 +128,75 @@ export function SSOSettings() {
   });
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [savingProvider, setSavingProvider] = useState<SSOProviderType | null>(null);
+  const [savingProviders, setSavingProviders] = useState<Partial<Record<SSOProviderType, boolean>>>({});
   const [testingProvider, setTestingProvider] = useState<SSOProviderType | null>(null);
   const [baseUrl, setBaseUrl] = useState<string>('');
   const { addToast } = useToast();
 
-  const fetchProviders = async () => {
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [baseline, setBaseline] = useState(formData);
+  const [enabled, setEnabled] = useState<Partial<Record<SSOProviderType, boolean>>>({});
+  const [enabledBaseline, setEnabledBaseline] = useState(enabled);
+  const [errors, setErrors] = useState<Partial<Record<SSOProviderType, string>>>({});
+  const active = useRef(false);
+  const dirtyProvider = (type: SSOProviderType) => JSON.stringify(formData[type]) !== JSON.stringify(baseline[type]) || !!enabled[type] !== !!enabledBaseline[type];
+  useUnsavedChanges(providerConfigs.some(config => dirtyProvider(config.type)));
+  const readGeneration = useRef(0);
+  const fetchProviders = useCallback(async () => {
+    const generation = ++readGeneration.current;
     setIsLoading(true);
-    try {
-      const [providersRes, baseUrlRes] = await Promise.all([
-        api.get<{ providers: SSOProvider[] }>('/api/sso/providers'),
-        api.get<{ baseUrl: string }>('/api/settings/base-url'),
-      ]);
-
-      if (providersRes.error) {
-        addToast({ type: 'error', title: 'Failed to load SSO providers', message: providersRes.error });
-      } else if (providersRes.data) {
-        setProviders(providersRes.data.providers);
-        // Initialize form data from fetched providers
-        const newFormData = { ...formData };
-        providersRes.data.providers.forEach((provider) => {
-          newFormData[provider.type] = { ...provider.config };
-        });
-        setFormData(newFormData);
-      }
-
-      if (baseUrlRes.data?.baseUrl) {
-        setBaseUrl(baseUrlRes.data.baseUrl);
-      }
-    } catch {
-      addToast({ type: 'error', title: 'Failed to load SSO providers' });
+    const [result, baseUrlResult] = await Promise.all([api.get<{ providers: SSOProvider[] }>('/api/sso/providers'), api.get<{ baseUrl: string }>('/api/settings/base-url')]);
+    if (!active.current || generation !== readGeneration.current) return;
+    const list = result.data?.providers;
+    if (result.error || !Array.isArray(list) || !list.every(isProvider) || new Set(list.map(provider => provider.type)).size !== list.length) {
+      setLoadError(result.error || 'Failed to load SSO providers: invalid response.'); setIsLoading(false); return;
     }
+    const initial = { ldap: {}, saml: {}, google: {}, plex: {}, oidc: {} } as Record<SSOProviderType, Record<string, unknown>>;
+    const initialEnabled: Partial<Record<SSOProviderType, boolean>> = {};
+    list.forEach(provider => { initial[provider.type] = { ...provider.config }; initialEnabled[provider.type] = provider.isEnabled; });
+    setLoaded(true); setProviders(list); setFormData(initial); setBaseline(initial); setEnabled(initialEnabled); setEnabledBaseline(initialEnabled); setLoadError(null);
+    if (typeof baseUrlResult.data?.baseUrl === 'string') setBaseUrl(baseUrlResult.data.baseUrl);
     setIsLoading(false);
-  };
-
-  useEffect(() => {
-    fetchProviders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    active.current = true;
+    void fetchProviders();
+    return () => { active.current = false; readGeneration.current++; };
+  }, [fetchProviders]);
 
   const getProvider = (type: SSOProviderType): SSOProvider | undefined => {
     return providers.find((p) => p.type === type);
   };
 
-  const handleToggle = async (type: SSOProviderType) => {
-    const provider = getProvider(type);
-    const newEnabled = !provider?.isEnabled;
-
-    try {
-      const { error } = await api.patch(`/api/sso/providers/${type}/toggle`, { isEnabled: newEnabled });
-      if (error) {
-        addToast({ type: 'error', title: `Failed to ${newEnabled ? 'enable' : 'disable'} ${type.toUpperCase()}`, message: error });
-      } else {
-        addToast({ type: 'success', title: `${type.toUpperCase()} ${newEnabled ? 'enabled' : 'disabled'}` });
-        fetchProviders();
-      }
-    } catch {
-      addToast({ type: 'error', title: `Failed to toggle ${type.toUpperCase()}` });
-    }
-  };
+  const handleToggle = (type: SSOProviderType) => setEnabled(current => ({ ...current, [type]: !current[type] }));
 
   const handleSave = async (type: SSOProviderType) => {
-    const config = providerConfigs.find((c) => c.type === type);
+    if (savingProviders[type] || !loaded) return;
+    const config = providerConfigs.find(item => item.type === type);
     if (!config) return;
-
-    // Validate required fields
-    const missingFields = config.fields
-      .filter((f) => f.required && !formData[type][f.key])
-      .map((f) => f.label);
-
-    if (missingFields.length > 0) {
-      addToast({
-        type: 'error',
-        title: 'Missing required fields',
-        message: missingFields.join(', '),
-      });
-      return;
+    const missing = config.fields.find(field => field.required && !formData[type][field.key]);
+    if (missing) {
+      setErrors(current => ({ ...current, [type]: `${missing.label} is required.` }));
+      document.getElementById(`sso-${type}-${missing.key}`)?.focus(); return;
     }
-
-    setSavingProvider(type);
-    try {
-      const { error } = await api.put(`/api/sso/providers/${type}`, {
-        name: config.name,
-        config: formData[type],
-      });
-
-      if (error) {
-        addToast({ type: 'error', title: `Failed to save ${config.name} settings`, message: error });
-      } else {
-        addToast({ type: 'success', title: `${config.name} settings saved` });
-        fetchProviders();
-      }
-    } catch {
-      addToast({ type: 'error', title: `Failed to save ${config.name} settings` });
+    const submitted = { ...formData[type] };
+    const submittedEnabled = !!enabled[type];
+    const persistedConfig = { ...submitted };
+    if (type === 'google' && typeof submitted.allowedDomains === 'string' && submitted.allowedDomains !== getProvider(type)?.config.allowedDomains) {
+      persistedConfig.allowedDomains = submitted.allowedDomains.split(',').map(domain => domain.trim()).filter(Boolean);
     }
-    setSavingProvider(null);
+    setSavingProviders(current => ({ ...current, [type]: true })); setErrors(current => ({ ...current, [type]: '' }));
+    const { data, error } = await api.put<{ provider?: SSOProvider }>(`/api/sso/providers/${type}`, { name: config.name, config: persistedConfig, isEnabled: submittedEnabled });
+    if (!active.current) return;
+    if (error || !isProvider(data?.provider) || data.provider.type !== type) setErrors(current => ({ ...current, [type]: error || `Invalid save response; retry or reload to confirm ${config.name} settings.` }));
+    else {
+      setBaseline(current => ({ ...current, [type]: submitted }));
+      setEnabledBaseline(current => ({ ...current, [type]: submittedEnabled }));
+      setProviders(current => [...current.filter(provider => provider.type !== type), data.provider!]);
+      addToast({ type: 'success', title: `${config.name} settings saved` });
+    }
+    setSavingProviders(current => ({ ...current, [type]: false }));
   };
 
   const handleTest = async (type: SSOProviderType) => {
@@ -223,6 +207,7 @@ export function SSOSettings() {
     try {
       const { data, error } = await api.post<{ success: boolean; message?: string }>(`/api/sso/providers/${type}/test`);
 
+      if (!active.current) return;
       if (error) {
         addToast({ type: 'error', title: `${config.name} connection test failed`, message: error });
       } else if (data?.success) {
@@ -231,6 +216,7 @@ export function SSOSettings() {
         addToast({ type: 'error', title: `${config.name} connection test failed`, message: data?.message || 'Unknown error' });
       }
     } catch {
+      if (!active.current) return;
       addToast({ type: 'error', title: `Failed to test ${config.name} connection` });
     }
     setTestingProvider(null);
@@ -291,38 +277,40 @@ export function SSOSettings() {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {loadError && <div className="space-y-2"><p role="alert" className="text-sm text-destructive">{loadError}</p><Button variant="outline" onClick={() => void fetchProviders()}>Retry loading SSO providers</Button></div>}
+        <fieldset disabled={!loaded} className="space-y-4">
         {providerConfigs.map((config) => {
           const provider = getProvider(config.type);
           const isExpanded = expandedProvider === config.type;
-          const isEnabled = provider?.isEnabled ?? false;
+          const isEnabled = !!enabled[config.type];
           const isSaved = !!provider;
           const mainFields = config.fields.filter((f) => !f.advanced);
           const advancedFields = config.fields.filter((f) => f.advanced);
 
           const renderField = (field: FieldConfig) => (
             <div key={field.key} className="space-y-2">
-              <label className="text-sm font-medium">
+              <label htmlFor={`sso-${config.type}-${field.key}`} className="text-sm font-medium">
                 {field.label}
-                {field.required && <span className="text-destructive ml-1">*</span>}
+                {field.required && <span aria-hidden="true" className="text-destructive ml-1">*</span>}
               </label>
               {field.type === 'textarea' ? (
-                <textarea
-                  value={formData[config.type][field.key] || ''}
+                <textarea id={`sso-${config.type}-${field.key}`} aria-required={field.required}
+                  value={String(formData[config.type][field.key] ?? '')}
                   onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
                   placeholder={field.placeholder}
                   className="w-full min-h-[100px] px-3 py-2 text-sm rounded-md border border-input bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 />
               ) : field.type === 'password' ? (
                 <div className="relative">
-                  <Input
+                  <Input id={`sso-${config.type}-${field.key}`} aria-required={field.required}
                     type={showPasswords[`${config.type}-${field.key}`] ? 'text' : 'password'}
-                    value={formData[config.type][field.key] || ''}
+                    value={String(formData[config.type][field.key] ?? '')}
                     onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
                     placeholder={field.placeholder || '••••••••'}
                     className="pr-10"
                   />
                   <button
-                    type="button"
+                    type="button" aria-label={`Toggle ${field.label} visibility`}
                     onClick={() => togglePasswordVisibility(`${config.type}-${field.key}`)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
@@ -334,9 +322,9 @@ export function SSOSettings() {
                   </button>
                 </div>
               ) : (
-                <Input
+                <Input id={`sso-${config.type}-${field.key}`} aria-required={field.required}
                   type="text"
-                  value={formData[config.type][field.key] || ''}
+                  value={String(formData[config.type][field.key] ?? '')}
                   onChange={(e) => handleFieldChange(config.type, field.key, e.target.value)}
                   placeholder={field.placeholder}
                 />
@@ -348,26 +336,23 @@ export function SSOSettings() {
           );
 
           return (
-            <div key={config.type} className="rounded-container border">
+            <section key={config.type} aria-label={`${config.name} settings`} className="rounded-container border">
               {/* Accordion Header */}
               <div
                 className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors"
                 onClick={() => toggleExpanded(config.type)}
               >
                 <div className="flex items-center gap-3">
-                  <button className="p-0.5">
-                    {isExpanded ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    )}
+                  <button type="button" aria-label={`Configure ${config.name}`} aria-expanded={isExpanded} className="flex h-11 w-11 items-center justify-center">
+                    <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform duration-[140ms] ${isExpanded ? 'rotate-90' : ''}`} />
                   </button>
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold">{config.name}</h3>
-                      <Badge variant={isEnabled ? 'success' : 'secondary'}>
-                        {isEnabled ? 'Enabled' : 'Disabled'}
+                      <Badge variant={provider?.isEnabled ? 'success' : 'secondary'}>
+                        {provider?.isEnabled ? 'Enabled' : 'Disabled'}
                       </Badge>
+                      {dirtyProvider(config.type) && <span className="font-mono text-xs text-muted-foreground">Unsaved</span>}
                     </div>
                     <p className="text-sm text-muted-foreground">{config.description}</p>
                   </div>
@@ -379,19 +364,7 @@ export function SSOSettings() {
                 >
                   <Switch
                     checked={isEnabled}
-                    onChange={() => {
-                      if (isSaved) {
-                        handleToggle(config.type);
-                      } else {
-                        addToast({
-                          type: 'warning',
-                          title: 'Configuration required',
-                          message: `Please configure and save ${config.name} settings first`,
-                        });
-                        setExpandedProvider(config.type);
-                      }
-                    }}
-                    disabled={!isSaved}
+                    onChange={() => handleToggle(config.type)}
                     label={`Enable ${config.name}`}
                   />
                 </div>
@@ -400,6 +373,7 @@ export function SSOSettings() {
               {/* Accordion Content */}
               {isExpanded && (
                 <div className="border-t p-4 space-y-4">
+                  <p role={errors[config.type] ? "alert" : "status"} className="text-sm text-muted-foreground">{errors[config.type] || (savingProviders[config.type] ? "Saving provider settings…" : dirtyProvider(config.type) ? "Unsaved provider settings changes" : !loaded ? "Provider settings unavailable" : isSaved ? "Provider settings saved" : "No saved provider configuration")}</p>
                   {mainFields.map(renderField)}
 
                   {advancedFields.length > 0 && (
@@ -416,20 +390,20 @@ export function SSOSettings() {
 
                   {/* Google OAuth Callback URL Info */}
                   {config.type === 'google' && (
-                    <div className="rounded-container bg-amber-50 dark:bg-amber-950/50 p-3 text-sm">
-                      <p className="font-medium text-amber-900 dark:text-amber-100">OAuth Redirect URI</p>
-                      <p className="mt-1 text-amber-800 dark:text-amber-200">
+                    <div className="rounded-button border bg-muted p-3 text-sm">
+                      <p className="font-medium">OAuth Redirect URI</p>
+                      <p className="mt-1 text-muted-foreground">
                         Add this redirect URI in your{' '}
                         <a
                           href="https://console.cloud.google.com/apis/credentials"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="underline hover:no-underline"
+                          className="text-link underline hover:no-underline"
                         >
                           Google Cloud Console
                         </a>:
                       </p>
-                      <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
+                      <code className="mt-2 block rounded-button bg-background px-2 py-1 font-mono text-xs break-all">
                         {baseUrl ? `${baseUrl}/api/auth/sso/google/callback` : 'Configure Base URL in Global Settings first'}
                       </code>
                     </div>
@@ -437,12 +411,12 @@ export function SSOSettings() {
 
                   {/* SAML Callback URL Info */}
                   {config.type === 'saml' && (
-                    <div className="rounded-container bg-amber-50 dark:bg-amber-950/50 p-3 text-sm">
-                      <p className="font-medium text-amber-900 dark:text-amber-100">SAML Assertion Consumer Service URL</p>
-                      <p className="mt-1 text-amber-800 dark:text-amber-200">
+                    <div className="rounded-button border bg-muted p-3 text-sm">
+                      <p className="font-medium">SAML Assertion Consumer Service URL</p>
+                      <p className="mt-1 text-muted-foreground">
                         Configure this ACS URL in your Identity Provider:
                       </p>
-                      <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
+                      <code className="mt-2 block rounded-button bg-background px-2 py-1 font-mono text-xs break-all">
                         {baseUrl ? `${baseUrl}/api/auth/sso/saml/callback` : 'Configure Base URL in Global Settings first'}
                       </code>
                     </div>
@@ -450,12 +424,12 @@ export function SSOSettings() {
 
                   {/* OIDC Callback URL Info */}
                   {config.type === 'oidc' && (
-                    <div className="rounded-container bg-amber-50 dark:bg-amber-950/50 p-3 text-sm">
-                      <p className="font-medium text-amber-900 dark:text-amber-100">OIDC Redirect URI</p>
-                      <p className="mt-1 text-amber-800 dark:text-amber-200">
+                    <div className="rounded-button border bg-muted p-3 text-sm">
+                      <p className="font-medium">OIDC Redirect URI</p>
+                      <p className="mt-1 text-muted-foreground">
                         Register this redirect URI with your OpenID Connect provider:
                       </p>
-                      <code className="mt-2 block rounded bg-amber-100 dark:bg-amber-900/50 px-2 py-1 font-mono text-xs text-amber-900 dark:text-amber-100 break-all">
+                      <code className="mt-2 block rounded-button bg-background px-2 py-1 font-mono text-xs break-all">
                         {baseUrl ? `${baseUrl}/api/auth/sso/oidc/callback` : 'Configure Base URL in Global Settings first'}
                       </code>
                     </div>
@@ -465,15 +439,15 @@ export function SSOSettings() {
                   <div className="flex gap-2 pt-2">
                     <Button
                       onClick={() => handleSave(config.type)}
-                      disabled={savingProvider === config.type}
+                      disabled={savingProviders[config.type] || !dirtyProvider(config.type)}
                       size="sm"
                     >
-                      {savingProvider === config.type ? (
+                      {savingProviders[config.type] ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       ) : (
                         <Save className="h-4 w-4 mr-2" />
                       )}
-                      {savingProvider === config.type ? 'Saving...' : 'Save'}
+                      {savingProviders[config.type] ? 'Saving...' : `Save ${config.name} settings`}
                     </Button>
                     <Button
                       variant="outline"
@@ -491,7 +465,7 @@ export function SSOSettings() {
                   </div>
                 </div>
               )}
-            </div>
+            </section>
           );
         })}
 
@@ -502,6 +476,7 @@ export function SSOSettings() {
             SSO allows users to authenticate using external identity providers. Enable a provider and configure its settings to allow users to sign in with their existing credentials.
           </p>
         </div>
+        </fieldset>
       </CardContent>
     </Card>
   );

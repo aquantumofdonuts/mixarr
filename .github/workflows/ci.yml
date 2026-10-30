@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,13 +42,16 @@ jobs:
             BASE_SHA="${{ github.event.before }}"
           fi
 
-          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}" | grep -E '^apps/api/src/.*\.ts$' || true)
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "${{ github.sha }}" -- ':(glob)apps/api/src/**/*.ts')
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No API TypeScript source files changed"
             exit 0
           fi
 
           echo "$CHANGED_FILES" | xargs npx eslint
+
+      - name: Verify release publication guard
+        run: node --test scripts/verify-release.test.cjs
 
       - name: Typecheck
         run: npm run typecheck
@@ -103,8 +108,8 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Push schema to test DB
-        run: npx prisma db push --schema apps/api/prisma/schema.prisma --skip-generate --accept-data-loss
+      - name: Deploy migrations to test DB
+        run: npm run db:deploy --workspace=@mixarr/api
 
       - name: Run tests
         run: npm test
@@ -156,5 +161,64 @@ jobs:
           tags: ghcr.io/${{ github.repository_owner }}/mixarr-${{ matrix.app }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+  release-schema:
+    name: Release migration safety
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: mixarr_upgrade_test
+        ports:
+          - 13316:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - name: Verify released v2 schemas and legacy migration safety
+        working-directory: apps/api
+        run: npx vitest run tests/scripts/deploy-schema.database.test.ts
+        env:
+          RELEASE_UPGRADE_TEST_DATABASE_URL: mysql://root@127.0.0.1:13316/mixarr_upgrade_test
 
-
+  release-images:
+    name: Release image (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [unified, slim]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build published variant
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile.${{ matrix.variant }}
+          load: true
+          push: false
+          tags: mixarr-release-check:${{ matrix.variant }}
+          cache-from: type=gha,scope=release-check-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=release-check-${{ matrix.variant }}
+      - name: Rehearse released v2 schemas, restart and fresh install
+        run: |
+          for version in v2.0.0 v2.2.0 v2.3.5; do
+            bash scripts/release-upgrade-smoke.sh '${{ matrix.variant }}' 'mixarr-release-check:${{ matrix.variant }}' "$version"
+          done

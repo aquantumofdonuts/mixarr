@@ -59,6 +59,14 @@ interface NotificationChannel {
   isActive: boolean;
 }
 
+/**
+ * Channel types that can actually deliver a notification. The Prisma enum also
+ * lists telegram/pushover/email, but nothing sends to them, so the API refuses
+ * to create channels of those types rather than accepting config it will drop.
+ */
+export const SUPPORTED_CHANNEL_TYPES = ['discord', 'webhook'] as const;
+export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
+
 export class NotificationService {
   /**
    * Send a notification to all matching channels for a user
@@ -105,20 +113,10 @@ export class NotificationService {
         return this.sendDiscord(channel.config as DiscordConfig, event, payload);
       case 'webhook':
         return this.sendWebhook(channel.config as WebhookConfig, event, payload);
-      case 'telegram':
-        // Future: implement Telegram
-        log.warn('Telegram notifications not yet implemented');
-        break;
-      case 'pushover':
-        // Future: implement Pushover
-        log.warn('Pushover notifications not yet implemented');
-        break;
-      case 'email':
-        // Future: implement email
-        log.warn('Email notifications not yet implemented');
-        break;
       default:
-        log.warn(`Unknown notification channel type: ${channel.type}`);
+        // Only the types in SUPPORTED_CHANNEL_TYPES can be created; a row of any
+        // other type predates that check and is skipped, never silently "sent".
+        log.warn(`Notification channel ${channel.id} has unsupported type '${channel.type}', skipping`);
     }
   }
 

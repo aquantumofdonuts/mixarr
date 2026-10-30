@@ -1,7 +1,7 @@
 /**
  * SubscriptionService Tests
  * 
- * TDD-driven tests for the subscription service.
+ * Tests for the subscription service.
  * Tests cover:
  * - CRUD operations (findAll, findById, create, update, delete)
  * - Ownership verification

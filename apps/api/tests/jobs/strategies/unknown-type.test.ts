@@ -22,7 +22,7 @@ describe('Strategy Registry - Unknown Type', () => {
   });
 
   it('worker guard should throw for unknown subscription type', () => {
-    // This mirrors the guard added to subscription-worker.ts
+    // Reject unregistered subscription types.
     const subscriptionType = 'nonexistent_type';
     const strategy = getStrategy(subscriptionType as SubscriptionType);
 

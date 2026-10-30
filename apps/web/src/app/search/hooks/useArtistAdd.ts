@@ -1,229 +1,95 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useAddArtistOptions, type ArtistAddOptions } from '@/components/artists/AddArtistOptions';
+import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/ui/toast';
-import type { ArtistResult, MbidCandidate } from './useSearch';
+import { artistResultKey, type ArtistResult } from './useSearch';
 
-export type { ArtistResult, MbidCandidate };
+export type { ArtistResult };
+export interface BatchAddResult { added: string[]; skipped: string[]; failed: { id: string; error: string }[] }
 
-interface BatchAddResult {
-  added: string[];
-  skipped: string[];
-  failed: { id: string; error: string }[];
-}
-
-/**
- * Returns `true` when the API error string indicates the artist already
- * exists in the user's Lidarr library.
- */
-export function isAlreadyExistsError(error: string): boolean {
-  return error.includes('ArtistExistsValidator') || error.includes('already been added');
-}
-
-/**
- * Hook that owns all artist-add logic: single add (with or without MBID),
- * MBID disambiguation modal state, and batch add.
- *
- * @param setResults – state setter from `useSearch` so the hook can mark
- *                     artists as `inLibrary` after a successful add.
- */
-export function useArtistAdd(
-  setResults: (updater: (prev: any[]) => any[]) => void,
-) {
+export function useArtistAdd(setResults: (updater: (prev: any[]) => any[]) => void, scope = '') {
+  const { user } = useAuth();
+  scope = `${user?.id ?? 'anonymous'}:${scope}`;
   const { addToast } = useToast();
-  const [addingArtistId, setAddingArtistId] = useState<string | null>(null);
-  const [mbidCandidates, setMbidCandidates] = useState<MbidCandidate[] | null>(null);
-  const [selectingArtist, setSelectingArtist] = useState<ArtistResult | null>(null);
+  const optionsAction = useAddArtistOptions(scope);
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const pending = useRef(new Set<string>());
   const [isBulkAdding, setIsBulkAdding] = useState(false);
-
-  /** Show a friendly toast depending on whether the error is "already exists". */
-  const handleAddArtistError = useCallback(
-    (error: string, artistName: string) => {
-      if (isAlreadyExistsError(error)) {
-        addToast({
-          type: 'info',
-          title: 'Already in Library',
-          message: `"${artistName}" is already in your Lidarr library`,
-        });
-      } else {
-        addToast({ type: 'error', title: 'Failed to add artist', message: error });
-      }
-    },
-    [addToast],
-  );
-
-  /**
-   * Add a single artist.
-   *
-   * - Artists **without** a foreignArtistId go through the discovery add
-   *   endpoint, which may return MBID candidates for disambiguation.
-   * - Artists **with** a foreignArtistId are added directly via MBID.
-   */
-  const handleAddArtist = useCallback(
-    async (artist: ArtistResult) => {
-      // --- No MBID: discovery add ---
-      if (!artist.foreignArtistId) {
-        setAddingArtistId(artist.artistName);
-        try {
-          const { data, error } = await api.post<{
-            success?: boolean;
-            artist?: any;
-            error?: string;
-            candidates?: MbidCandidate[];
-            artistName?: string;
-          }>('/api/search/discover/add', {
-            artistName: artist.artistName,
-          });
-
-          if (error) {
-            handleAddArtistError(error, artist.artistName);
-          } else if (data?.candidates) {
-            // Multiple MBID matches – show disambiguation modal
-            setMbidCandidates(data.candidates);
-            setSelectingArtist(artist);
-          } else if (data?.success) {
-            addToast({
-              type: 'success',
-              title: 'Artist added',
-              message: `${artist.artistName} added to Lidarr`,
-            });
-            setResults((prev) =>
-              prev.map((r) =>
-                r.artistName === artist.artistName
-                  ? { ...r, inLibrary: true, foreignArtistId: data.artist?.foreignArtistId }
-                  : r,
-              ),
-            );
-          }
-        } finally {
-          setAddingArtistId(null);
-        }
-        return;
-      }
-
-      // --- Has MBID: direct add ---
-      setAddingArtistId(artist.foreignArtistId);
-      try {
-        const { data, error } = await api.post<{ success: boolean; artist?: any }>(
-          '/api/search/artists/add',
-          { foreignArtistId: artist.foreignArtistId },
-        );
-
-        if (error) {
-          handleAddArtistError(error, artist.artistName);
-        } else if (data?.success) {
-          addToast({
-            type: 'success',
-            title: 'Artist added',
-            message: `${artist.artistName} added to Lidarr`,
-          });
-          setResults((prev) =>
-            prev.map((r) =>
-              r.foreignArtistId === artist.foreignArtistId ? { ...r, inLibrary: true } : r,
-            ),
-          );
-        }
-      } finally {
-        setAddingArtistId(null);
-      }
-    },
-    [addToast, handleAddArtistError, setResults],
-  );
-
-  /**
-   * Complete the MBID disambiguation flow by selecting a specific MBID
-   * for the artist currently in `selectingArtist`.
-   */
-  const handleAddWithMbid = useCallback(
-    async (mbid: string) => {
-      if (!selectingArtist) return;
-
-      setAddingArtistId(selectingArtist.artistName);
-      setMbidCandidates(null);
-      try {
-        const { data, error } = await api.post<{ success: boolean; artist?: any }>(
-          '/api/search/discover/add',
-          { artistName: selectingArtist.artistName, mbid },
-        );
-
-        if (error) {
-          handleAddArtistError(error, selectingArtist.artistName);
-        } else if (data?.success) {
-          addToast({
-            type: 'success',
-            title: 'Artist added',
-            message: `${selectingArtist.artistName} added to Lidarr`,
-          });
-          setResults((prev) =>
-            prev.map((r) =>
-              r.artistName === selectingArtist.artistName
-                ? { ...r, inLibrary: true, foreignArtistId: mbid }
-                : r,
-            ),
-          );
-        }
-      } finally {
-        setSelectingArtist(null);
-        setAddingArtistId(null);
-      }
-    },
-    [selectingArtist, addToast, handleAddArtistError, setResults],
-  );
-
-  /**
-   * Batch-add multiple artists by their foreignArtistId set.
-   * Returns the API result so the caller can clear its selection state.
-   */
-  const handleBatchAdd = useCallback(
-    async (ids: Set<string>) => {
-      if (ids.size === 0) return null;
-
-      setIsBulkAdding(true);
-      try {
-        const { data, error } = await api.post<BatchAddResult>('/api/search/batch', {
-          artistIds: Array.from(ids),
-        });
-
-        if (error) {
-          addToast({ type: 'error', title: 'Bulk add failed', message: error });
-        } else if (data) {
-          addToast({
-            type: 'success',
-            title: 'Bulk add complete',
-            message: `Added: ${data.added.length}, Skipped: ${data.skipped.length}, Failed: ${data.failed.length}`,
-          });
-          const addedSet = new Set([...data.added, ...data.skipped]);
-          setResults((prev) =>
-            prev.map((r) => (addedSet.has(r.foreignArtistId) ? { ...r, inLibrary: true } : r)),
-          );
-        }
-
-        return data ?? null;
-      } finally {
-        setIsBulkAdding(false);
-      }
-    },
-    [addToast, setResults],
-  );
-
-  /** Close the MBID disambiguation modal and clear related state. */
-  const clearMbidModal = useCallback(() => {
-    setMbidCandidates(null);
-    setSelectingArtist(null);
+  const scopeRef = useRef({ value: scope, revision: 0 });
+  if (scopeRef.current.value !== scope) scopeRef.current = { value: scope, revision: scopeRef.current.revision + 1 };
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { pending.current.clear(); setPendingIds(new Set()); setIsBulkAdding(false); }, [scope]);
+  const current = useCallback((owner: { value: string; revision: number }) => mounted.current && scopeRef.current === owner, []);
+  const markPending = useCallback((key: string, value: boolean) => {
+    if (value) pending.current.add(key); else pending.current.delete(key);
+    setPendingIds(new Set(pending.current));
   }, []);
+  const updateArtist = useCallback((key: string, patch: Partial<ArtistResult>) => {
+    setResults(previous => previous.map(row => artistResultKey(row) === key ? { ...row, resultKey: key, ...patch } : row));
+  }, [setResults]);
+  const reportError = useCallback((key: string, error: string) => {
+    updateArtist(key, { acquisitionError: error });
+    addToast({ type: 'error', title: 'Failed to add artist', message: error });
+  }, [addToast, updateArtist]);
 
-  return {
-    // State
-    addingArtistId,
-    mbidCandidates,
-    selectingArtist,
-    isBulkAdding,
-
-    // Actions
-    handleAddArtist,
-    handleAddWithMbid,
-    handleBatchAdd,
-    clearMbidModal,
-  };
+  const add = useCallback(async (artist: ArtistResult, options: ArtistAddOptions) => {
+    const mbid = options.mbid;
+    const key = artistResultKey(artist), owner = scopeRef.current;
+    if (pending.current.has(key)) return;
+    markPending(key, true); updateArtist(key, { acquisitionError: undefined });
+    try {
+      const discovery = !artist.foreignArtistId;
+      const { data, error } = await api.post<{ success?: boolean; outcome?: 'added' | 'already-in-library'; artist?: { foreignArtistId?: string } }>(
+        discovery ? '/api/search/discover/add' : '/api/search/artists/add',
+        discovery ? { artistName: artist.artistName, ...options } : { ...options, foreignArtistId: artist.foreignArtistId },
+      );
+      if (!current(owner)) return;
+      if (error) throw new Error(error);
+      if (data?.success === true) {
+        updateArtist(key, { inLibrary: true, foreignArtistId: mbid || data.artist?.foreignArtistId || artist.foreignArtistId, acquisitionError: undefined });
+        addToast({ type: 'success', title: data.outcome === 'added' ? 'Artist added' : data.outcome === 'already-in-library' ? 'Already in Lidarr' : 'Membership confirmed', message: data.outcome === 'added' ? `${artist.artistName} added to Lidarr` : data.outcome === 'already-in-library' ? `${artist.artistName} is already in Lidarr` : `${artist.artistName} is in Lidarr` });
+      } else { const message = 'Addition was not confirmed. Check Lidarr before retrying.'; throw new Error(message); }
+      return true;
+    } catch (cause) {
+      if (current(owner)) reportError(key, cause instanceof Error ? cause.message : 'Addition failed');
+      throw cause;
+    } finally { if (current(owner)) markPending(key, false); }
+  }, [markPending, updateArtist, current, reportError, addToast]);
+  const handleAddArtist = useCallback(async (artist: ArtistResult) => optionsAction.runWithOptions({ name: artist.artistName, mbid: artist.foreignArtistId }, options => add(artist, options)), [add, optionsAction.runWithOptions]);
+  const executeBatch = useCallback(async (ids: Set<string>, options: ArtistAddOptions) => {
+    if (!ids.size || isBulkAdding || [...ids].some(id => pending.current.has(id))) return null;
+    const owner = scopeRef.current;
+    setIsBulkAdding(true);
+    ids.forEach(id => { pending.current.add(id); updateArtist(id, { acquisitionError: undefined }); });
+    setPendingIds(new Set(pending.current));
+    try {
+      const { data, error } = await api.post<BatchAddResult>('/api/search/batch', { artistIds: [...ids], ...options });
+      if (!current(owner)) return null;
+      if (error || !data || !Array.isArray(data.added) || !Array.isArray(data.skipped) || !Array.isArray(data.failed)) {
+        const message = error || 'Bulk addition was not confirmed. Check Lidarr before retrying.';
+        ids.forEach(id => updateArtist(id, { acquisitionError: message }));
+        throw new Error(message);
+      }
+      const succeeded = new Set([...data.added, ...data.skipped].filter(id => ids.has(id)));
+      setResults(previous => previous.map(row => succeeded.has(row.foreignArtistId) ? { ...row, inLibrary: true, acquisitionError: undefined } : row));
+      succeeded.forEach(id => ids.delete(id));
+      data.failed.filter(item => ids.has(item.id)).forEach(item => updateArtist(item.id, { acquisitionError: item.error }));
+      addToast({ type: data.failed.length ? 'warning' : 'success', title: data.failed.length ? 'Bulk add partial' : 'Bulk add complete', message: `Added: ${data.added.length}, Skipped: ${data.skipped.length}, Failed: ${data.failed.length}` });
+      if (data.failed.length) throw Object.assign(new Error(`${data.failed.length} artist additions failed. Confirm again to retry the failed selection.`), { partial: true });
+      return data;
+    } catch (cause) {
+      if (current(owner)) { const message = cause instanceof Error ? cause.message : 'Bulk addition failed'; if (!(cause && typeof cause === 'object' && 'partial' in cause)) ids.forEach(id => updateArtist(id, { acquisitionError: message })); if (!(cause && typeof cause === 'object' && 'partial' in cause)) addToast({ type: 'error', title: 'Bulk add failed', message }); }
+      throw cause;
+    } finally { if (current(owner)) { pending.current.clear(); setPendingIds(new Set(pending.current)); setIsBulkAdding(false); } }
+  }, [isBulkAdding, current, updateArtist, setResults, addToast]);
+  const handleBatchAdd = useCallback(async (ids: Set<string>) => {
+    if (!ids.size) return null;
+    const remaining = new Set(ids);
+    return optionsAction.runWithOptions({ name: `Add ${ids.size} selected artists`, bulk: true }, options => executeBatch(remaining, options)) as Promise<BatchAddResult | null>;
+  }, [optionsAction.runWithOptions, executeBatch]);
+  return { optionsDialog: optionsAction.dialog, addingArtistId: [...pendingIds][0] || null, pendingIds, isBulkAdding, handleAddArtist, handleBatchAdd };
 }

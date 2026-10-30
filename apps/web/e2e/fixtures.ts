@@ -6,6 +6,7 @@ import { test as base, expect, Page } from '@playwright/test';
 
 // Test user credentials (from seed data or test environment)
 export const TEST_USER = {
+  username: 'test',
   email: 'test@example.com',
   password: 'testpassword123',
 };
@@ -20,7 +21,7 @@ export const test = base.extend<{
     await page.goto('/login');
     
     // Fill login form
-    await page.getByLabel(/email/i).fill(TEST_USER.email);
+    await page.getByLabel(/username/i).fill(TEST_USER.username);
     await page.getByLabel(/password/i).fill(TEST_USER.password);
     
     // Submit and wait for redirect

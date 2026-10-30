@@ -1,8 +1,5 @@
 /**
- * Subscription Constants
- *
- * Centralized configuration for subscription types, presets, and related options.
- * Extracted from the subscriptions page for reuse across components.
+ * Subscription types, presets, and related options shared by UI components.
  */
 
 import Brain from 'lucide-react/dist/esm/icons/brain';

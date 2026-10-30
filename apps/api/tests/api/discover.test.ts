@@ -632,3 +632,88 @@ describe('Discover API', () => {
     });
   });
 });
+
+
+describe('actual similar route provider availability', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+  it('reports failed seeds without disclosing provider errors and preserves partial recommendations/counts', async () => {
+    const { getLastfmService, getLidarrService } = await import('../../src/lib/connection-resolver.js');
+    const { LidarrCache } = await import('../../src/services/lidarr.js');
+    const { fetchDeezerArtistImage } = await import('../../src/services/deezer.js');
+    const similar = vi.fn().mockRejectedValueOnce(new Error('secret provider credential')).mockResolvedValueOnce([{ name: 'New Artist', mbid: '11111111-1111-4111-8111-111111111111', match: 0.8 }]);
+    vi.mocked(getLastfmService).mockResolvedValue({ getSimilarArtists: similar } as any);
+    vi.mocked(getLidarrService).mockResolvedValue({} as any);
+    vi.mocked(LidarrCache).mockImplementation(function () { return { refresh: vi.fn().mockResolvedValue(undefined), exists: vi.fn().mockResolvedValue(false) } as any; });
+    vi.mocked(fetchDeezerArtistImage).mockResolvedValue(null);
+    const response = await request(app).post('/api/discover/similar').send({ artistNames: ['Unavailable seed', 'Available seed'], limit: 100 });
+    expect(response.status).toBe(200);
+    expect(response.body.failedSeedArtists).toEqual(['Unavailable seed']);
+    expect(response.body.recommendations).toMatchObject([{ name: 'New Artist', matchCount: 1, matchedFrom: ['Available seed'] }]);
+    expect(JSON.stringify(response.body)).not.toContain('secret provider credential');
+    expect(similar.mock.calls).toEqual([['Unavailable seed', 100], ['Available seed', 100]]);
+  });
+  it('distinguishes every seed failing from successful empty matches', async () => {
+    const { getLastfmService, getLidarrService } = await import('../../src/lib/connection-resolver.js');
+    const { LidarrCache } = await import('../../src/services/lidarr.js');
+    const similar = vi.fn().mockRejectedValue(new Error('Unavailable'));
+    vi.mocked(getLastfmService).mockResolvedValue({ getSimilarArtists: similar } as any);
+    vi.mocked(getLidarrService).mockResolvedValue({} as any);
+    vi.mocked(LidarrCache).mockImplementation(function () { return { refresh: vi.fn().mockResolvedValue(undefined), exists: vi.fn().mockResolvedValue(false) } as any; });
+    const failed = await request(app).post('/api/discover/similar').send({ artistNames: ['Seed'] });
+    expect(failed.status).toBe(200); expect(failed.body.failedSeedArtists).toEqual(['Seed']); expect(failed.body.total).toBe(0);
+    similar.mockResolvedValue([]);
+    const empty = await request(app).post('/api/discover/similar').send({ artistNames: ['Seed'] });
+    expect(empty.status).toBe(200); expect(empty.body.failedSeedArtists).toEqual([]); expect(empty.body.total).toBe(0);
+  });
+});
+
+
+describe('confirmed Discover additions and ancillary notifications', () => {
+  beforeEach(async () => {
+    const { LidarrCache } = await import('../../src/services/lidarr.js');
+    const { notificationService } = await import('../../src/services/notifications.js');
+    vi.mocked(LidarrCache).mockImplementation(function () { return { refresh: vi.fn().mockResolvedValue(undefined), exists: vi.fn().mockResolvedValue(false) } as never; });
+    vi.mocked(notificationService.send).mockReset().mockResolvedValue(undefined);
+  });
+  it.each([false, true])('reports helper-confirmed existing membership=%s after the initial cache miss', async alreadyInLibrary => {
+    const { getLidarrServiceWithConfig } = await import('../../src/lib/connection-resolver.js');
+    const { notificationService } = await import('../../src/services/notifications.js');
+    const { addLogEntry } = await import('../../src/routes/logs.js');
+    const artist = { foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', artistName: 'Confirmed Artist' };
+    const add = vi.fn().mockResolvedValue({ artist, alreadyInLibrary });
+    vi.mocked(getLidarrServiceWithConfig).mockResolvedValueOnce({ service: { addArtistWithCacheWarm: add }, config: { qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } } as never);
+    const response = await request(app).post('/api/discover/add').send({ mbid: artist.foreignArtistId, artistName: artist.artistName });
+    const outcome = alreadyInLibrary ? 'already-in-library' : 'added';
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ success: true, outcome, artist });
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(addLogEntry).toHaveBeenCalledWith('info', 'discover', alreadyInLibrary ? 'Artist "Confirmed Artist" is already in Lidarr' : 'Added artist "Confirmed Artist" from discover', expect.objectContaining({ outcome, mbid: artist.foreignArtistId }));
+    if (alreadyInLibrary) expect(notificationService.send).not.toHaveBeenCalled();
+    else expect(notificationService.send).toHaveBeenCalledExactlyOnceWith(1, 'artist.added', { artistName: artist.artistName });
+  });
+  it.each([false, true])('returns provider confirmation with one addition when notification fails=%s', async failNotification => {
+    const { getLidarrServiceWithConfig } = await import('../../src/lib/connection-resolver.js');
+    const { notificationService } = await import('../../src/services/notifications.js');
+    const artist = { foreignArtistId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', artistName: 'Confirmed Artist' };
+    const add = vi.fn().mockResolvedValue({ artist, refreshCommand: { id: 1 } });
+    vi.mocked(getLidarrServiceWithConfig).mockResolvedValueOnce({ service: { addArtistWithCacheWarm: add }, config: { qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } } as never);
+    if (failNotification) vi.mocked(notificationService.send).mockRejectedValueOnce(new Error('Notification database unavailable'));
+    else vi.mocked(notificationService.send).mockResolvedValueOnce(undefined);
+    const response = await request(app).post('/api/discover/add').send({ mbid: artist.foreignArtistId, artistName: artist.artistName });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ success: true, outcome: 'added', artist, refreshTriggered: true });
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+  it('preserves an actual provider failure without sending a notification or retrying the addition', async () => {
+    const { getLidarrServiceWithConfig } = await import('../../src/lib/connection-resolver.js');
+    const { notificationService } = await import('../../src/services/notifications.js');
+    vi.mocked(notificationService.send).mockClear();
+    const add = vi.fn().mockRejectedValue(new Error('Provider rejected addition'));
+    vi.mocked(getLidarrServiceWithConfig).mockResolvedValueOnce({ service: { addArtistWithCacheWarm: add }, config: { qualityProfileId: 1, metadataProfileId: 2, rootFolderPath: '/music' } } as never);
+    const response = await request(app).post('/api/discover/add').send({ mbid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', artistName: 'Confirmed Artist' });
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe('Provider rejected addition');
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(notificationService.send).not.toHaveBeenCalled();
+  });
+});

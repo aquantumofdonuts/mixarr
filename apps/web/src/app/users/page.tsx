@@ -9,6 +9,7 @@ import { Modal, ModalFooter } from '@/components/ui/modal';
 import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { ResultState } from '@/components/ui/result-state';
 import { PageHeader } from '@/components/layout/page-header';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
@@ -17,9 +18,7 @@ import Edit from 'lucide-react/dist/esm/icons/edit';
 import KeyRound from 'lucide-react/dist/esm/icons/key-round';
 import LogOut from 'lucide-react/dist/esm/icons/log-out';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-import Shield from 'lucide-react/dist/esm/icons/shield';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
-import User from 'lucide-react/dist/esm/icons/user';
 import UserPlus from 'lucide-react/dist/esm/icons/user-plus';
 import XCircle from 'lucide-react/dist/esm/icons/x-circle';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -54,10 +53,10 @@ export default function UsersPage() {
   const [confirmTarget, setConfirmTarget] = useState<number | null>(null);
 
   // Fetch users with React Query (only for admins)
-  const { data: usersData, isLoading, isFetching } = useQuery({
+  const { data: usersData, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ['admin', 'users'],
-    queryFn: async () => {
-      const { data, error } = await api.get<{ users: UserData[] }>('/api/admin/users');
+    queryFn: async ({ signal }) => {
+      const { data, error } = await api.get<{ users: UserData[] }>('/api/admin/users', { signal });
       if (error) throw new Error(error);
       return data?.users ?? [];
     },
@@ -112,7 +111,7 @@ export default function UsersPage() {
   const handleEditUser = async () => {
     if (!editingUser) return;
     
-    const payload: Record<string, any> = {
+    const payload: Record<string, string | boolean | null> = {
       displayName: editForm.displayName,
       email: editForm.email || null,
       role: editForm.role,
@@ -192,28 +191,26 @@ export default function UsersPage() {
       </PageHeader>
 
       {/* Current User Card */}
-      <Card className="mb-8">
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <User className="h-5 w-5" />
             Your Account
           </CardTitle>
           <CardDescription>Manage your account settings</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
+          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+            <div className="min-w-0">
               <p className="text-sm text-muted-foreground">Username</p>
-              <p className="font-medium">{user?.username}</p>
+              <p className="break-words font-mono">{user?.username}</p>
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-muted-foreground">Display Name</p>
-              <p className="font-medium">{user?.displayName}</p>
+              <p className="break-words font-medium">{user?.displayName}</p>
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-muted-foreground">Role</p>
               <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4 text-primary" />
                 <span className="font-medium capitalize">{user?.role}</span>
               </div>
             </div>
@@ -223,7 +220,7 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setShowPasswordModal(true)}>
               <KeyRound className="h-4 w-4 mr-2" /> Change Password
             </Button>
-            <Button variant="destructive" onClick={logout}>
+            <Button variant="outline" onClick={logout}>
               <LogOut className="h-4 w-4 mr-2" /> Sign Out
             </Button>
           </div>
@@ -235,7 +232,7 @@ export default function UsersPage() {
         <Card>
           <CardHeader>
             <CardTitle>All Users</CardTitle>
-            <CardDescription>Manage system users ({users.length} total)</CardDescription>
+            <CardDescription>{isLoading ? 'Loading users…' : isError ? 'User list unavailable' : <><span className="font-mono">{users.length}</span> users</>}</CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -251,34 +248,31 @@ export default function UsersPage() {
                   </div>
                 ))}
               </div>
+            ) : isError ? (
+              <ResultState kind="error" message={error.message} action={<Button variant="outline" onClick={handleRefresh}>Retry</Button>} />
             ) : users.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">No users found</div>
+              <ResultState kind="no-records" message="Add a user to give them access to Mixarr." />
             ) : (
-              <div className="space-y-3">
+              <div className="divide-y border-y">
                 {users.map((u) => (
                   <div
                     key={u.id}
-                    className={`flex items-center justify-between p-4 rounded-container border ${!u.isActive ? 'opacity-60 bg-muted/50' : ''}`}
+                    className={`flex min-w-0 flex-wrap items-center justify-between gap-3 py-3 ${!u.isActive ? 'bg-muted/50' : ''}`}
                   >
-                    <div className="flex items-center gap-4">
-                      <div className={`h-10 w-10 rounded-full flex items-center justify-center ${u.isActive ? 'bg-primary/10' : 'bg-muted'}`}>
-                        <User className={`h-5 w-5 ${u.isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{u.displayName}</p>
-                          <Badge variant={u.role === 'admin' ? 'default' : 'secondary'}>
-                            {u.role}
-                          </Badge>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <p className="min-w-0 break-words font-medium">{u.displayName || u.username}</p>
+                          <span className="text-xs text-muted-foreground capitalize">{u.role}</span>
                           {!u.isActive && (
-                            <Badge variant="destructive">Inactive</Badge>
+                            <Badge variant="secondary">Inactive</Badge>
                           )}
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          @{u.username} · Last login: {formatDate(u.lastLogin)}
+                        <p className="break-words font-mono text-xs text-muted-foreground">
+                          #{u.id} · @{u.username} · Last login: {formatDate(u.lastLogin)}
                         </p>
                         {u._count && (
-                          <p className="text-xs text-muted-foreground">
+                          <p className="font-mono text-xs text-muted-foreground">
                             {u._count.connections} connections · {u._count.subscriptions} subscriptions · {u._count.importSources} imports
                           </p>
                         )}
@@ -289,7 +283,7 @@ export default function UsersPage() {
                         variant="ghost"
                         size="icon"
                         onClick={() => openEditModal(u)}
-                        title="Edit user"
+                        aria-label={`Edit user ${u.username}`}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -298,7 +292,7 @@ export default function UsersPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleDeleteClick(u.id)}
-                          title="Delete user"
+                          aria-label={`Delete user ${u.username}`}
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
@@ -330,24 +324,24 @@ export default function UsersPage() {
       >
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Current Password</label>
             <Input
+              label="Current Password"
               type="password"
               value={passwordForm.current}
               onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
             />
           </div>
           <div>
-            <label className="text-sm font-medium">New Password</label>
             <Input
+              label="New Password"
               type="password"
               value={passwordForm.new}
               onChange={(e) => setPasswordForm({ ...passwordForm, new: e.target.value })}
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Confirm New Password</label>
             <Input
+              label="Confirm New Password"
               type="password"
               value={passwordForm.confirm}
               onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
@@ -370,24 +364,24 @@ export default function UsersPage() {
       >
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Username *</label>
             <Input
+              label="Username *"
               value={createForm.username}
               onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })}
               placeholder="johndoe"
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Display Name</label>
             <Input
+              label="Display Name"
               value={createForm.displayName}
               onChange={(e) => setCreateForm({ ...createForm, displayName: e.target.value })}
               placeholder="John Doe"
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Email</label>
             <Input
+              label="Email"
               type="email"
               value={createForm.email}
               onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
@@ -395,16 +389,16 @@ export default function UsersPage() {
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Password *</label>
             <Input
+              label="Password *"
               type="password"
               value={createForm.password}
               onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Role</label>
             <Select
+              label="Role"
               value={createForm.role}
               onChange={(e) => setCreateForm({ ...createForm, role: e.target.value as 'admin' | 'user' })}
               options={[
@@ -430,15 +424,15 @@ export default function UsersPage() {
       >
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Display Name</label>
             <Input
+              label="Display Name"
               value={editForm.displayName}
               onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })}
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Email</label>
             <Input
+              label="Email"
               type="email"
               value={editForm.email}
               onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
@@ -446,8 +440,8 @@ export default function UsersPage() {
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Role</label>
             <Select
+              label="Role"
               value={editForm.role}
               onChange={(e) => setEditForm({ ...editForm, role: e.target.value as 'admin' | 'user' })}
               options={[
@@ -461,8 +455,8 @@ export default function UsersPage() {
             )}
           </div>
           <div>
-            <label className="text-sm font-medium">Status</label>
-            <div className="flex items-center gap-4 mt-2">
+            <p id="edit-user-status" className="text-sm font-medium">Status</p>
+            <div role="radiogroup" aria-labelledby="edit-user-status" className="mt-2 flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
@@ -491,8 +485,8 @@ export default function UsersPage() {
             )}
           </div>
           <div>
-            <label className="text-sm font-medium">New Password (leave blank to keep current)</label>
             <Input
+              label="New Password (leave blank to keep current)"
               type="password"
               value={editForm.password}
               onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}

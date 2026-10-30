@@ -1,7 +1,7 @@
 /**
  * DTO Tests
  * 
- * Tests for Data Transfer Object transformations (SOC-007)
+ * Tests for Data Transfer Object transformations
  */
 
 import { describe, it, expect } from 'vitest';
