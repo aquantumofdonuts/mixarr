@@ -5,6 +5,9 @@ import prisma from '../lib/db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { parseIntParam } from '../utils/params.js';
 import { loginLimiter, setupLimiter, createUserLimiter } from '../middleware/rate-limiter.js';
+import { validateBody } from '../middleware/validate.js';
+import { updateProfileSchema, changePasswordSchema } from '../schemas/user.js';
+import type { UpdateProfileInput, ChangePasswordInput } from '../schemas/user.js';
 import { SsoProviderService } from '../services/sso-provider.js';
 import { createGoogleStrategy } from '../auth/strategies/google.js';
 import { createLdapStrategy } from '../auth/strategies/ldap.js';
@@ -506,6 +509,109 @@ authRouter.get('/me', async (req, res) => {
     res.json({ user: req.user, setupRequired });
   } else {
     res.json({ user: null, setupRequired });
+  }
+});
+
+const profileSelect = {
+  id: true,
+  username: true,
+  displayName: true,
+  email: true,
+  role: true,
+} as const;
+
+// Current user: read own profile (the session user carries no email)
+authRouter.get('/profile', requireAuth, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: profileSelect,
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    res.json({ user });
+  } catch (error) {
+    logger.error('Failed to fetch profile', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// Current user: update own display name and email
+authRouter.put('/profile', requireAuth, validateBody(updateProfileSchema), async (req, res) => {
+  try {
+    const { displayName, email } = req.body as UpdateProfileInput;
+
+    const data: { displayName?: string; email?: string | null } = {};
+    if (displayName !== undefined) data.displayName = displayName;
+    if (email !== undefined) data.email = email || null;
+
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data,
+      select: profileSelect,
+    });
+
+    res.json({ success: true, user });
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2002') {
+      res.status(409).json({ error: 'That email is already used by another account' });
+      return;
+    }
+    logger.error('Failed to update profile', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// Current user: change own password (rate limited like login, since it checks the current password)
+authRouter.post('/password', requireAuth, loginLimiter, validateBody(changePasswordSchema), async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body as ChangePasswordInput;
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { passwordHash: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // SSO-only accounts have no local password to change
+    if (!user.passwordHash) {
+      res.status(400).json({ error: 'This account has no local password' });
+      return;
+    }
+
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) {
+      res.status(400).json({ error: 'Current password is incorrect' });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { passwordHash },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Failed to change password', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    res.status(500).json({ error: 'Failed to change password' });
   }
 });
 
