@@ -68,10 +68,12 @@ export default function MyProfilePage() {
     setIsUpdatingProfile(false);
   };
 
-  const openProfileModal = () => {
+  const openProfileModal = async () => {
+    // The session user has no email, so load it; saving a blank field would clear it
+    const { data } = await api.get<{ user: { displayName: string; email: string | null } }>('/api/auth/profile');
     setProfileForm({
-      displayName: user?.displayName || '',
-      email: '',
+      displayName: data?.user?.displayName || user?.displayName || '',
+      email: data?.user?.email || '',
     });
     setShowProfileModal(true);
   };
