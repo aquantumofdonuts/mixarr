@@ -32,6 +32,10 @@ interface AISettings {
 }
 
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+// claude-3-haiku-20240307 was retired on 2026-04-19; keep the same (Haiku) tier.
+const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-5-5';
+// Chat completions send no `temperature`: Claude 4.7+ models behind Anthropic's
+// OpenAI-compatible endpoint reject any non-default value with a 400.
 
 /**
  * Placeholder API key for OpenAI-compatible endpoints that don't require auth.
@@ -180,7 +184,6 @@ Return at least 5 unique artists total, maximum 10.`;
           { role: 'user', content: prompt },
         ],
         max_tokens: 500,
-        temperature: 0.7,
       });
 
       const content = response.choices[0]?.message?.content || '[]';
@@ -221,7 +224,7 @@ Return at least 5 unique artists total, maximum 10.`;
 
     try {
       const response = await this.anthropicClient.messages.create({
-        model: 'claude-3-haiku-20240307',
+        model: DEFAULT_ANTHROPIC_MODEL,
         max_tokens: 500,
         messages: [{ role: 'user', content: prompt }],
         system: 'You are a music expert that recommends artists. Always respond with valid JSON arrays only.',
@@ -260,7 +263,7 @@ Return at least 5 unique artists total, maximum 10.`;
       // If JSON parsing fails, try to extract artist names line by line
       const lines = content.split('\n');
       return lines
-        .map(line => line.replace(/^[\d\.\-\*]+\s*/, '').replace(/["']/g, '').trim())
+        .map(line => line.replace(/^[\d.\-*]+\s*/, '').replace(/["']/g, '').trim())
         .filter(line => line.length > 0 && line.length < 100);
     }
     return [];
@@ -316,7 +319,6 @@ Return ONLY a JSON array of artist names, nothing else. Format:
             { role: 'user', content: searchPrompt },
           ],
           max_tokens: 500,
-          temperature: 0.7,
         });
 
         const content = response.choices[0]?.message?.content || '[]';
@@ -336,7 +338,7 @@ Return ONLY a JSON array of artist names, nothing else. Format:
     if (this.settings.anthropicEnabled && this.anthropicClient) {
       try {
         const response = await this.anthropicClient.messages.create({
-          model: 'claude-3-haiku-20240307',
+          model: DEFAULT_ANTHROPIC_MODEL,
           max_tokens: 500,
           messages: [{ role: 'user', content: searchPrompt }],
           system: 'You are a music expert that recommends artists based on descriptions. Always respond with valid JSON arrays only.',
