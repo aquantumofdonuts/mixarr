@@ -25,6 +25,10 @@ Screenshots use fictional demonstration data. Provider availability depends on e
 
 ## Quick Start
 
+## One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Mixarr/)
+
 ### Docker Compose (Recommended)
 
 For a **new installation**, create a `.env` file. Generate a session secret once with `openssl rand -hex 32`, replace the placeholder below, and keep this file for future upgrades:
