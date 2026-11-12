@@ -177,6 +177,10 @@ command=/usr/bin/mysqld_safe --datadir=/data/mysql
 autostart=true
 autorestart=true
 priority=10
+; mysqld_safe ignores SIGTERM, so signal its process group to reach mariadbd
+stopasgroup=true
+killasgroup=true
+stopwaitsecs=30
 stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
@@ -434,9 +438,6 @@ sleep 2
 # Start all services via supervisor
 # -----------------------------------------------------------------------------
 echo "Starting all services..."
-/usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf &
-SUPERVISOR_PID=$!
-
 echo "=== Mixarr is starting up ==="
 if [ -n "${DISABLE_CADDY}" ]; then
     echo "Access the web interface on whichever host port you mapped to container port 3000 (README uses 3010)"
@@ -444,8 +445,9 @@ else
     echo "Access the web interface on whichever host port you mapped to container port 443 (README uses 3443)"
 fi
 
-# Keep container running
-wait $SUPERVISOR_PID
+# Replace this shell so supervisord runs as PID 1 and receives the SIGTERM
+# from docker stop. It then stops the programs in reverse priority order.
+exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
 ENTRYPOINT
 
 RUN chmod +x /entrypoint.sh
