@@ -37,10 +37,10 @@ PR #85 exposed incomplete artist-text sanitization, which now removes remaining 
 
 ---
 
-## GitHub provider reports and v3.0.0 resolutions
+## GitHub provider reports and v3.0.x resolutions
 
-- **#81 — TIDAL subscriptions 404.** All seven calls in `apps/api/src/services/tidal.ts` use the `/userCollections/{id}` and `/userRecommendations/{id}` paths TIDAL removed on 2026-09-14; the issue lists the replacement `/userCollection*/me/…` paths.
 - **#87 — Jellyfin authentication header compatibility.** The service still uses `X-Emby-Token`; compatibility with the reporter's newer Jellyfin version remains separate provider work.
+- **Released and closed in v3.0.1:** TIDAL v2 endpoints ([#81](https://github.com/aquantumofdonuts/mixarr/issues/81)), current Claude models and user-seeded Last.fm AI recommendations ([#94](https://github.com/aquantumofdonuts/mixarr/issues/94)), self-service profile/password routes ([#95](https://github.com/aquantumofdonuts/mixarr/issues/95)), and clean unified-container shutdown ([#99](https://github.com/aquantumofdonuts/mixarr/issues/99)). TIDAL mixes have no public replacement; refreshed TIDAL tokens are not yet persisted; TIDAL search returns only the first embedded result page (about 20 per type) and does not follow the relationship cursor. See the [completed archive](ISSUES-FIXED.md#v301-release--november-17-2026).
 - **Released and closed in v3.0.0:** saved slskd connection tests ([#66](https://github.com/aquantumofdonuts/mixarr/issues/66)), manual search timeout units and compound completion states ([#88](https://github.com/aquantumofdonuts/mixarr/issues/88)), and the slim default API proxy/setup path ([#60](https://github.com/aquantumofdonuts/mixarr/issues/60)). Published images were verified and requesters received upgrade guidance. See the [completed archive](ISSUES-FIXED.md#v300-release--october-29-2026).
 
 ---
@@ -60,18 +60,6 @@ This initiative includes truthful acquisition feedback, artist/source drilldown,
 ---
 
 ## 🔧 TECHNICAL DEBT (Deferred)
-
-### Account profile/password client routes do not match the API
-
-**Priority:** Medium
-
-**Status:** Backlog; preexisting functional limitation
-
-**Verified:** October 9, 2026
-
-The account page calls `PUT /api/auth/profile` and `POST /api/auth/password`; the Users page also calls the latter for the current account. `apps/api/src/routes/auth.ts` registers neither endpoint. These same client calls exist at baseline `d1aec6c`, before the catalog rollout. T27 changes their visual treatment only; its screenshot/browser checks do not establish working profile/password submission. Existing admin reset-password routing is a separate operation.
-
-Repair the account forms against an explicitly validated, authenticated server contract in a separate functional change. Do not treat the catalog's visual acceptance as acceptance of these submissions. Evidence: `apps/web/src/app/users/me/page.tsx:38,55`, `apps/web/src/app/users/page.tsx:79`, and the registered `authRouter` methods in `apps/api/src/routes/auth.ts`.
 
 ### TD-009: Unify "Artist Added" Tracking Across Add Paths
 

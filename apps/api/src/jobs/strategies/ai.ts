@@ -60,8 +60,13 @@ const aiRecommendation: SubscriptionStrategy = {
       if (!isLastFMConfig(conn.config)) {
         throw new Error('Invalid Last.fm connection config');
       }
+      // Seed from the user's own top artists, not the global chart (getTopArtists)
+      if (!conn.config.username) {
+        throw new Error('Last.fm connection is missing username. Please update your Last.fm connection with your username.');
+      }
       const lastfm = new LastfmService({ apiKey: conn.config.apiKey });
-      const top = await lastfm.getTopArtists(20);
+      const period = context.config.period || 'overall';
+      const top = await lastfm.getUserTopArtists(conn.config.username, period, 20);
       sourceArtists = top.artists.map(a => a.name);
     }
 

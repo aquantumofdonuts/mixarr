@@ -37,6 +37,12 @@ export const updateUserSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+// Schema for PUT /auth/profile (the signed-in user's own profile)
+export const updateProfileSchema = z.object({
+  displayName: z.string().trim().min(1).max(100).optional(),
+  email: z.string().email().max(255).nullable().optional(),
+});
+
 // Schema for password changes
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Current password is required'),
@@ -52,5 +58,6 @@ export const loginSchema = z.object({
 // Export inferred types
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;

@@ -295,4 +295,49 @@ describe('AIService', () => {
       expect(available).toBe(false);
     });
   });
+
+  describe('request parameters', () => {
+    const bothProviders = {
+      id: 1,
+      openaiApiKey: 'test-key',
+      openaiEnabled: true,
+      openaiStrategy: 'similar' as const,
+      openaiBaseUrl: 'https://api.anthropic.com/v1/',
+      openaiModel: 'claude-sonnet-5-5',
+      anthropicApiKey: 'test-anthropic-key',
+      anthropicEnabled: true,
+      anthropicStrategy: 'similar' as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    beforeEach(() => {
+      vi.mocked(prisma.aISettings.findFirst).mockResolvedValue(bothProviders);
+      mockOpenAICreate.mockResolvedValue({ choices: [{ message: { content: '["A"]' } }] });
+      mockAnthropicCreate.mockResolvedValue({ content: [{ type: 'text', text: '["B"]' }] });
+    });
+
+    it('sends no temperature on chat completions (Claude 4.7+ rejects non-default values)', async () => {
+      const service = new AIService();
+      await service.searchByPrompt('desert rock');
+      await service.getRecommendations(['Kyuss']);
+
+      expect(mockOpenAICreate).toHaveBeenCalledTimes(2);
+      for (const [args] of mockOpenAICreate.mock.calls) {
+        expect(args).not.toHaveProperty('temperature');
+        expect(args.model).toBe('claude-sonnet-5-5');
+      }
+    });
+
+    it('uses a current Claude model for the Anthropic provider, not the retired claude-3-haiku', async () => {
+      const service = new AIService();
+      await service.searchByPrompt('desert rock');
+      await service.getRecommendations(['Kyuss']);
+
+      expect(mockAnthropicCreate).toHaveBeenCalledTimes(2);
+      for (const [args] of mockAnthropicCreate.mock.calls) {
+        expect(args.model).toBe('claude-haiku-5-5');
+      }
+    });
+  });
 });

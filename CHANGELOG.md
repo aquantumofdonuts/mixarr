@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v3.0.1] - 2026-11-17
+
+A patch release with four community fixes from [@kris-anderson](https://github.com/kris-anderson). No database migrations or API breaking changes.
+
+[Release notes](docs/releases/v3.0.1.md) · [Installation and upgrade guide](README.md#upgrading)
+
+### Fixed
+- **TIDAL:** collections, playlists, playlist tracks, search and similar artists use TIDAL's current v2 endpoints, with cursor paging, relevance-ordered search and the account's country code (#81, #98). TIDAL removed mixes from its public API, so the `tidal_discovery`, `tidal_mix` and `tidal_new_arrivals` subscription types now fail with a clear message instead of a 404.
+- **AI:** the Anthropic provider uses `claude-haiku-5-5` instead of the retired `claude-3-haiku-20240307`. The OpenAI-compatible provider no longer sends `temperature`, so current Claude models work through Anthropic's compatible endpoint. Last.fm-seeded AI recommendations use the user's own top artists instead of the global chart (#94, #97).
+- **Profile:** added `GET`/`PUT /api/auth/profile` and `POST /api/auth/password`, so users can edit their own display name, email and password. The profile dialog shows the stored email instead of clearing it on save, and stays closed if the profile can't be loaded (#105). Accounts without a local password can't change or clear their own email, since SSO sign-in matches on it (#95, #96).
+- **Unified image:** supervisord runs as PID 1 and MariaDB receives the stop signal, so `docker stop` shuts every service down cleanly instead of timing out and killing MariaDB (#99, #100).
+
+### Upgrade notes
+- Upgrade in place from v3.0.0 by changing the image tag; keep your volumes and `SESSION_SECRET`. Large unified-image databases may want a longer container stop timeout, such as `stop_grace_period: 60s`.
+- Delete or pause any TIDAL mix subscriptions; they can no longer run.
+
+---
+
 ## [v3.0.0] - 2026-10-29
 
 A compact music catalog, explicit acquisition outcomes, and credited collaboration exploration.
