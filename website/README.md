@@ -2,9 +2,9 @@
 
 `index.html` is the static project website. Pages deploys changes under `website/` only after a push to `prod` (or a manual workflow dispatch). Updating `dev` does not publish the site.
 
-The public site announces [v3.0.0](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0), released October 29, 2026. Unified `:v3.0.0` and slim `:v3.0.0-slim` images are published for AMD64 and ARM64; `:latest` and `:slim` are moving stable aliases. The Compose and Docker Run examples use the versioned unified image and a saved session secret. Existing users follow the root README's upgrade instructions with their current volumes and environment.
+The public site announces [v3.0.1](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.1), released November 17, 2026. Unified `:v3.0.1` and slim `:v3.0.1-slim` images are published for AMD64 and ARM64; `:latest` and `:slim` are moving stable aliases. The Compose and Docker Run examples use the versioned unified image and a saved session secret. Existing users follow the root README's upgrade instructions with their current volumes and environment.
 
-The gallery shows the v3.0.0 catalog with fictional demonstration data. UI captures do not establish live provider compatibility. Known issues include TIDAL and Jellyfin compatibility and remain linked from the site.
+The gallery shows the v3.0.0 catalog with fictional demonstration data. UI captures do not establish live provider compatibility. Known issues include Jellyfin compatibility and TIDAL's removal of mixes, and remain linked from the site.
 
 To refresh screenshots, build and start the web app locally, then run from the repository root:
 
@@ -20,7 +20,7 @@ The capture suite reuses the strict catalog browser fixtures, blocks external re
 
 The commands run ESLint without its cache because the current dependency override causes Next’s cached lint command to fail with `flatCache.load is not a function`.
 
-Copy sources: `packages/shared-types/src/subscription.ts` (56 registered types), the app routes and artist/Constellation components (catalog behavior), the root README/Compose files (deployment), and `docs/releases/v3.0.0.md` (release announcement). Keep provider limitations visible when refreshing copy.
+Copy sources: `packages/shared-types/src/subscription.ts` (56 registered types), the app routes and artist/Constellation components (catalog behavior), the root README/Compose files (deployment), and `docs/releases/v3.0.1.md` (release announcement). Keep provider limitations visible when refreshing copy.
 
 Serve this directory locally to check the static page, for example `python3 -m http.server 3028 --directory website`. Check the gallery/lightbox, carousel, installation tabs, image loading, and mobile navigation before committing.
 

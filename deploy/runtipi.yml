@@ -5,7 +5,7 @@ website_url: "https://aquantumofdonuts.github.io/mixarr/"
 # URL where the full source code of the program can be downloaded
 source_code_url: "https://github.com/aquantumofdonuts/mixarr/tree/prod"
 # description of what the software does, shorter than 250 characters, sentence case
-description: "Self-hosted music discovery and catalog companion for Lidarr. Mixarr v3.0.0 adds an artist inspector, Collaboration Constellation, and clear review outcomes."
+description: "Self-hosted music discovery and catalog companion for Lidarr. Mixarr v3 adds an artist inspector, Collaboration Constellation, and clear review outcomes."
 # list of license identifiers, see https://github.com/awesome-selfhosted/awesome-selfhosted-data/blob/master/licenses.yml for the full list of licenses
 licenses:
   - GPL-3.0

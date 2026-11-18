@@ -1,5 +1,5 @@
 # =============================================================================
-# Mixarr v3.0.0 BYO Infrastructure
+# Mixarr v3.0.1 BYO Infrastructure
 # For users with existing MariaDB/MySQL and Redis
 #
 # Usage:
@@ -19,7 +19,7 @@
 
 services:
   mixarr:
-    image: ghcr.io/aquantumofdonuts/mixarr:v3.0.0-slim
+    image: ghcr.io/aquantumofdonuts/mixarr:v3.0.1-slim
     container_name: mixarr
     ports:
       - "3000:3000"    # Web UI
