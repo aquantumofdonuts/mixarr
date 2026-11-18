@@ -552,6 +552,26 @@ authRouter.put('/profile', requireAuth, validateBody(updateProfileSchema), async
     if (displayName !== undefined) data.displayName = displayName;
     if (email !== undefined) data.email = email || null;
 
+    // SSO sign-in matches accounts by email, so an account without a local password
+    // that changes or clears its email can no longer sign in. Leave that to an admin.
+    if (data.email !== undefined) {
+      const current = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: { email: true, passwordHash: true },
+      });
+      if (!current) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+      const unchanged = (current.email ?? '').toLowerCase() === (data.email ?? '').toLowerCase();
+      if (!current.passwordHash && !unchanged) {
+        res.status(400).json({
+          error: 'This account signs in with SSO, which matches your email. Ask an administrator to change it.',
+        });
+        return;
+      }
+    }
+
     const user = await prisma.user.update({
       where: { id: req.user!.id },
       data,

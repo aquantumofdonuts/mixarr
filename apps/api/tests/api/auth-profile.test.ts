@@ -62,6 +62,11 @@ describe('Self-service profile routes', () => {
   });
 
   describe('PUT /api/auth/profile', () => {
+    beforeEach(() => {
+      // Accounts with a local password may change their email
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({ email: 'old@example.com', passwordHash: 'hash' } as any);
+    });
+
     it('updates display name and email for the signed-in user only', async () => {
       vi.mocked(prisma.user.update).mockResolvedValue({
         id: 7, username: 'kris', displayName: 'Kris A', email: 'kris@example.com', role: 'admin',
@@ -112,6 +117,38 @@ describe('Self-service profile routes', () => {
       const res = await request(app).put('/api/auth/profile').send({ email: 'taken@example.com' });
 
       expect(res.status).toBe(409);
+    });
+
+    describe('accounts without a local password (SSO-only)', () => {
+      beforeEach(() => {
+        vi.mocked(prisma.user.findUnique).mockResolvedValue({ email: 'kris@example.com', passwordHash: null } as any);
+        vi.mocked(prisma.user.update).mockResolvedValue({ id: 7 } as any);
+      });
+
+      it.each([
+        ['clearing', null],
+        ['changing', 'other@example.com'],
+      ])('refuses %s the email, which SSO sign-in matches on', async (_label, email) => {
+        const res = await request(app).put('/api/auth/profile').send({ displayName: 'Kris', email });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/SSO/);
+        expect(prisma.user.update).not.toHaveBeenCalled();
+      });
+
+      it('allows saving the same email (case-insensitive) with a new display name', async () => {
+        const res = await request(app).put('/api/auth/profile').send({ displayName: 'Kris A', email: 'Kris@Example.com' });
+
+        expect(res.status).toBe(200);
+        expect(prisma.user.update).toHaveBeenCalled();
+      });
+
+      it('allows a display-name-only change without looking up the account', async () => {
+        const res = await request(app).put('/api/auth/profile').send({ displayName: 'Kris A' });
+
+        expect(res.status).toBe(200);
+        expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      });
     });
   });
 
