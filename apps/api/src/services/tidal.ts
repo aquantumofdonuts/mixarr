@@ -42,6 +42,27 @@ interface JsonApiResponse<T = Record<string, unknown>> {
   links?: { next?: string };
 }
 
+// Relationship endpoints (e.g. /userCollectionTracks/me/relationships/items) return
+// resource identifiers in `data`; the resources themselves arrive in `included`.
+interface JsonApiIdentifier {
+  id: string;
+  type: string;
+}
+
+interface JsonApiRelationshipResponse {
+  data?: JsonApiIdentifier[];
+  included?: JsonApiResource[];
+  links?: { next?: string };
+}
+
+// TIDAL pages relationship endpoints with page[cursor] (about 20 items per page)
+const MAX_PAGES = 20;
+
+// TIDAL removed /userRecommendations (discovery, my and new-arrival mixes) from its
+// public API on 2026-09-14 (spec v1.10.128) without a replacement.
+const MIXES_REMOVED_MESSAGE =
+  'TIDAL no longer offers mixes (discovery, my mixes, new arrivals) through its public API, so this subscription type is unavailable';
+
 interface TidalArtistAttributes {
   name: string;
   popularity?: number;
@@ -116,6 +137,7 @@ export interface TidalUser {
   username: string;
   firstName?: string;
   lastName?: string;
+  country?: string;
 }
 
 // PKCE helpers
@@ -133,6 +155,7 @@ export class TidalService {
   private tokens: TidalTokens | null = null;
   private onTokenRefresh?: (tokens: TidalTokens) => void;
   private refreshPromise: Promise<void> | null = null; // Prevent concurrent refresh
+  private me: TidalUser | null = null; // Cached /users/me (country code for catalog requests)
 
   constructor(config: TidalConfig, onTokenRefresh?: (tokens: TidalTokens) => void) {
     this.clientId = config.clientId;
@@ -335,7 +358,9 @@ export class TidalService {
 
     await rateLimit('tidal');
 
-    const response = await fetchWithTimeout(`https://openapi.tidal.com/v2${endpoint}`, {
+    // links.next values are paths relative to /v2; accept absolute URLs too
+    const path = endpoint.replace(/^https:\/\/openapi\.tidal\.com/, '').replace(/^\/v2(?=\/)/, '');
+    const response = await fetchWithTimeout(`https://openapi.tidal.com/v2${path}`, {
       headers: {
         Authorization: `Bearer ${this.tokens.accessToken}`,
         Accept: 'application/vnd.api+json',
@@ -370,14 +395,79 @@ export class TidalService {
    * Get current user profile
    */
   async getMe(): Promise<TidalUser> {
+    if (this.me) return this.me;
     const response = await this.request<JsonApiResponse<TidalUserAttributes>>('/users/me');
     const user = response.data as JsonApiResource<TidalUserAttributes>;
-    return {
+    this.me = {
       id: user.id,
       username: user.attributes.username,
       firstName: user.attributes.firstName,
       lastName: user.attributes.lastName,
+      country: user.attributes.country,
     };
+    return this.me;
+  }
+
+  /** Country code for catalog endpoints (playlists, search, similar artists) */
+  private async getCountryCode(): Promise<string> {
+    const me = await this.getMe();
+    return me.country || 'US';
+  }
+
+  /**
+   * Follow a relationship endpoint's cursor pages and return the related resources in
+   * relationship order. Identifiers of other types (e.g. videos in a playlist) are skipped.
+   */
+  private async getRelationshipItems<A>(
+    endpoint: string,
+    type: string,
+    limit: number
+  ): Promise<{ resources: JsonApiResource<A>[]; included: JsonApiResource[] }> {
+    const resources: JsonApiResource<A>[] = [];
+    const included: JsonApiResource[] = [];
+    let next: string | undefined = endpoint;
+
+    for (let page = 0; next && resources.length < limit && page < MAX_PAGES; page++) {
+      const response: JsonApiRelationshipResponse = await this.request<JsonApiRelationshipResponse>(next);
+      included.push(...(response.included ?? []));
+      const byKey = new Map(included.map(r => [`${r.type}:${r.id}`, r]));
+
+      for (const ref of response.data ?? []) {
+        if (ref.type !== type) continue;
+        const resource = byKey.get(`${ref.type}:${ref.id}`);
+        if (resource) resources.push(resource as unknown as JsonApiResource<A>);
+        if (resources.length >= limit) break;
+      }
+      next = response.links?.next;
+    }
+
+    return { resources, included };
+  }
+
+  /**
+   * Run a search. /searchResults/{id} takes an opaque id now, so the query goes in
+   * filter[query] and the response holds exactly one searchResults resource.
+   */
+  private async search<A>(
+    query: string,
+    relationship: 'artists' | 'tracks' | 'albums',
+    include: string,
+    limit: number
+  ): Promise<{ resources: JsonApiResource<A>[]; included: JsonApiResource[] }> {
+    const countryCode = await this.getCountryCode();
+    const response = await this.request<JsonApiResponse>(
+      `/searchResults?filter%5Bquery%5D=${encodeURIComponent(query)}&countryCode=${countryCode}&include=${include}`
+    );
+
+    const result = Array.isArray(response.data) ? response.data[0] : response.data;
+    const included = response.included ?? [];
+    const refs = result?.relationships?.[relationship]?.data;
+    const ordered = (Array.isArray(refs) ? refs : refs ? [refs] : [])
+      .map(ref => included.find(r => r.type === ref.type && r.id === ref.id))
+      .filter((r): r is JsonApiResource => r !== undefined)
+      .map(r => r as unknown as JsonApiResource<A>);
+
+    return { resources: ordered.slice(0, limit), included };
   }
 
   // HELPER: Parse JSON:API resources
@@ -451,39 +541,36 @@ export class TidalService {
    * Get user's favorite tracks
    */
   async getCollectionTracks(limit: number = 50): Promise<TidalTrack[]> {
-    const me = await this.getMe();
-    const response = await this.request<JsonApiResponse<TidalTrackAttributes>>(
-      `/userCollections/${me.id}/relationships/tracks?limit=${limit}&include=artists`
+    const { resources, included } = await this.getRelationshipItems<TidalTrackAttributes>(
+      '/userCollectionTracks/me/relationships/items?include=items.artists',
+      'tracks',
+      limit
     );
-    
-    const tracks = Array.isArray(response.data) ? response.data : [response.data];
-    return tracks.map(t => this.parseTrack(t as JsonApiResource<TidalTrackAttributes>, response.included));
+    return resources.map(t => this.parseTrack(t, included));
   }
 
   /**
    * Get user's favorite albums
    */
   async getCollectionAlbums(limit: number = 50): Promise<TidalAlbum[]> {
-    const me = await this.getMe();
-    const response = await this.request<JsonApiResponse<TidalAlbumAttributes>>(
-      `/userCollections/${me.id}/relationships/albums?limit=${limit}&include=artists`
+    const { resources, included } = await this.getRelationshipItems<TidalAlbumAttributes>(
+      '/userCollectionAlbums/me/relationships/items?include=items.artists',
+      'albums',
+      limit
     );
-    
-    const albums = Array.isArray(response.data) ? response.data : [response.data];
-    return albums.map(a => this.parseAlbum(a as JsonApiResource<TidalAlbumAttributes>, response.included));
+    return resources.map(a => this.parseAlbum(a, included));
   }
 
   /**
    * Get user's favorite artists
    */
   async getCollectionArtists(limit: number = 50): Promise<TidalArtist[]> {
-    const me = await this.getMe();
-    const response = await this.request<JsonApiResponse<TidalArtistAttributes>>(
-      `/userCollections/${me.id}/relationships/artists?limit=${limit}`
+    const { resources } = await this.getRelationshipItems<TidalArtistAttributes>(
+      '/userCollectionArtists/me/relationships/items?include=items',
+      'artists',
+      limit
     );
-    
-    const artists = Array.isArray(response.data) ? response.data : [response.data];
-    return artists.map(a => this.parseArtist(a as JsonApiResource<TidalArtistAttributes>));
+    return resources.map(a => this.parseArtist(a));
   }
 
   // PLAYLISTS
@@ -492,25 +579,25 @@ export class TidalService {
    * Get user's playlists
    */
   async getPlaylists(limit: number = 50): Promise<TidalPlaylist[]> {
-    const me = await this.getMe();
-    const response = await this.request<JsonApiResponse<TidalPlaylistAttributes>>(
-      `/userCollections/${me.id}/relationships/playlists?limit=${limit}`
+    const { resources } = await this.getRelationshipItems<TidalPlaylistAttributes>(
+      '/userCollectionPlaylists/me/relationships/items?include=items',
+      'playlists',
+      limit
     );
-    
-    const playlists = Array.isArray(response.data) ? response.data : [response.data];
-    return playlists.map(p => this.parsePlaylist(p as JsonApiResource<TidalPlaylistAttributes>));
+    return resources.map(p => this.parsePlaylist(p));
   }
 
   /**
-   * Get tracks from a specific playlist
+   * Get tracks from a specific playlist (videos are skipped)
    */
   async getPlaylistTracks(playlistId: string, limit: number = 50): Promise<TidalTrack[]> {
-    const response = await this.request<JsonApiResponse<TidalTrackAttributes>>(
-      `/playlists/${playlistId}/relationships/items?limit=${limit}&include=artists`
+    const countryCode = await this.getCountryCode();
+    const { resources, included } = await this.getRelationshipItems<TidalTrackAttributes>(
+      `/playlists/${encodeURIComponent(playlistId)}/relationships/items?countryCode=${countryCode}&include=items.artists`,
+      'tracks',
+      limit
     );
-    
-    const tracks = Array.isArray(response.data) ? response.data : [response.data];
-    return tracks.map(t => this.parseTrack(t as JsonApiResource<TidalTrackAttributes>, response.included));
+    return resources.map(t => this.parseTrack(t, included));
   }
 
   // RECOMMENDATIONS
@@ -519,39 +606,21 @@ export class TidalService {
    * Get user's discovery mixes (like Spotify Discover Weekly)
    */
   async getDiscoveryMixes(): Promise<TidalPlaylist[]> {
-    const me = await this.getMe();
-    const response = await this.request<JsonApiResponse<TidalPlaylistAttributes>>(
-      `/userRecommendations/${me.id}/relationships/discoveryMixes`
-    );
-    
-    const mixes = Array.isArray(response.data) ? response.data : [response.data];
-    return mixes.map(m => this.parsePlaylist(m as JsonApiResource<TidalPlaylistAttributes>));
+    throw new Error(MIXES_REMOVED_MESSAGE);
   }
 
   /**
    * Get user's personal mixes
    */
   async getMyMixes(): Promise<TidalPlaylist[]> {
-    const me = await this.getMe();
-    const response = await this.request<JsonApiResponse<TidalPlaylistAttributes>>(
-      `/userRecommendations/${me.id}/relationships/myMixes`
-    );
-    
-    const mixes = Array.isArray(response.data) ? response.data : [response.data];
-    return mixes.map(m => this.parsePlaylist(m as JsonApiResource<TidalPlaylistAttributes>));
+    throw new Error(MIXES_REMOVED_MESSAGE);
   }
 
   /**
    * Get new arrival mixes
    */
   async getNewArrivalMixes(): Promise<TidalPlaylist[]> {
-    const me = await this.getMe();
-    const response = await this.request<JsonApiResponse<TidalPlaylistAttributes>>(
-      `/userRecommendations/${me.id}/relationships/newArrivalMixes`
-    );
-    
-    const mixes = Array.isArray(response.data) ? response.data : [response.data];
-    return mixes.map(m => this.parsePlaylist(m as JsonApiResource<TidalPlaylistAttributes>));
+    throw new Error(MIXES_REMOVED_MESSAGE);
   }
 
   /**
@@ -590,36 +659,24 @@ export class TidalService {
    * Search for artists
    */
   async searchArtists(query: string, limit: number = 25): Promise<TidalArtist[]> {
-    const response = await this.request<JsonApiResponse<TidalArtistAttributes>>(
-      `/searchResults/${encodeURIComponent(query)}/relationships/artists?limit=${limit}`
-    );
-    
-    const artists = Array.isArray(response.data) ? response.data : [response.data];
-    return artists.map(a => this.parseArtist(a as JsonApiResource<TidalArtistAttributes>));
+    const { resources } = await this.search<TidalArtistAttributes>(query, 'artists', 'artists', limit);
+    return resources.map(a => this.parseArtist(a));
   }
 
   /**
    * Search for tracks
    */
   async searchTracks(query: string, limit: number = 25): Promise<TidalTrack[]> {
-    const response = await this.request<JsonApiResponse<TidalTrackAttributes>>(
-      `/searchResults/${encodeURIComponent(query)}/relationships/tracks?limit=${limit}&include=artists`
-    );
-    
-    const tracks = Array.isArray(response.data) ? response.data : [response.data];
-    return tracks.map(t => this.parseTrack(t as JsonApiResource<TidalTrackAttributes>, response.included));
+    const { resources, included } = await this.search<TidalTrackAttributes>(query, 'tracks', 'tracks.artists', limit);
+    return resources.map(t => this.parseTrack(t, included));
   }
 
   /**
    * Search for albums
    */
   async searchAlbums(query: string, limit: number = 25): Promise<TidalAlbum[]> {
-    const response = await this.request<JsonApiResponse<TidalAlbumAttributes>>(
-      `/searchResults/${encodeURIComponent(query)}/relationships/albums?limit=${limit}&include=artists`
-    );
-    
-    const albums = Array.isArray(response.data) ? response.data : [response.data];
-    return albums.map(a => this.parseAlbum(a as JsonApiResource<TidalAlbumAttributes>, response.included));
+    const { resources, included } = await this.search<TidalAlbumAttributes>(query, 'albums', 'albums.artists', limit);
+    return resources.map(a => this.parseAlbum(a, included));
   }
 
   // SIMILAR ARTISTS
@@ -628,11 +685,12 @@ export class TidalService {
    * Get similar artists
    */
   async getSimilarArtists(artistId: string, limit: number = 25): Promise<TidalArtist[]> {
-    const response = await this.request<JsonApiResponse<TidalArtistAttributes>>(
-      `/artists/${artistId}/relationships/similarArtists?limit=${limit}`
+    const countryCode = await this.getCountryCode();
+    const { resources } = await this.getRelationshipItems<TidalArtistAttributes>(
+      `/artists/${encodeURIComponent(artistId)}/relationships/similarArtists?countryCode=${countryCode}&include=similarArtists`,
+      'artists',
+      limit
     );
-    
-    const artists = Array.isArray(response.data) ? response.data : [response.data];
-    return artists.map(a => this.parseArtist(a as JsonApiResource<TidalArtistAttributes>));
+    return resources.map(a => this.parseArtist(a));
   }
 }
