@@ -1,5 +1,5 @@
 # =============================================================================
-# Mixarr v3.0.0 Slim Stack
+# Mixarr v3.0.1 Slim Stack
 # Production deployment using slim image with external MariaDB and Redis
 #
 # Usage:
@@ -21,7 +21,7 @@ services:
   # Mixarr Application (API + Web)
   # ---------------------------------------------------------------------------
   mixarr:
-    image: ghcr.io/aquantumofdonuts/mixarr:v3.0.0-slim
+    image: ghcr.io/aquantumofdonuts/mixarr:v3.0.1-slim
     container_name: mixarr
     ports:
       - "3000:3000"    # Web UI

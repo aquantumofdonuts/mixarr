@@ -10,16 +10,16 @@
 
 <p align="center">
   <a href="https://aquantumofdonuts.github.io/mixarr/"><img src="https://img.shields.io/badge/Website-mixarr-00d4aa?style=flat-square" alt="Website"></a>
-  <a href="https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0"><img src="https://img.shields.io/badge/Release-v3.0.0-bf7a56?style=flat-square" alt="Release v3.0.0"></a>
+  <a href="https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.1"><img src="https://img.shields.io/badge/Release-v3.0.1-bf7a56?style=flat-square" alt="Release v3.0.1"></a>
   <a href="https://github.com/aquantumofdonuts/mixarr"><img src="https://img.shields.io/github/stars/aquantumofdonuts/mixarr?style=flat-square" alt="GitHub"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue?style=flat-square" alt="License"></a>
 </p>
 
 Mixarr is a self-hosted music discovery and catalog companion for Lidarr. Bring playlists, charts, listening history, and recommendations together; inspect artists and their sources; review discoveries; and send your choices to Lidarr. Explore recording credits with Collaboration Constellation, schedule 56 subscription types, and optionally use AI recommendations.
 
-**v3.0.0 is available** for AMD64 and ARM64, in unified and slim images. This major release adds a compact catalog, shared artist inspector, clearer acquisition outcomes, and direct upgrades from released v2 schemas. [Read the release announcement](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0) · [Upgrade an existing installation](#upgrading) · [Full changelog](CHANGELOG.md)
+**v3.0.1 is available** for AMD64 and ARM64, in unified and slim images. This patch release restores TIDAL subscriptions and search on TIDAL's current API, supports current Claude models for AI recommendations, lets you edit your own profile and password, and makes the unified container stop cleanly. v3.0 adds a compact catalog, shared artist inspector, clearer acquisition outcomes, and direct upgrades from released v2 schemas. [Read the release notes](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.1) · [Upgrade an existing installation](#upgrading) · [Full changelog](CHANGELOG.md)
 
-![Mixarr v3.0.0 discovery catalog](website/img/mixarr-discover.png)
+![Mixarr v3 discovery catalog](website/img/mixarr-discover.png)
 
 Screenshots use fictional demonstration data. Provider availability depends on each service's API and authorization; see [known limitations](#known-limitations).
 
@@ -40,7 +40,7 @@ Create a `docker-compose.yml`:
 ```yaml
 services:
   mixarr:
-    image: ghcr.io/aquantumofdonuts/mixarr:v3.0.0
+    image: ghcr.io/aquantumofdonuts/mixarr:v3.0.1
     container_name: mixarr
     ports:
       - "3443:443"  # HTTPS Access
@@ -71,7 +71,7 @@ docker run -d \
   -p 3010:3000 \
   -v ~/mixarr-data:/data \
   --env-file .env \
-  ghcr.io/aquantumofdonuts/mixarr:v3.0.0
+  ghcr.io/aquantumofdonuts/mixarr:v3.0.1
 ```
 
 > **Note**: Access the web interface at **`https://YOUR-IP:3443`**.
@@ -84,10 +84,10 @@ Both image variants are published for `linux/amd64` and `linux/arm64`:
 
 | Versioned image | Moving stable alias | Contents | Best for |
 | --- | --- | --- | --- |
-| `ghcr.io/aquantumofdonuts/mixarr:v3.0.0` | `:latest` | API, web, MariaDB, Redis, Caddy | One container with persistent `/data` |
-| `ghcr.io/aquantumofdonuts/mixarr:v3.0.0-slim` | `:slim` | API and web | Separate database and Redis services |
+| `ghcr.io/aquantumofdonuts/mixarr:v3.0.1` | `:latest` | API, web, MariaDB, Redis, Caddy | One container with persistent `/data` |
+| `ghcr.io/aquantumofdonuts/mixarr:v3.0.1-slim` | `:slim` | API and web | Separate database and Redis services |
 
-The examples pin v3.0.0 for a repeatable installation. `latest` and `slim` track stable releases and can advance to a newer version.
+The examples pin v3.0.1 for a repeatable installation. `latest` and `slim` track stable releases and can advance to a newer version.
 
 ### Option 1: Unified Image (Default)
 
@@ -103,7 +103,7 @@ curl -fsSL https://raw.githubusercontent.com/aquantumofdonuts/mixarr/prod/docker
 docker compose up -d
 ```
 
-The supplied Compose file uses `v3.0.0-slim`. Open `http://YOUR-IP:3000`; no `API_URL` override is needed for the bundled web/API connection. Complete the Base URL setting during setup, using the URL you actually browse.
+The supplied Compose file uses `v3.0.1-slim`. Open `http://YOUR-IP:3000`; no `API_URL` override is needed for the bundled web/API connection. Complete the Base URL setting during setup, using the URL you actually browse.
 
 ### Option 3: Slim Image with Existing Infrastructure
 
@@ -115,14 +115,14 @@ docker run -d \
   -p 3000:3000 \
   --env-file .env \
   -v ~/mixarr-data:/data \
-  ghcr.io/aquantumofdonuts/mixarr:v3.0.0-slim
+  ghcr.io/aquantumofdonuts/mixarr:v3.0.1-slim
 ```
 
 For this option, add `DATABASE_URL=mysql://user:pass@your-db:3306/mixarr` and `REDIS_URL=redis://your-redis:6379` to the saved `.env` file, along with `SESSION_SECRET`, `BASE_URL`, and `FRONTEND_URL`. See [docker-compose.byo.yml](docker-compose.byo.yml) for the Compose equivalent. Keep the database and Redis data persistent as well.
 
 ### Unraid
 
-Use the [v3.0.0 Unraid template](deploy/unraid.xml), or enter the unified image's ports, persistent `/data` mapping, and environment variables in Unraid's Docker UI. Preserve the existing data mapping and session secret when updating an installed container.
+Use the [v3.0.1 Unraid template](deploy/unraid.xml), or enter the unified image's ports, persistent `/data` mapping, and environment variables in Unraid's Docker UI. Preserve the existing data mapping and session secret when updating an installed container.
 
 ---
 ## Post-Installation Setup
@@ -142,7 +142,7 @@ Use the [v3.0.0 Unraid template](deploy/unraid.xml), or enter the unified image'
 *   **SkyHook Cache Warming** — pre-warms MusicBrainz metadata to reduce transient Lidarr add failures.
 *   **Multi-Service Support**:
     *   **Spotify** — playlists, new releases, saved albums/tracks, followed artists, top artists, recommendations, search
-    *   **TIDAL** — playlists, favorites, followed artists, discovery mixes, new arrivals
+    *   **TIDAL** — playlists, favorites, followed artists, search, similar artists (TIDAL no longer offers mixes through its public API)
     *   **Last.fm** — charts, tags, similar artists, user library, weekly charts, related tags
     *   **ListenBrainz** — top listens, similar users, recommendations, fresh releases, weekly jams, playlists, radio
     *   **Deezer** — playlists, charts, editorial picks, user favorites, flow, recommendations
@@ -291,11 +291,11 @@ The stack includes Next.js (Frontend), Express (API), Redis (Queue), and MySQL (
 
 ## Upgrading
 
-**v3.0.0 images are published and ready to use.** Back up your database and persistent data before upgrading. For a unified deployment this includes `/data`; for slim deployments also back up the external database and Redis persistence. Keep the same volume mounts, connection configuration, and `SESSION_SECRET`. Generate no new session secret during an upgrade.
+**v3.0.1 images are published and ready to use.** v3.0.1 has no schema changes and upgrades in place from v3.0.0. Back up your database and persistent data before upgrading. For a unified deployment this includes `/data`; for slim deployments also back up the external database and Redis persistence. Keep the same volume mounts, connection configuration, and `SESSION_SECRET`. Generate no new session secret during an upgrade.
 
 For an existing Compose installation whose application service is named `mixarr`:
 
-1. Change only its image to `ghcr.io/aquantumofdonuts/mixarr:v3.0.0` (unified) or `ghcr.io/aquantumofdonuts/mixarr:v3.0.0-slim` (slim). Keep your existing Compose file, `.env`, volumes, and database/Redis services.
+1. Change only its image to `ghcr.io/aquantumofdonuts/mixarr:v3.0.1` (unified) or `ghcr.io/aquantumofdonuts/mixarr:v3.0.1-slim` (slim). Keep your existing Compose file, `.env`, volumes, and database/Redis services.
 2. Pull and recreate the application container:
 
    ```bash
@@ -304,7 +304,7 @@ For an existing Compose installation whose application service is named `mixarr`
    docker compose logs --tail=100 mixarr
    ```
 
-3. Wait for startup to finish, refresh the browser, and check your connections and subscriptions. Read the [v3.0.0 release notes](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0), including the custom API changes below.
+3. Wait for startup to finish, refresh the browser, and check your connections and subscriptions. Read the [v3.0.1 release notes](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.1). If you are upgrading from v2, also read the [v3.0.0 release notes](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0), including the custom API changes below.
 
 Docker Run and Unraid users should recreate/update the existing application container with the versioned image and the same saved environment and data mappings. Do not delete volumes or run `docker compose down -v` as part of an upgrade.
 
@@ -330,7 +330,7 @@ Restore the pre-upgrade database and persistent-data backup together with the pr
 
 ## Known limitations
 
-Live provider verification is separate from release and UI testing. TIDAL endpoint compatibility ([#81](https://github.com/aquantumofdonuts/mixarr/issues/81)), Jellyfin authentication compatibility ([#87](https://github.com/aquantumofdonuts/mixarr/issues/87)), and other integration/security findings remain tracked in [known issues](docs/ISSUES.md). v3.0.0 does not claim to resolve them. Some Deezer subscription types require OAuth access that is currently unavailable. Constellation's local Discogs index is optional; automatic index refresh is unavailable.
+Live provider verification is separate from release and UI testing. Jellyfin authentication compatibility ([#87](https://github.com/aquantumofdonuts/mixarr/issues/87)) and other integration/security findings remain tracked in [known issues](docs/ISSUES.md). TIDAL's public API no longer offers mixes, so the TIDAL discovery, My Mix and new-arrival subscription types report that they are unavailable. Refreshed TIDAL access tokens are not yet saved between runs. Some Deezer subscription types require OAuth access that is currently unavailable. Constellation's local Discogs index is optional; automatic index refresh is unavailable.
 
 ## License
 
