@@ -16,12 +16,12 @@ vi.mock('../../../src/services/spotify.js', () => ({
   },
 }));
 
-const mockGetTopArtists = vi.fn();
+const mockGetUserTopArtists = vi.fn();
 
 vi.mock('../../../src/services/lastfm.js', () => ({
   LastfmService: function MockLastfmService() {
     return {
-      getTopArtists: mockGetTopArtists,
+      getUserTopArtists: mockGetUserTopArtists,
     };
   },
 }));
@@ -64,7 +64,7 @@ function makeContext(config: Record<string, unknown> = {}): StrategyContext {
       ['lastfm', {
         id: 2,
         type: 'lastfm',
-        config: { apiKey: 'test-key' },
+        config: { apiKey: 'test-key', username: 'testuser' },
       }],
     ]),
   };
@@ -92,7 +92,7 @@ function makeLastfmContext(config: Record<string, unknown> = {}): StrategyContex
       ['lastfm', {
         id: 2,
         type: 'lastfm',
-        config: { apiKey: 'test-key' },
+        config: { apiKey: 'test-key', username: 'testuser' },
       }],
     ]),
   };
@@ -180,7 +180,7 @@ describe('AI recommendation strategy', () => {
   // -----------------------------------------------------------------------
   describe('source = lastfm', () => {
     it('fetches top artists and returns AI recommendations', async () => {
-      mockGetTopArtists.mockResolvedValue({
+      mockGetUserTopArtists.mockResolvedValue({
         artists: [
           { name: 'LFM Seed A' },
           { name: 'LFM Seed B' },
@@ -195,7 +195,7 @@ describe('AI recommendation strategy', () => {
         makeContext({ source: 'lastfm', strategy: 'discovery', limit: 5 }),
       );
 
-      expect(mockGetTopArtists).toHaveBeenCalledWith(20);
+      expect(mockGetUserTopArtists).toHaveBeenCalledWith('testuser', 'overall', 20);
       expect(mockGetRecommendationsWithStrategy).toHaveBeenCalledWith(
         ['LFM Seed A', 'LFM Seed B'],
         'discovery',
@@ -213,12 +213,35 @@ describe('AI recommendation strategy', () => {
     });
 
     it('throws if Last.fm returns no artists', async () => {
-      mockGetTopArtists.mockResolvedValue({ artists: [] });
+      mockGetUserTopArtists.mockResolvedValue({ artists: [] });
 
       const strategy = getStrategy('ai_recommendation')!;
       await expect(
         strategy.execute(makeContext({ source: 'lastfm' })),
       ).rejects.toThrow('No artists found in lastfm library');
+    });
+
+    it('passes the configured period to the user top-artists lookup', async () => {
+      mockGetUserTopArtists.mockResolvedValue({ artists: [{ name: 'Seed' }] });
+      mockGetRecommendationsWithStrategy.mockResolvedValue([]);
+
+      const strategy = getStrategy('ai_recommendation')!;
+      await strategy.execute(makeContext({ source: 'lastfm', period: '3month' }));
+
+      expect(mockGetUserTopArtists).toHaveBeenCalledWith('testuser', '3month', 20);
+    });
+
+    it('throws if the Last.fm connection has no username', async () => {
+      const context: StrategyContext = {
+        config: { source: 'lastfm' },
+        connections: new Map([
+          ['lastfm', { id: 2, type: 'lastfm', config: { apiKey: 'test-key' } }],
+        ]),
+      };
+
+      const strategy = getStrategy('ai_recommendation')!;
+      await expect(strategy.execute(context)).rejects.toThrow('Last.fm connection is missing username');
+      expect(mockGetUserTopArtists).not.toHaveBeenCalled();
     });
   });
 
@@ -241,7 +264,7 @@ describe('AI recommendation strategy', () => {
     });
 
     it('uses 20 as default limit', async () => {
-      mockGetTopArtists.mockResolvedValue({ artists: [{ name: 'Y' }] });
+      mockGetUserTopArtists.mockResolvedValue({ artists: [{ name: 'Y' }] });
       mockGetRecommendationsWithStrategy.mockResolvedValue([]);
 
       const strategy = getStrategy('ai_recommendation')!;
