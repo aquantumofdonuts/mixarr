@@ -4,7 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| Latest stable ([v3.0.0](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0)) | :white_check_mark: |
+| Latest stable ([v3.0.1](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.1)) | :white_check_mark: |
 | < Latest | :x:               |
 
 See the [upgrade guide](README.md#upgrading) before moving from v2 to v3. Keep your session secret and persistent data; v3.0.0 includes breaking changes for custom API clients.
