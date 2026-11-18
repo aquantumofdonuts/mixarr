@@ -4,6 +4,21 @@
 
 ---
 
+## v3.0.1 release — November 17, 2026
+
+The [v3.0.1 release](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.1) is a patch release with four community fixes, all contributed by [@kris-anderson](https://github.com/kris-anderson):
+
+| Report | Fix | Resolution |
+| --- | --- | --- |
+| [#81 — TIDAL subscriptions 404](https://github.com/aquantumofdonuts/mixarr/issues/81) | [#98](https://github.com/aquantumofdonuts/mixarr/pull/98) | Collections, playlists, search and similar artists use TIDAL's current v2 endpoints. Mix subscription types fail with a clear message because TIDAL removed mixes from its public API. |
+| [#94 — Retired Claude model and rejected temperature](https://github.com/aquantumofdonuts/mixarr/issues/94) | [#97](https://github.com/aquantumofdonuts/mixarr/pull/97) | Anthropic provider uses `claude-haiku-5-5`; chat completions send no `temperature`; Last.fm AI seeds come from the user's top artists. |
+| [#95 — Profile save and password change 404](https://github.com/aquantumofdonuts/mixarr/issues/95) | [#96](https://github.com/aquantumofdonuts/mixarr/pull/96) | Authenticated self-service profile and password routes; the profile dialog keeps the stored email. |
+| [#99 — Unified image never stops cleanly](https://github.com/aquantumofdonuts/mixarr/issues/99) | [#100](https://github.com/aquantumofdonuts/mixarr/pull/100) | supervisord runs as PID 1 and MariaDB receives the stop signal, so `docker stop` exits cleanly. |
+
+There are no schema changes. Refreshed TIDAL tokens are not yet persisted, and that is still open work.
+
+---
+
 ## v3.0.0 release — October 29, 2026
 
 The [v3.0.0 release](https://github.com/aquantumofdonuts/mixarr/releases/tag/v3.0.0) includes the compact catalog, artist inspector, Collaboration Constellation, and these completed reports:
