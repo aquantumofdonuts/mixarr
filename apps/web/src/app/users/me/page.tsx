@@ -70,10 +70,15 @@ export default function MyProfilePage() {
 
   const openProfileModal = async () => {
     // The session user has no email, so load it; saving a blank field would clear it
-    const { data } = await api.get<{ user: { displayName: string; email: string | null } }>('/api/auth/profile');
+    const { data, error } = await api.get<{ user: { displayName: string; email: string | null } }>('/api/auth/profile');
+    // Without the stored profile, a save would send a blank email and erase it
+    if (error || !data?.user) {
+      addToast({ type: 'error', title: 'Failed to load profile', message: error || 'Please try again.' });
+      return;
+    }
     setProfileForm({
-      displayName: data?.user?.displayName || user?.displayName || '',
-      email: data?.user?.email || '',
+      displayName: data.user.displayName || user?.displayName || '',
+      email: data.user.email || '',
     });
     setShowProfileModal(true);
   };
