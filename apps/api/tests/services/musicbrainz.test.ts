@@ -6,11 +6,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setTimeout as delay } from 'node:timers/promises';
 import { MusicBrainzService } from '../../src/services/musicbrainz.js';
+import { rateLimit } from '../../src/services/rate-limiter.js';
 
 // Mock the rate limiter
 vi.mock('../../src/services/rate-limiter.js', () => ({
   rateLimit: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Retry waits resolve at once; tests assert the requested delays instead.
+vi.mock('node:timers/promises', () => ({
+  setTimeout: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('MusicBrainzService', () => {
@@ -222,6 +229,82 @@ describe('MusicBrainzService', () => {
       const result = await service.lookupArtistDiscogsId('mbid-4');
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('request retries', () => {
+    const originalFetch = global.fetch;
+
+    beforeEach(() => {
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+      vi.mocked(Math.random).mockRestore();
+    });
+
+    function reply(status: number, body: unknown = {}, headers: Record<string, string> = {}) {
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: status === 503 ? 'Service Temporarily Unavailable' : 'Error',
+        headers: new Headers(headers),
+        json: async () => body,
+      } as unknown as Response;
+    }
+
+    function mockReplies(...replies: Response[]) {
+      const fn = vi.fn();
+      for (const r of replies) fn.mockResolvedValueOnce(r);
+      global.fetch = fn as unknown as typeof fetch;
+      return fn;
+    }
+
+    const found = { artists: [{ id: 'mbid-1', name: 'Artist', 'sort-name': 'Artist', score: 100 }] };
+
+    it('retries a 503 and returns the next successful response', async () => {
+      const fetchMock = mockReplies(reply(503), reply(200, found));
+
+      const artists = await service.searchArtist('Artist');
+
+      expect(artists.map(a => a.id)).toEqual(['mbid-1']);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(delay).mock.calls.map(c => c[0])).toEqual([1000]);
+      // The retry takes its own rate-limit token.
+      expect(rateLimit).toHaveBeenCalledTimes(2);
+    });
+
+    it('backs off exponentially and gives up after three retries', async () => {
+      const fetchMock = mockReplies(reply(503), reply(503), reply(503), reply(503));
+
+      await expect(service.searchArtist('Artist')).rejects.toThrow('MusicBrainz API error: 503');
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(vi.mocked(delay).mock.calls.map(c => c[0])).toEqual([1000, 2000, 4000]);
+    });
+
+    it('waits for Retry-After on a 429 when it is longer than the backoff', async () => {
+      mockReplies(reply(429, {}, { 'Retry-After': '5' }), reply(200, found));
+
+      await service.searchArtist('Artist');
+
+      expect(vi.mocked(delay).mock.calls.map(c => c[0])).toEqual([5000]);
+    });
+
+    it('fails without retrying when Retry-After exceeds 30 seconds', async () => {
+      const fetchMock = mockReplies(reply(503, {}, { 'Retry-After': '120' }));
+
+      await expect(service.searchArtist('Artist')).rejects.toThrow('MusicBrainz API error: 503');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(delay).not.toHaveBeenCalled();
+    });
+
+    it('does not retry other errors', async () => {
+      const fetchMock = mockReplies(reply(400));
+
+      await expect(service.searchArtist('Artist')).rejects.toThrow('MusicBrainz API error: 400');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(delay).not.toHaveBeenCalled();
     });
   });
 });
