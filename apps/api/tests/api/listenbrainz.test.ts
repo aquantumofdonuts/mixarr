@@ -40,6 +40,17 @@ function mockErrorResponse(status: number, statusText: string, errorData?: { err
   };
 }
 
+// ListenBrainz answers 204 with an empty body when it has not calculated the data yet
+function mockNoContentResponse(): Partial<Response> {
+  return {
+    ok: true,
+    status: 204,
+    statusText: 'No Content',
+    json: () => Promise.reject(new Error('No body')),
+    text: () => Promise.resolve(''),
+  };
+}
+
 describe('ListenBrainz Service', () => {
   let service: ListenBrainzService;
   let mockFetch: ReturnType<typeof vi.fn>;
@@ -228,6 +239,14 @@ describe('ListenBrainz Service', () => {
 
       await expect(service.getUserTopArtists('month', 10)).rejects.toThrow('ListenBrainz API error');
     });
+
+    it('should return no artists when statistics have not been calculated (204)', async () => {
+      mockFetch.mockResolvedValue(mockNoContentResponse());
+
+      const result = await service.getUserTopArtists('all_time', 25);
+
+      expect(result).toEqual({ artists: [], count: 0, totalArtistCount: 0 });
+    });
   });
 
   describe('getRecommendations', () => {
@@ -286,6 +305,20 @@ describe('ListenBrainz Service', () => {
 
       await expect(service.getRecommendations('top_artist', 10)).rejects.toThrow('ListenBrainz API error');
     });
+
+    it('should return no recommendations when ListenBrainz has not generated them (204)', async () => {
+      mockFetch.mockResolvedValue(mockNoContentResponse());
+
+      const result = await service.getRecommendations('similar_artist', 25);
+
+      expect(result).toEqual({ mbids: [], count: 0 });
+    });
+
+    it('should still throw on an empty 200 body', async () => {
+      mockFetch.mockResolvedValue({ ...mockNoContentResponse(), status: 200, statusText: 'OK' });
+
+      await expect(service.getRecommendations('similar_artist', 25)).rejects.toThrow('returned empty response');
+    });
   });
 
   describe('getSimilarUsers', () => {
@@ -340,6 +373,23 @@ describe('ListenBrainz Service', () => {
         expect.objectContaining({
           headers: expect.objectContaining({
             'Authorization': `Token ${testToken}`,
+          }),
+        })
+      );
+    });
+  });
+
+  describe('User-Agent', () => {
+    it('should identify Mixarr on every request', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ payload: [] }));
+
+      await service.getSimilarUsers();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'User-Agent': expect.stringMatching(/^Mixarr\/\S+ \(https:\/\/github\.com\/aquantumofdonuts\/mixarr\)$/),
           }),
         })
       );
@@ -498,6 +548,14 @@ describe('ListenBrainz Service', () => {
       mockFetch.mockResolvedValue(mockResponse({
         payload: { data: { top_artists: [] } },
       }));
+
+      const result = await service.getYearInMusic(2024);
+
+      expect(result.topArtists).toEqual([]);
+    });
+
+    it('should return empty array when the report has not been calculated (204)', async () => {
+      mockFetch.mockResolvedValue(mockNoContentResponse());
 
       const result = await service.getYearInMusic(2024);
 
