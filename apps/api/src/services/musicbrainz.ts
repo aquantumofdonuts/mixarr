@@ -4,13 +4,43 @@
  * Handles all interactions with the MusicBrainz API for artist lookups.
  */
 
+import { setTimeout as delay } from 'node:timers/promises';
 import { rateLimit } from './rate-limiter.js';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
 import { createLogger } from '../lib/logger.js';
 
 const API_TIMEOUT = 10_000;
 
+// MusicBrainz answers 503 when its server-wide rate limit is exceeded, even for
+// clients under 1 req/s, and 429 for per-client limits. Both clear within seconds.
+const RETRYABLE_STATUSES = new Set([429, 503]);
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 1_000;
+const RETRY_JITTER_MS = 500;
+// A longer Retry-After is treated as an outage: fail now instead of holding the caller.
+const MAX_RETRY_AFTER_MS = 30_000;
+
 const logger = createLogger('MusicBrainz');
+
+function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null;
+  if (/^\s*\d+\s*$/.test(value)) return Number(value) * 1000;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.max(0, date - Date.now());
+}
+
+/**
+ * Delay before retry number `retry` (1-based): exponential backoff plus jitter,
+ * or the server's Retry-After when that is longer. Returns null when
+ * Retry-After exceeds MAX_RETRY_AFTER_MS.
+ */
+function retryDelayMs(retry: number, retryAfter: string | null): number | null {
+  const backoff = RETRY_BASE_DELAY_MS * 2 ** (retry - 1) + Math.random() * RETRY_JITTER_MS;
+  const requested = parseRetryAfter(retryAfter);
+  if (requested === null) return backoff;
+  if (requested > MAX_RETRY_AFTER_MS) return null;
+  return Math.max(backoff, requested);
+}
 
 interface MusicBrainzArtist {
   id: string;
@@ -121,21 +151,33 @@ export class MusicBrainzService {
   private userAgent = 'Mixarr/2.0.0 (https://github.com/aquantumofdonuts/mixarr)';
 
   private async request<T>(endpoint: string): Promise<T> {
-    await rateLimit('musicbrainz');
+    for (let retry = 0; ; retry++) {
+      // Every attempt, retries included, takes a rate-limit token.
+      await rateLimit('musicbrainz');
 
-    const response = await fetchWithTimeout(`${this.baseUrl}${endpoint}`, {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': this.userAgent,
-      },
-      timeout: API_TIMEOUT,
-    });
+      const response = await fetchWithTimeout(`${this.baseUrl}${endpoint}`, {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': this.userAgent,
+        },
+        timeout: API_TIMEOUT,
+      });
 
-    if (!response.ok) {
-      throw new Error(`MusicBrainz API error: ${response.status} ${response.statusText}`);
+      if (response.ok) {
+        return response.json() as Promise<T>;
+      }
+
+      const wait = RETRYABLE_STATUSES.has(response.status) && retry < MAX_RETRIES
+        ? retryDelayMs(retry + 1, response.headers.get('retry-after'))
+        : null;
+      if (wait === null) {
+        throw new Error(`MusicBrainz API error: ${response.status} ${response.statusText}`);
+      }
+
+      await response.body?.cancel().catch(() => undefined);
+      logger.debug(`MusicBrainz ${response.status} for ${endpoint}; retry ${retry + 1}/${MAX_RETRIES} in ${Math.round(wait)}ms`);
+      await delay(wait);
     }
-
-    return response.json() as Promise<T>;
   }
 
   // Escape special characters for MusicBrainz Lucene query syntax
