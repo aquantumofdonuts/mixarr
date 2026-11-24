@@ -187,6 +187,10 @@ interface LovedTracksResponse {
 // Default timeout for API requests (30 seconds)
 const DEFAULT_TIMEOUT_MS = 30000;
 
+// ListenBrainz blocks API clients that send no meaningful User-Agent while it
+// fights bot traffic, and asks clients to identify themselves (same format as MusicBrainz).
+const USER_AGENT = 'Mixarr/2.0.0 (https://github.com/aquantumofdonuts/mixarr)';
+
 // Valid periods for validation
 export const VALID_PERIODS: ListenBrainzPeriod[] = ['week', 'month', 'quarter', 'half_yearly', 'year', 'all_time'];
 
@@ -212,6 +216,7 @@ export class ListenBrainzService {
   private async fetchRequest(url: string, useAuth: boolean = true): Promise<Response> {
     const headers: Record<string, string> = {
       'Accept': 'application/json',
+      'User-Agent': USER_AGENT,
     };
 
     if (useAuth && this.token) {
@@ -224,10 +229,19 @@ export class ListenBrainzService {
     });
   }
 
-  private async request<T>(endpoint: string, useAuth: boolean = true): Promise<T> {
+  /**
+   * @param noContent - Returned when ListenBrainz answers 204 No Content, which it does
+   *   for data it has not calculated yet (user statistics, recommendations).
+   *   Endpoints that never answer 204 leave it unset and still throw.
+   */
+  private async request<T>(endpoint: string, useAuth: boolean = true, noContent?: T): Promise<T> {
     await rateLimit('listenbrainz');
 
     const response = await this.fetchRequest(`${this.baseUrl}${endpoint}`, useAuth);
+
+    if (response.status === 204 && noContent !== undefined) {
+      return noContent;
+    }
 
     // Handle empty response bodies
     const text = await response.text();
@@ -329,7 +343,9 @@ export class ListenBrainzService {
     totalArtistCount: number;
   }> {
     const response = await this.request<TopArtistsResponse>(
-      `/1/stats/user/${this.username}/artists?range=${period}&count=${count}`
+      `/1/stats/user/${this.username}/artists?range=${period}&count=${count}`,
+      true,
+      { payload: { artists: [], count: 0, total_artist_count: 0 } }
     );
 
     return {
@@ -352,7 +368,9 @@ export class ListenBrainzService {
     count: number;
   }> {
     const response = await this.request<RecommendationsResponse>(
-      `/1/cf/recommendation/user/${this.username}/recording?artist_type=${type}&count=${count}`
+      `/1/cf/recommendation/user/${this.username}/recording?artist_type=${type}&count=${count}`,
+      true,
+      { payload: { mbids: [], count: 0 } }
     );
 
     return {
@@ -396,7 +414,9 @@ export class ListenBrainzService {
   }> {
     const targetYear = year ?? new Date().getFullYear();
     const response = await this.request<YearInMusicResponse>(
-      `/1/stats/user/${this.username}/year-in-music/${targetYear}`
+      `/1/stats/user/${this.username}/year-in-music/${targetYear}`,
+      true,
+      { payload: { data: {} } }
     );
 
     return {
